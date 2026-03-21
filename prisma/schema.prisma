@@ -1,0 +1,104 @@
+// ============================================================
+// AltText Magic — Phase 1 Prisma Schema
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// 1. Session 表
+//    ⚠️ 必须与 @shopify/shopify-app-session-storage-prisma 完全兼容
+//    模型名必须为 "Session"（adapter 默认查找此表名）
+// ============================================================
+
+model Session {
+  id                String    @id          // Shopify session ID，如 "offline_myshop.myshopify.com"
+  shop              String                 // 店铺域名，如 "myshop.myshopify.com"
+  state             String                 // OAuth state 参数
+  isOnline          Boolean   @default(false) // 是否为 online session
+  scope             String?                // 授权的 scope 列表（逗号分隔）
+  expires           DateTime?              // session 过期时间（online session 使用）
+  accessToken       String                 // Shopify access token（明文，adapter 要求）
+  userId            BigInt?                // 在线用户 ID（online session 使用）
+  firstName         String?                // 用户名
+  lastName          String?                // 用户姓
+  email             String?                // 用户邮箱
+  accountOwner      Boolean?               // 是否为店铺 owner
+  locale            String?                // 用户区域设置
+  collaborator      Boolean?               // 是否为 collaborator
+  emailVerified     Boolean?               // 邮箱是否已验证
+  refreshToken      String?                // 刷新令牌（如适用）
+  refreshTokenExpires DateTime?            // 刷新令牌过期时间
+
+  // ---------- 索引 ----------
+  @@index([shop])                          // 按 shop 查找 session（afterAuth、unauthenticated context）
+}
+
+// ============================================================
+// 2. Shop 表
+//    存储已安装店铺的核心信息
+//    access_token 加密后存储在此表（非 Session 表中的明文 token）
+// ============================================================
+
+model Shop {
+  id                     String    @id @default(cuid())
+  shopDomain             String    @unique @map("shop_domain")    // 店铺域名，如 "myshop.myshopify.com"
+  accessTokenEncrypted   String    @map("access_token_encrypted") // AES-256-GCM 加密后的 offline access token
+  accessTokenNonce       String    @map("access_token_nonce")     // GCM nonce（IV），每次加密唯一
+  accessTokenTag         String    @map("access_token_tag")       // GCM auth tag
+  scopes                 String?                                  // 已授权 scopes 快照
+  currentPlan            String    @default("FREE") @map("current_plan") // 当前计费计划: FREE | STARTER | GROWTH | PRO | UNLIMITED
+  scanScopeFlags         Int       @default(15) @map("scan_scope_flags") // 扫描范围位掩码：bit0=Product, bit1=File, bit2=Collection, bit3=Article => 默认 0b1111 = 15
+  installedAt            DateTime  @default(now()) @map("installed_at")  // 首次安装时间
+  uninstalledAt          DateTime? @map("uninstalled_at")                // 卸载时间（APP_UNINSTALLED 时写入）
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  // ---------- 关系 ----------
+  webhookEvents WebhookEvent[]
+
+  // ---------- 索引 ----------
+  @@index([currentPlan])                   // 按计划筛选店铺（运营/统计查询）
+  @@index([uninstalledAt])                 // 清理任务：查找已卸载的店铺
+
+  @@map("shops")                           // 数据库表名映射为 "shops"
+}
+
+// ============================================================
+// 3. WebhookEvent 表
+//    Webhook 幂等落库：HMAC 校验通过后立即写入，快速返回 200
+//    后续由 BullMQ job 异步处理
+// ============================================================
+
+model WebhookEvent {
+  id                String    @id @default(cuid())
+  shopDomain        String    @map("shop_domain")                   // 来源店铺域名
+  topic             String                                          // Webhook topic，如 "APP_UNINSTALLED"、"PRODUCTS_UPDATE"
+  shopifyWebhookId  String    @unique @map("shopify_webhook_id")    // Shopify X-Shopify-Webhook-Id，用于幂等去重
+  apiVersion        String?   @map("api_version")                   // Shopify API 版本，如 "2025-01"
+  payload           Json                                            // 原始 payload（JSONB）
+  status            String    @default("PENDING") @map("status")    // 处理状态: PENDING | PROCESSING | DONE | FAILED
+  attempts          Int       @default(0)                           // 处理尝试次数
+  processedAt       DateTime? @map("processed_at")                  // 处理完成时间
+  errorMessage      String?   @map("error_message")                 // 最近一次错误信息
+  receivedAt        DateTime  @default(now()) @map("received_at")   // 接收时间
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // ---------- 关系 ----------
+  shop              Shop?     @relation(fields: [shopDomain], references: [shopDomain], onDelete: Cascade)
+
+  // ---------- 索引 ----------
+  @@index([shopDomain])                    // 按店铺查找事件
+  @@index([topic])                         // 按 topic 筛选
+  @@index([status])                        // Worker 拉取 PENDING 事件
+  @@index([shopDomain, topic, receivedAt]) // 复合索引：特定店铺 + topic 的时间线查询
+  @@index([receivedAt])                    // 清理旧事件
+
+  @@map("webhook_events")                  // 数据库表名映射为 "webhook_events"
+}
