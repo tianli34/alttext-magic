@@ -16,7 +16,15 @@
     "moduleResolution": "Bundler",
     "target": "ES2022",
     "baseUrl": ".",
-    "types": ["@react-router/node", "vite/client", "@shopify/polaris-types"],
+    "types": [
+      "@shopify/polaris-types",
+      "vite/client"
+    ],
+    "typeRoots": [
+      "./node_modules",
+      "./node_modules/@types",
+      "./.react-router/types"
+    ],
     "rootDirs": [".", "./.react-router/types"]
   }
 }

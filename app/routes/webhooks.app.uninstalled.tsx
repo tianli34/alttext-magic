@@ -1,17 +1,27 @@
 import type { ActionFunctionArgs } from "react-router";
+import { receiveWebhook } from "../lib/server/webhooks/webhook-receive.service.js";
 import { authenticate } from "../shopify.server";
-import db from "../db.server";
+import { webhookLogger } from "../../server/utils/logger.js";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, session, topic } = await authenticate.webhook(request);
+  const { payload, topic, shop, webhookId, apiVersion } =
+    await authenticate.webhook(request);
+  const log = webhookLogger.child({
+    topic,
+    shop,
+    webhookId,
+    apiVersion: apiVersion ?? undefined,
+  });
 
-  console.log(`Received ${topic} webhook for ${shop}`);
+  log.info("webhook.verified");
 
-  // Webhook requests can trigger multiple times and after an app has already been uninstalled.
-  // If this webhook already ran, the session may have been deleted previously.
-  if (session) {
-    await db.session.deleteMany({ where: { shop } });
-  }
+  await receiveWebhook({
+    shop,
+    topic,
+    webhookId,
+    apiVersion,
+    payload,
+  });
 
-  return new Response();
+  return new Response(null, { status: 200 });
 };

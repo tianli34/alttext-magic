@@ -1,0 +1,24 @@
+
+
+name = "AltText Magic"
+client_id = "4ec8f56dff94744229a673380ff8ab42"
+application_url = "https://nonidolatrous-nayeli-gushily.ngrok-free.dev"
+embedded = true
+
+[access_scopes]
+scopes = "read_products,write_products,read_files,write_files,read_content,write_content"
+
+[auth]
+redirect_urls = ["https://nonidolatrous-nayeli-gushily.ngrok-free.dev/api/auth/callback"]
+
+[webhooks]
+api_version = "2026-04"
+
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled"]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/webhooks"
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = "magic-ai-test-01.myshopify.com"

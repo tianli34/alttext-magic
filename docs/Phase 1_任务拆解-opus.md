@@ -46,7 +46,7 @@
 **4. 生成环境变量清单与 `.env.example` 文件**
 - 类型：**AI任务**
 - 目标：根据 Phase 1 需要的所有配置项，生成完整的环境变量清单文档和 `.env.example` 模板文件
-- 产出物：`.env.example` 文件，包含所有变量名、说明注释、示例值（如 `SHOPIFY_API_KEY=`、`SHOPIFY_API_SECRET=`、`DATABASE_URL=`、`REDIS_URL=`、`ENCRYPTION_KEY=`、`NODE_ENV=` 等）
+- 产出物：`.env.example` 文件，包含所有变量名、说明注释、示例值（如 `SHOPIFY_API_KEY=`、`SHOPIFY_API_SECRET=`、`DATABASE_URL=`、`REDIS_URL=`、`TOKEN_ENCRYPTION_KEY=`、`NODE_ENV=` 等）
 - 依赖关系：无
 - 备注：AI 生成模板，真实值由人工在后续任务中填入。
 
@@ -85,7 +85,7 @@
 **8. 实现 Token 加密/解密工具模块**
 - 类型：**AI任务**
 - 目标：编写 AES-256-GCM 加密/解密工具函数，用于 Offline Access Token 的安全存储与读取
-- 产出物：`app/utils/encryption.server.ts`，导出 `encrypt(plaintext: string): string` 和 `decrypt(ciphertext: string): string`；从 `ENCRYPTION_KEY` 环境变量读取密钥；包含单元测试文件 `app/utils/encryption.server.test.ts`
+- 产出物：`app/utils/encryption.server.ts`，导出 `encrypt(plaintext: string): string` 和 `decrypt(ciphertext: string): string`；从 `TOKEN_ENCRYPTION_KEY` 环境变量读取密钥；包含单元测试文件 `app/utils/encryption.server.test.ts`
 - 依赖关系：任务 5 完成（项目结构存在）
 - 备注：AI 需确保 IV 随机生成、AuthTag 附带、输出格式为 `iv:authTag:ciphertext` 的 Base64 编码。
 
@@ -217,7 +217,7 @@
 **19. 在 Railway 平台配置 Service 与环境变量**
 - 类型：**人工任务**
 - 目标：在 Railway Dashboard 中创建 `web` 和 `worker` 两个 Service，配置 GitHub 仓库关联、环境变量注入
-- 产出物：Railway 上 `web` / `worker` / `postgres` / `redis` 四个 Service 配置完成；所有环境变量（`SHOPIFY_API_KEY`、`SHOPIFY_API_SECRET`、`DATABASE_URL`、`REDIS_URL`、`ENCRYPTION_KEY`、`SCOPES`、`HOST` 等）已注入
+- 产出物：Railway 上 `web` / `worker` / `postgres` / `redis` 四个 Service 配置完成；所有环境变量（`SHOPIFY_API_KEY`、`SHOPIFY_API_SECRET`、`DATABASE_URL`、`REDIS_URL`、`TOKEN_ENCRYPTION_KEY`、`SCOPES`、`HOST` 等）已注入
 - 依赖关系：任务 1（API Key/Secret）、任务 3（Railway Project/插件已创建）、任务 17（配置文件就绪）、任务 18（加密密钥已生成）
 - 备注：涉及平台 GUI 操作、凭证粘贴、域名绑定。AI 无法完成。
 
@@ -298,7 +298,7 @@
 | 🔴 P0 | 任务 1 — 创建 Shopify App | 阻塞任务 9（OAuth 配置需要 API Key/Secret）、任务 19（环境变量）|
 | 🔴 P0 | 任务 2 — 创建开发店铺 | 阻塞任务 22（安装验证）|
 | 🔴 P0 | 任务 3 — 创建 Railway Project | 阻塞任务 19（环境变量配置）、任务 21（部署）|
-| 🟡 P1 | 任务 18 — 生成加密密钥 | 阻塞任务 19（环境变量中需要 `ENCRYPTION_KEY`）|
+| 🟡 P1 | 任务 18 — 生成加密密钥 | 阻塞任务 19（环境变量中需要 `TOKEN_ENCRYPTION_KEY`）|
 
 **建议执行顺序：**
 1. **先完成人工任务 1、2、3、18**（约 1-2 小时即可全部搞定），拿到所有外部凭证。

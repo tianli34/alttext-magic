@@ -99,7 +99,7 @@
 **安装 & 鉴权（Shopify App 基础））**
 
 - OAuth 安装、Session 持久化
-- **嵌入式 App（Embedded App）**：运行于 Shopify Admin 内，遵循 Shopify Polaris 设计系统
+- **嵌入式 App（Embedded App）**：运行于 Shopify Admin 内，遵循 Shopify Polaris Web Components 设计系统
 - `app/uninstalled` Webhook
 - GDPR Webhook（数据访问 / 删除等）
 - 付费计划支持产品 / 集合资源的自动增量刷新能力
@@ -316,7 +316,7 @@
 | 项目 | 要求 / 原则 | 备注 |
 | :-- | :-- | :-- |
 | App 类型 | **嵌入式 App（Embedded App）** | 运行于 Shopify Admin 内 |
-| UI 约束 | **Shopify Polaris + App Bridge** | 属于平台硬性要求 |
+| UI 约束 | **Shopify Polaris Web Components + App Bridge** | 属于平台硬性要求 |
 | 全量扫描能力 | 需支持官方允许的异步批量扫描能力 | 适配大批量店铺 |
 | 增量刷新能力 | 付费计划对产品 / 集合支持自动增量刷新；Free 计划依赖手动刷新 | 文章 / 文件库在 MVP 阶段手动刷新 |
 | 自动刷新原则 | 应尽量过滤与图片无关的变更，减少无效重扫 | 提升效率与稳定性 |
@@ -348,3 +348,6 @@
 
 
 ---
+
+
+

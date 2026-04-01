@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./dist-worker",
+    "rootDir": "."
+  },
+  "include": ["worker/**/*.ts", "server/**/*.ts", "app/lib/server/**/*.ts"]
+}

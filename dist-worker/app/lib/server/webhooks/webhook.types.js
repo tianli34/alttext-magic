@@ -1,0 +1,22 @@
+export const GDPR_TOPICS = [
+    "CUSTOMERS_DATA_REQUEST",
+    "CUSTOMERS_REDACT",
+    "SHOP_REDACT",
+];
+export const PHASE1_WEBHOOK_TOPICS = [
+    "APP_UNINSTALLED",
+    ...GDPR_TOPICS,
+    "BULK_OPERATIONS_FINISH",
+    "PRODUCTS_CREATE",
+    "PRODUCTS_UPDATE",
+    "PRODUCTS_DELETE",
+    "COLLECTIONS_CREATE",
+    "COLLECTIONS_UPDATE",
+    "COLLECTIONS_DELETE",
+];
+export const WEBHOOK_EVENT_STATUS = {
+    pending: "PENDING",
+    processing: "PROCESSING",
+    processed: "PROCESSED",
+    failed: "FAILED",
+};

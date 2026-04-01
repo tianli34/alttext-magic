@@ -1,5 +1,24 @@
 
 
+
+
+
+
+
+
+
+git add .
+git commit -m "324 0 项目目录结构"
+git push
+
+
+
+
+
+
+
+
+
 cd E:\alt-text-magic
 shopify app dev
 npm run dev
@@ -14,3 +33,6 @@ https://nonidolatrous-nayeli-gushily.ngrok-free.dev
 
 
 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
+
+
+notepad $PROFILE
