@@ -1,5 +1,3 @@
-
-
 name = "AltText Magic"
 client_id = "4ec8f56dff94744229a673380ff8ab42"
 application_url = "https://nonidolatrous-nayeli-gushily.ngrok-free.dev"
@@ -22,7 +20,7 @@ uri = "/webhooks"
 [[webhooks.subscriptions]]
 uri = "/webhooks"
 topics = [
-  "app/uninstalled"
+  "app/uninstalled",
   "bulk_operations/finish",
   "products/create",
   "products/update",

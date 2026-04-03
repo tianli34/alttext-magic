@@ -1,0 +1,60 @@
+services:
+  db:
+    image: postgres:18
+    container_name: my-postgres18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: mydatabase
+      TZ: Asia/Shanghai                      # 设置时区
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql            # 数据持久化（PG18 新路径）
+      - ./init-scripts:/docker-entrypoint-initdb.d  # 初始化 SQL 脚本
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser -d mydatabase"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+
+  redis:
+    image: redis:8-alpine
+    restart: always
+    # 如果只给其他容器访问，可以删掉这一段
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: my-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: adminpassword
+    ports:
+      - "9080:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:

@@ -1,0 +1,40 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+shopify app webhook trigger --topic customers/data_request --address https://nonidolatrous-nayeli-gushily.ngrok-free.dev/webhooks
+shopify app webhook trigger --topic customers/redact --address https://nonidolatrous-nayeli-gushily.ngrok-free.dev/webhooks
+shopify app webhook trigger --topic shop/redact --address https://nonidolatrous-nayeli-gushily.ngrok-free.dev/webhooks
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

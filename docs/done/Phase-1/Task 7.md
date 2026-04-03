@@ -1,0 +1,5 @@
+已完成 Embedded App 壳层和占位页接入，保持在 Shopify Admin 内嵌运行，继续复用现有模板的 `AppProvider embedded` 与 `s-app-nav` 布局。[app.tsx](E:/alttext-magic/app/routes/app.tsx) 现在提供 `Dashboard / Review / History / Billing / Settings / Help` 导航；[app._index.tsx](E:/alttext-magic/app/routes/app._index.tsx)、[app.review.tsx](E:/alttext-magic/app/routes/app.review.tsx)、[app.history.tsx](E:/alttext-magic/app/routes/app.history.tsx)、[app.billing.tsx](E:/alttext-magic/app/routes/app.billing.tsx)、[app.settings.tsx](E:/alttext-magic/app/routes/app.settings.tsx)、[app.help.tsx](E:/alttext-magic/app/routes/app.help.tsx) 都已改为最小占位页。为避免重复结构，新增了共享占位组件 [AppPlaceholderPage.tsx](E:/alttext-magic/app/components/common/AppPlaceholderPage.tsx)。
+
+另外补了 [globals.d.ts](E:/alttext-magic/app/globals.d.ts) 的自定义元素类型声明，并按要求把完成记录追加到了 [STATUS.md](E:/alttext-magic/docs/STATUS.md)。当前没有加入任何真实业务功能。
+
+验证已完成：`pnpm.cmd typecheck` 通过。

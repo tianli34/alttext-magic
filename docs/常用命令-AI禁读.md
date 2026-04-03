@@ -4,11 +4,11 @@
 
 
 
-
+Windows PowerShell
 
 
 git add .
-git commit -m "324 0 项目目录结构"
+git commit -m "Task 6 done"
 git push
 
 
@@ -24,7 +24,7 @@ shopify app dev
 npm run dev
 curl.exe -I -k https://34.111.204.238
 
- ngrok http 6022
+ngrok http 4040
 
 cd E:\alttext-magic
 shopify app dev --tunnel-url=https://nonidolatrous-nayeli-gushily.ngrok-free.dev:6022

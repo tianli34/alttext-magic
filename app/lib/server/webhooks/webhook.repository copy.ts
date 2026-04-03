@@ -1,3 +1,7 @@
+/**
+ * File: app/lib/server/webhooks/webhook.repository.ts
+ * Purpose: Encapsulate Prisma access for webhook event persistence and lifecycle updates.
+ */
 import { Prisma } from "@prisma/client";
 import prisma from "../../../../server/db/prisma.server.js";
 import {
@@ -5,32 +9,10 @@ import {
   type AuthenticatedWebhookEnvelope,
 } from "./webhook.types.js";
 
-// [新增] 确保店铺存在的辅助函数
-async function ensureShopExists(shopDomain: string): Promise<void> {
-  await prisma.shop.upsert({
-    where: {
-      shopDomain: shopDomain, // 根据你的 schema 调整字段名，可能是 domain 或 shopDomain
-    },
-    update: {}, // 已存在则不更新
-    create: {
-      shopDomain: shopDomain, // [新增] 创建店铺记录
-      // [新增] 以下字段根据你的 schema 必填项填写，可能包括：
-      accessTokenEncrypted: "test-token", // 测试用默认值
-      scopes: "read_products,write_products", // 测试用默认值
-      accessTokenNonce: "nonce_value_from_oauth",   // 👈 补充
-      accessTokenTag: "tag_value_from_response"     // 👈 补充      
-      // 其他你的 Shop 模型必填字段...
-    },
-  });
-}
-
 export async function createWebhookEventIfAbsent(
   envelope: AuthenticatedWebhookEnvelope,
 ): Promise<{ eventId: string; isNew: boolean }> {
   try {
-    // [新增] 先确保店铺存在，避免外键约束错误
-    await ensureShopExists(envelope.shop);
-
     const event = await prisma.webhookEvent.create({
       data: {
         shopDomain: envelope.shop,
@@ -131,7 +113,7 @@ export async function getWebhookEventById(webhookEventId: string) {
 export async function markShopUninstalled(shopDomain: string): Promise<void> {
   await prisma.shop.updateMany({
     where: {
-      shopDomain, // [注意] 确保这里字段名与 schema 一致
+      shopDomain,
     },
     data: {
       uninstalledAt: new Date(),
