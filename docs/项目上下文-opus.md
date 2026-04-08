@@ -69,7 +69,7 @@ alt_target ←1:1→ decorative_mark
 - **预留机制**: batch启动前原子预留 → 逐条consume → 结束释放剩余
 - **扫描不计费，成功生成即扣1**
 
-## 关键表(26张)
+## 关键表(31张)
 `shops` / `scan_notice_ack` / `shop_operation_lock` / `scan_job` / `scan_task` / `scan_task_attempt` / `stg_product` / `stg_media_image_product` / `stg_media_image_file` / `stg_collection` / `stg_article` / `scan_result_target` / `scan_result_usage` / `alt_target` / `image_usage` / `decorative_mark` / `alt_candidate` / `candidate_group_projection` / `alt_draft` / `audit_log` / `webhook_event` / `resource_image_fingerprint` / `job_batch` / `job_item` / `billing_subscription` / `overage_pack_purchase` / `credit_bucket` / `credit_reservation` / `credit_reservation_line` / `credit_ledger` / `billing_ledger`
 
 ## 关键API

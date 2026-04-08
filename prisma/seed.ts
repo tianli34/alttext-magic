@@ -8,10 +8,11 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import { createCipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, randomBytes, randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
+import type { ScopeFlagState } from "../app/lib/scope-utils";
 
 // ── Inline encryption (mirrors server/crypto/token-encryption.ts) ─────
 const ALGORITHM = "aes-256-gcm";
@@ -54,21 +55,49 @@ const TEST_SHOPS = [
     shopDomain: "test-store-1.myshopify.com",
     accessToken: "shpat_test_token_alpha_001",
     scopes: "read_products,write_products,read_content",
-    scanScopeFlags: 15, // 1111 = all scopes
+    scanScopeFlags: {
+      PRODUCT_MEDIA: true,
+      FILES: true,
+      COLLECTION_IMAGE: true,
+      ARTICLE_IMAGE: true,
+    },
   },
   {
     shopDomain: "test-store-2.myshopify.com",
     accessToken: "shpat_test_token_beta_002",
     scopes: "read_products,write_products",
-    scanScopeFlags: 5, // 0101 = products + collections
+    scanScopeFlags: {
+      PRODUCT_MEDIA: true,
+      FILES: false,
+      COLLECTION_IMAGE: true,
+      ARTICLE_IMAGE: false,
+    },
   },
   {
     shopDomain: "test-store-3.myshopify.com",
     accessToken: "shpat_test_token_gamma_003",
     scopes: "read_content,write_content",
-    scanScopeFlags: 10, // 1010 = files + articles
+    scanScopeFlags: {
+      PRODUCT_MEDIA: false,
+      FILES: true,
+      COLLECTION_IMAGE: false,
+      ARTICLE_IMAGE: true,
+    },
   },
-] as const;
+] as const satisfies ReadonlyArray<{
+  shopDomain: string;
+  accessToken: string;
+  scopes: string;
+  scanScopeFlags: ScopeFlagState;
+}>;
+
+interface SeededShopRecord {
+  id: string;
+  shopDomain: string;
+  currentPlan: string;
+  scanScopeFlags: ScopeFlagState;
+  installedAt: Date;
+}
 
 async function main() {
   console.log("🌱 Seeding shops table...\n");
@@ -76,36 +105,63 @@ async function main() {
   for (const shop of TEST_SHOPS) {
     const encrypted = encryptToken(shop.accessToken);
 
-    const record = await prisma.shop.upsert({
-      where: { shopDomain: shop.shopDomain },
-      create: {
-        shopDomain: shop.shopDomain,
-        accessTokenEncrypted: encrypted.encrypted,
-        accessTokenNonce: encrypted.nonce,
-        accessTokenTag: encrypted.tag,
-        scopes: shop.scopes,
-        currentPlan: "FREE",
-        scanScopeFlags: shop.scanScopeFlags,
-        installedAt: new Date(),
-        uninstalledAt: null,
-      },
-      update: {
-        accessTokenEncrypted: encrypted.encrypted,
-        accessTokenNonce: encrypted.nonce,
-        accessTokenTag: encrypted.tag,
-        scopes: shop.scopes,
-        currentPlan: "FREE",
-        scanScopeFlags: shop.scanScopeFlags,
-        uninstalledAt: null,
-      },
-    });
+    const now = new Date();
+    const serializedScanScopeFlags = JSON.stringify(shop.scanScopeFlags);
+    const [record] = await prisma.$queryRaw<SeededShopRecord[]>(
+      Prisma.sql`
+        INSERT INTO "shops" (
+          "id",
+          "shop_domain",
+          "access_token_encrypted",
+          "access_token_nonce",
+          "access_token_tag",
+          "scopes",
+          "current_plan",
+          "scan_scope_flags",
+          "installed_at",
+          "uninstalled_at",
+          "created_at",
+          "updated_at"
+        )
+        VALUES (
+          ${randomUUID()},
+          ${shop.shopDomain},
+          ${encrypted.encrypted},
+          ${encrypted.nonce},
+          ${encrypted.tag},
+          ${shop.scopes},
+          ${"FREE"},
+          ${serializedScanScopeFlags}::jsonb,
+          ${now},
+          NULL,
+          ${now},
+          ${now}
+        )
+        ON CONFLICT ("shop_domain") DO UPDATE
+        SET
+          "access_token_encrypted" = EXCLUDED."access_token_encrypted",
+          "access_token_nonce" = EXCLUDED."access_token_nonce",
+          "access_token_tag" = EXCLUDED."access_token_tag",
+          "scopes" = EXCLUDED."scopes",
+          "current_plan" = EXCLUDED."current_plan",
+          "scan_scope_flags" = EXCLUDED."scan_scope_flags",
+          "uninstalled_at" = NULL,
+          "updated_at" = EXCLUDED."updated_at"
+        RETURNING
+          "id",
+          "shop_domain" AS "shopDomain",
+          "current_plan" AS "currentPlan",
+          "scan_scope_flags" AS "scanScopeFlags",
+          "installed_at" AS "installedAt"
+      `,
+    );
 
     console.log(`✅ Upserted: ${record.shopDomain} (id=${record.id})`);
     console.log(
       `   encrypted=${encrypted.encrypted.slice(0, 20)}... nonce=${encrypted.nonce.slice(0, 12)}... tag=${encrypted.tag.slice(0, 12)}...`,
     );
     console.log(
-      `   currentPlan=${record.currentPlan} scanScopeFlags=${record.scanScopeFlags} installedAt=${record.installedAt.toISOString()}`,
+      `   currentPlan=${record.currentPlan} scanScopeFlags=${JSON.stringify(record.scanScopeFlags)} installedAt=${record.installedAt.toISOString()}`,
     );
     console.log();
   }

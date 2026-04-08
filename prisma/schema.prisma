@@ -1,9 +1,10 @@
 // ============================================================
-// AltText Magic — Phase 1 Prisma Schema
+// AltText Magic - Phase 1 Prisma Schema
 // ============================================================
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "windows"]
 }
 
 datasource db {
@@ -11,7 +12,220 @@ datasource db {
 }
 
 // ============================================================
-// 1. Session 表
+// 0. Enums
+// ============================================================
+
+enum ScanJobStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL_SUCCESS
+  FAILED
+}
+
+enum ScanJobPublishStatus {
+  PENDING
+  PUBLISHED
+  NOT_PUBLISHED
+}
+
+enum ScanResourceType {
+  PRODUCT_MEDIA
+  FILES
+  COLLECTION_IMAGE
+  ARTICLE_IMAGE
+}
+
+enum ScanTaskStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum ScanTaskAttemptStatus {
+  PENDING
+  RUNNING
+  READY_TO_PARSE
+  PARSING
+  SUCCESS
+  FAILED
+}
+
+enum JobBatchType {
+  SCAN
+  GENERATE
+  WRITEBACK
+}
+
+enum JobBatchStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  PARTIAL_SUCCESS
+  FAILED
+}
+
+enum JobItemStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED_ALREADY_FILLED
+}
+
+enum ResourceImageFingerprintResourceType {
+  PRODUCT
+  COLLECTION
+}
+
+enum AltPlane {
+  FILE_ALT
+  COLLECTION_IMAGE_ALT
+  ARTICLE_IMAGE_ALT
+}
+
+enum ImageUsageType {
+  PRODUCT
+  FILE
+}
+
+enum PresentStatus {
+  PRESENT
+  NOT_FOUND
+}
+
+enum AltCandidateStatus {
+  MISSING
+  GENERATION_FAILED_RETRYABLE
+  GENERATED
+  WRITEBACK_FAILED_RETRYABLE
+  WRITTEN
+  RESOLVED
+  NOT_FOUND
+  DECORATIVE_SKIPPED
+  SKIPPED_ALREADY_FILLED
+}
+
+enum AltCandidateMissingReason {
+  EMPTY
+  WHITESPACE
+}
+
+enum CandidateGroupType {
+  PRODUCT_MEDIA
+  FILES
+  COLLECTION
+  ARTICLE
+}
+
+enum CandidateGroupPrimaryUsageType {
+  PRODUCT
+  FILE
+  SELF
+}
+
+enum AltDraftContextMode {
+  RESOURCE_SPECIFIC
+  FILE_NEUTRAL
+  SHARED_NEUTRAL
+}
+
+enum WebhookEventStatus {
+  PENDING
+  COALESCED
+  PROCESSING
+  PROCESSED
+  SKIPPED_PLAN
+  SKIPPED_SCOPE
+  SKIPPED_NO_IMAGE_CHANGE
+  FAILED
+}
+
+enum BillingPlanCode {
+  FREE
+  STARTER
+  GROWTH
+  PRO
+  MAX
+}
+
+enum BillingInterval {
+  MONTHLY
+  ANNUAL
+}
+
+enum BillingSubscriptionStatus {
+  PENDING
+  ACTIVE
+  CANCEL_SCHEDULED
+  CANCELED
+  EXPIRED
+  FAILED
+}
+
+enum OveragePackPurchaseStatus {
+  PENDING
+  PURCHASED
+  FAILED
+  REFUNDED
+  VOIDED
+}
+
+enum CreditBucketType {
+  FREE_MONTHLY_INCLUDED
+  MONTHLY_INCLUDED
+  ANNUAL_INCLUDED
+  WELCOME
+  OVERAGE_PACK
+}
+
+enum CreditBucketStatus {
+  PENDING
+  ACTIVE
+  EXHAUSTED
+  EXPIRED
+  CANCELED
+}
+
+enum CreditReservationStatus {
+  PENDING
+  ACTIVE
+  PARTIALLY_CONSUMED
+  CONSUMED
+  RELEASED
+  EXPIRED
+  CANCELED
+  FAILED
+}
+
+enum CreditLedgerType {
+  GRANT
+  RESERVE
+  CONSUME
+  RELEASE
+  EXPIRE
+  ADJUSTMENT
+}
+
+enum BillingLedgerEntryType {
+  SUBSCRIPTION_ACTIVATED
+  SUBSCRIPTION_RENEWED
+  SUBSCRIPTION_CANCELED
+  SUBSCRIPTION_EXPIRED
+  OVERAGE_PURCHASED
+  OVERAGE_REFUNDED
+  ADJUSTMENT
+}
+
+enum BillingLedgerStatus {
+  PENDING
+  POSTED
+  VOIDED
+  FAILED
+}
+
+// ============================================================
+// 1. Session
 // ============================================================
 
 model Session {
@@ -33,71 +247,1040 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 
-  // ---------- 索引 ----------
+  // ---------- Indexes ----------
   @@index([shop])
 }
 
 // ============================================================
-// 2. Shop 表
+// 2. Shop
 // ============================================================
 
 model Shop {
-  id                   String    @id @default(cuid())
-  shopDomain           String    @unique @map("shop_domain")
-  accessTokenEncrypted String    @map("access_token_encrypted")
-  accessTokenNonce     String    @map("access_token_nonce")
-  accessTokenTag       String    @map("access_token_tag")
-  scopes               String?
-  currentPlan          String    @default("FREE") @map("current_plan")
-  scanScopeFlags       Int       @default(15) @map("scan_scope_flags")
-  installedAt          DateTime  @default(now()) @map("installed_at")
-  uninstalledAt        DateTime? @map("uninstalled_at")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @updatedAt @map("updated_at")
+  id                      String    @id @default(cuid())
+  shopDomain              String    @unique @map("shop_domain")
+  accessTokenEncrypted    String    @map("access_token_encrypted")
+  accessTokenNonce        String    @map("access_token_nonce")
+  accessTokenTag          String    @map("access_token_tag")
+  scopes                  String?
+  currentPlan             String    @default("FREE") @map("current_plan")
+  scanScopeFlags          Json      @default("{\"PRODUCT_MEDIA\":true,\"FILES\":true,\"COLLECTION_IMAGE\":true,\"ARTICLE_IMAGE\":true}") @map("scan_scope_flags")
+  scanScopeUpdatedAt      DateTime? @map("scan_scope_updated_at")
+  firstPaidBonusGrantedAt DateTime? @map("first_paid_bonus_granted_at")
+  lastPublishedScopeFlags Json?     @map("last_published_scope_flags")
+  lastPublishedScanJobId  String?   @map("last_published_scan_job_id")
+  lastPublishedAt         DateTime? @map("last_published_at")
+  installedAt             DateTime  @default(now()) @map("installed_at")
+  uninstalledAt           DateTime? @map("uninstalled_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
 
-  // ---------- 关系 ----------
-  webhookEvents WebhookEvent[]
+  // ---------- Relations ----------
+  webhookEvents             WebhookEvent[]
+  scanNoticeAcks            ScanNoticeAck[]
+  shopOperationLock         ShopOperationLock?
+  lastPublishedScanJob      ScanJob?                   @relation("ShopLastPublishedScanJob", fields: [lastPublishedScanJobId], references: [id], onDelete: SetNull)
+  scanJobs                  ScanJob[]
+  scanTasks                 ScanTask[]
+  scanTaskAttempts          ScanTaskAttempt[]
+  jobBatches                JobBatch[]
+  billingSubscriptions      BillingSubscription[]
+  overagePackPurchases      OveragePackPurchase[]
+  creditBuckets             CreditBucket[]
+  creditReservations        CreditReservation[]
+  creditReservationLines    CreditReservationLine[]
+  creditLedgers             CreditLedger[]
+  billingLedgers            BillingLedger[]
+  stgProducts               StgProduct[]
+  stgMediaProducts          StgMediaImageProduct[]
+  stgMediaFiles             StgMediaImageFile[]
+  stgCollections            StgCollection[]
+  stgArticles               StgArticle[]
+  scanResultTargets         ScanResultTarget[]
+  scanResultUsages          ScanResultUsage[]
+  altTargets                AltTarget[]
+  imageUsages               ImageUsage[]
+  decorativeMarks           DecorativeMark[]
+  altCandidates             AltCandidate[]
+  candidateGroupProjections CandidateGroupProjection[]
+  altDrafts                 AltDraft[]
+  auditLogs                 AuditLog[]
+  resourceImageFingerprints ResourceImageFingerprint[]
 
-  // ---------- 索引 ----------
-
+  // ---------- Indexes ----------
   @@index([currentPlan])
-
+  @@index([lastPublishedScanJobId])
   @@index([uninstalledAt])
-
   @@index([uninstalledAt, currentPlan])
-
   @@map("shops")
 }
 
 // ============================================================
-// 3. WebhookEvent 表
+// 3. ScanNoticeAck
+// ============================================================
+
+model ScanNoticeAck {
+  id                 String   @id @default(cuid())
+  shopId             String   @map("shop_id")
+  noticeVersion      String   @map("notice_version")
+  scopeFlagsSnapshot Json     @map("scope_flags_snapshot")
+  acknowledgedAt     DateTime @default(now()) @map("acknowledged_at")
+
+  // ---------- Relations ----------
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, noticeVersion])
+  @@index([noticeVersion])
+  @@map("scan_notice_ack")
+}
+
+// ============================================================
+// 4. ShopOperationLock
+// ============================================================
+
+model ShopOperationLock {
+  shopId      String    @id @map("shop_id")
+  lockType    String    @map("lock_type")
+  batchId     String?   @map("batch_id")
+  acquiredAt  DateTime  @default(now()) @map("acquired_at")
+  heartbeatAt DateTime? @map("heartbeat_at")
+  expiresAt   DateTime  @map("expires_at")
+  releasedAt  DateTime? @map("released_at")
+  status      String    @map("status")
+
+  // ---------- Relations ----------
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@index([status, expiresAt])
+  @@index([lockType, status])
+  @@map("shop_operation_lock")
+}
+
+// ============================================================
+// 5. WebhookEvent
 // ============================================================
 
 model WebhookEvent {
-  id               String    @id @default(cuid())
-  shopDomain       String    @map("shop_domain")
-  topic            String
-  shopifyWebhookId String    @unique @map("shopify_webhook_id")
-  apiVersion       String?   @map("api_version")
-  payload          Json
-  status           String    @default("PENDING") @map("status")
-  attempts         Int       @default(0)
-  processedAt      DateTime? @map("processed_at")
-  errorMessage     String?   @map("error_message")
-  receivedAt       DateTime  @default(now()) @map("received_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id                   String             @id @default(cuid())
+  shopDomain           String             @map("shop_domain")
+  topic                String
+  resourceId           String?            @map("resource_id")
+  shopifyWebhookId     String             @unique @map("shopify_webhook_id")
+  idempotencyKey       String             @unique @map("idempotency_key")
+  apiVersion           String?            @map("api_version")
+  payload              Json
+  status               WebhookEventStatus @default(PENDING) @map("status")
+  attempts             Int                @default(0)
+  jobBatchId           String?            @map("job_batch_id")
+  coalescedIntoEventId String?            @map("coalesced_into_event_id")
+  queuedAt             DateTime?          @map("queued_at")
+  lastAttemptAt        DateTime?          @map("last_attempt_at")
+  processingStartedAt  DateTime?          @map("processing_started_at")
+  processedAt          DateTime?          @map("processed_at")
+  errorMessage         String?            @map("error_message")
+  receivedAt           DateTime           @default(now()) @map("received_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
 
-  // ---------- 关系 ----------
-  shop Shop? @relation(fields: [shopDomain], references: [shopDomain], onDelete: Cascade)
+  // ---------- Relations ----------
+  shop               Shop           @relation(fields: [shopDomain], references: [shopDomain], onDelete: Cascade)
+  jobBatch           JobBatch?      @relation(fields: [jobBatchId], references: [id], onDelete: SetNull)
+  coalescedIntoEvent WebhookEvent?  @relation("WebhookEventCoalescedInto", fields: [coalescedIntoEventId], references: [id], onDelete: SetNull)
+  coalescedEvents    WebhookEvent[] @relation("WebhookEventCoalescedInto")
 
-  // ---------- 索引 ----------
-
+  // ---------- Indexes ----------
   @@index([status, receivedAt])
-
   @@index([shopDomain, topic, receivedAt])
-
+  @@index([shopDomain, topic, resourceId, receivedAt])
+  @@index([shopDomain, status, receivedAt])
+  @@index([jobBatchId])
+  @@index([coalescedIntoEventId])
+  @@index([processedAt])
+  @@index([lastAttemptAt])
   @@index([receivedAt])
-
   @@map("webhook_events")
+}
+
+// ============================================================
+// 6. ScanJob
+// ============================================================
+
+model ScanJob {
+  id                      String               @id @default(cuid())
+  shopId                  String               @map("shop_id")
+  status                  ScanJobStatus        @default(RUNNING)
+  publishStatus           ScanJobPublishStatus @default(PENDING) @map("publish_status")
+  scopeFlags              Json                 @map("scope_flags")
+  noticeVersion           String               @map("notice_version")
+  successfulResourceTypes Json                 @default("[]") @map("successful_resource_types")
+  failedResourceTypes     Json                 @default("[]") @map("failed_resource_types")
+  startedAt               DateTime             @default(now()) @map("started_at")
+  finishedAt              DateTime?            @map("finished_at")
+  publishedAt             DateTime?            @map("published_at")
+  error                   String?
+
+  // ---------- Relations ----------
+  shop                 Shop                       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  publishedForShops    Shop[]                     @relation("ShopLastPublishedScanJob")
+  scanTasks            ScanTask[]
+  scanResultTargets    ScanResultTarget[]
+  scanResultUsages     ScanResultUsage[]
+  lastPublishedTargets AltTarget[]                @relation("LastPublishedScanJobAltTargets")
+  lastPublishedUsages  ImageUsage[]               @relation("LastPublishedScanJobImageUsages")
+  lastSeenUsages       ImageUsage[]               @relation("LastSeenScanJobImageUsages")
+  lastSeenCandidates   AltCandidate[]              @relation("LastSeenScanJobAltCandidates")
+  groupProjections     CandidateGroupProjection[]
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@index([shopId, status, startedAt])
+  @@index([publishStatus, startedAt])
+  @@map("scan_job")
+}
+
+// ============================================================
+// 7. ScanTask
+// ============================================================
+
+model ScanTask {
+  id                  String           @id @default(cuid())
+  shopId              String           @map("shop_id")
+  scanJobId           String           @map("scan_job_id")
+  resourceType        ScanResourceType @map("resource_type")
+  status              ScanTaskStatus   @default(PENDING)
+  currentAttemptNo    Int              @default(0) @map("current_attempt_no")
+  successfulAttemptId String?          @unique @map("successful_attempt_id")
+  maxParseAttempts    Int              @default(3) @map("max_parse_attempts")
+  startedAt           DateTime         @default(now()) @map("started_at")
+  finishedAt          DateTime?        @map("finished_at")
+  error               String?
+
+  // ---------- Relations ----------
+  shop              Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanJob           ScanJob            @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
+  attempts          ScanTaskAttempt[]  @relation("ScanTaskAttempts")
+  successfulAttempt ScanTaskAttempt?   @relation("SuccessfulScanTaskAttempt", fields: [successfulAttemptId], references: [id], onDelete: SetNull)
+  scanResultTargets ScanResultTarget[]
+  scanResultUsages  ScanResultUsage[]
+
+  // ---------- Indexes ----------
+  @@unique([scanJobId, resourceType])
+  @@index([shopId])
+  @@index([scanJobId, status])
+  @@index([shopId, resourceType, status])
+  @@map("scan_task")
+}
+
+// ============================================================
+// 8. ScanTaskAttempt
+// ============================================================
+
+model ScanTaskAttempt {
+  id                 String                @id @default(cuid())
+  shopId             String                @map("shop_id")
+  scanTaskId         String                @map("scan_task_id")
+  attemptNo          Int                   @map("attempt_no")
+  status             ScanTaskAttemptStatus @default(PENDING)
+  bulkOperationId    String?               @unique @map("bulk_operation_id")
+  bulkResultUrl      String?               @map("bulk_result_url")
+  resultUrlFetchedAt DateTime?             @map("result_url_fetched_at")
+  parsedRows         Int                   @default(0) @map("parsed_rows")
+  lastParseError     String?               @map("last_parse_error")
+  startedAt          DateTime              @default(now()) @map("started_at")
+  finishedAt         DateTime?             @map("finished_at")
+
+  // ---------- Relations ----------
+  shop              Shop                   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanTask          ScanTask               @relation("ScanTaskAttempts", fields: [scanTaskId], references: [id], onDelete: Cascade)
+  successfulForTask ScanTask?              @relation("SuccessfulScanTaskAttempt")
+  stgProducts       StgProduct[]
+  stgMediaProducts  StgMediaImageProduct[]
+  stgMediaFiles     StgMediaImageFile[]
+  stgCollections    StgCollection[]
+  stgArticles       StgArticle[]
+
+  // ---------- Indexes ----------
+  @@unique([scanTaskId, attemptNo])
+  @@index([shopId])
+  @@index([scanTaskId, status])
+  @@index([shopId, status, startedAt])
+  @@map("scan_task_attempt")
+}
+
+// ============================================================
+// 9. JobBatch
+// ============================================================
+
+model JobBatch {
+  id            String         @id @default(cuid())
+  shopId        String         @map("shop_id")
+  type          JobBatchType
+  reservationId String?        @unique @map("reservation_id")
+  total         Int            @default(0)
+  success       Int            @default(0)
+  failed        Int            @default(0)
+  skipped       Int            @default(0)
+  status        JobBatchStatus @default(PENDING)
+  startedAt     DateTime       @default(now()) @map("started_at")
+  finishedAt    DateTime?      @map("finished_at")
+
+  // ---------- Relations ----------
+  shop          Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  reservation   CreditReservation? @relation("JobBatchReservation", fields: [reservationId], references: [id], onDelete: SetNull)
+  items         JobItem[]
+  webhookEvents WebhookEvent[]
+  auditLogs     AuditLog[]
+  creditLedgers CreditLedger[]
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@index([shopId, type, startedAt])
+  @@index([shopId, status, startedAt])
+  @@map("job_batch")
+}
+
+// ============================================================
+// 10. JobItem
+// ============================================================
+
+model JobItem {
+  id             String        @id @default(cuid())
+  batchId        String        @map("batch_id")
+  altCandidateId String        @map("alt_candidate_id")
+  status         JobItemStatus @default(PENDING)
+  error          String?
+
+  // ---------- Relations ----------
+  batch        JobBatch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  altCandidate AltCandidate @relation(fields: [altCandidateId], references: [id], onDelete: Cascade)
+  auditLogs    AuditLog[]
+
+  // ---------- Indexes ----------
+  @@unique([batchId, altCandidateId])
+  @@index([altCandidateId])
+  @@index([batchId, status])
+  @@map("job_item")
+}
+
+// ============================================================
+// 11. StgProduct
+// ============================================================
+
+model StgProduct {
+  id                String @id @default(cuid())
+  shopId            String @map("shop_id")
+  scanTaskAttemptId String @map("scan_task_attempt_id")
+  productId         String @map("product_id")
+  title             String
+  handle            String
+
+  // ---------- Relations ----------
+  shop            Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanTaskAttempt ScanTaskAttempt @relation(fields: [scanTaskAttemptId], references: [id], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, scanTaskAttemptId, productId])
+  @@index([shopId])
+  @@index([scanTaskAttemptId])
+  @@index([shopId, productId])
+  @@index([scanTaskAttemptId, productId])
+  @@map("stg_product")
+}
+
+// ============================================================
+// 12. StgMediaImageProduct
+// ============================================================
+
+model StgMediaImageProduct {
+  id                String  @id @default(cuid())
+  shopId            String  @map("shop_id")
+  scanTaskAttemptId String  @map("scan_task_attempt_id")
+  mediaImageId      String  @map("media_image_id")
+  parentProductId   String  @map("parent_product_id")
+  alt               String?
+  url               String
+  width             Int?
+  height            Int?
+  positionIndex     Int?    @map("position_index")
+
+  // ---------- Relations ----------
+  shop            Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanTaskAttempt ScanTaskAttempt @relation(fields: [scanTaskAttemptId], references: [id], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, scanTaskAttemptId, mediaImageId, parentProductId])
+  @@index([shopId])
+  @@index([scanTaskAttemptId])
+  @@index([shopId, mediaImageId])
+  @@index([shopId, parentProductId])
+  @@index([scanTaskAttemptId, parentProductId, positionIndex])
+  @@map("stg_media_image_product")
+}
+
+// ============================================================
+// 13. StgMediaImageFile
+// ============================================================
+
+model StgMediaImageFile {
+  id                String  @id @default(cuid())
+  shopId            String  @map("shop_id")
+  scanTaskAttemptId String  @map("scan_task_attempt_id")
+  mediaImageId      String  @map("media_image_id")
+  alt               String?
+  url               String
+  width             Int?
+  height            Int?
+
+  // ---------- Relations ----------
+  shop            Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanTaskAttempt ScanTaskAttempt @relation(fields: [scanTaskAttemptId], references: [id], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, scanTaskAttemptId, mediaImageId])
+  @@index([shopId])
+  @@index([scanTaskAttemptId])
+  @@index([shopId, mediaImageId])
+  @@map("stg_media_image_file")
+}
+
+// ============================================================
+// 14. StgCollection
+// ============================================================
+
+model StgCollection {
+  id                String  @id @default(cuid())
+  shopId            String  @map("shop_id")
+  scanTaskAttemptId String  @map("scan_task_attempt_id")
+  collectionId      String  @map("collection_id")
+  title             String
+  handle            String
+  imageAltText      String? @map("image_alt_text")
+  imageUrl          String? @map("image_url")
+
+  // ---------- Relations ----------
+  shop            Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanTaskAttempt ScanTaskAttempt @relation(fields: [scanTaskAttemptId], references: [id], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, scanTaskAttemptId, collectionId])
+  @@index([shopId])
+  @@index([scanTaskAttemptId])
+  @@index([shopId, collectionId])
+  @@map("stg_collection")
+}
+
+// ============================================================
+// 15. StgArticle
+// ============================================================
+
+model StgArticle {
+  id                String  @id @default(cuid())
+  shopId            String  @map("shop_id")
+  scanTaskAttemptId String  @map("scan_task_attempt_id")
+  articleId         String  @map("article_id")
+  title             String
+  handle            String
+  imageAltText      String? @map("image_alt_text")
+  imageUrl          String? @map("image_url")
+
+  // ---------- Relations ----------
+  shop            Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanTaskAttempt ScanTaskAttempt @relation(fields: [scanTaskAttemptId], references: [id], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, scanTaskAttemptId, articleId])
+  @@index([shopId])
+  @@index([scanTaskAttemptId])
+  @@index([shopId, articleId])
+  @@map("stg_article")
+}
+
+// ============================================================
+// 16. ResourceImageFingerprint
+// ============================================================
+
+model ResourceImageFingerprint {
+  id                     String                               @id @default(cuid())
+  shopId                 String                               @map("shop_id")
+  resourceType           ResourceImageFingerprintResourceType @map("resource_type")
+  resourceId             String                               @map("resource_id")
+  fingerprintHash        String                               @map("fingerprint_hash")
+  lastProcessedWebhookId String?                              @map("last_processed_webhook_id")
+  lastProcessedAt        DateTime?                            @map("last_processed_at")
+  createdAt              DateTime                             @default(now()) @map("created_at")
+  updatedAt              DateTime                             @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, resourceType, resourceId])
+  @@index([shopId])
+  @@index([shopId, resourceType])
+  @@index([shopId, resourceType, fingerprintHash])
+  @@index([lastProcessedWebhookId])
+  @@map("resource_image_fingerprint")
+}
+
+// ============================================================
+// 17. ScanResultTarget
+// ============================================================
+
+model ScanResultTarget {
+  id              String           @id @default(cuid())
+  shopId          String           @map("shop_id")
+  scanJobId       String           @map("scan_job_id")
+  resourceType    ScanResourceType @map("resource_type")
+  altPlane        AltPlane         @map("alt_plane")
+  writeTargetId   String           @map("write_target_id")
+  locale          String           @default("default")
+  displayTitle    String?          @map("display_title")
+  displayHandle   String?          @map("display_handle")
+  previewUrl      String?          @map("preview_url")
+  currentAltText  String?          @map("current_alt_text")
+  currentAltEmpty Boolean          @default(true) @map("current_alt_empty")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop     Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanJob  ScanJob           @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
+  scanTask ScanTask          @relation(fields: [scanJobId, resourceType], references: [scanJobId, resourceType], onDelete: Cascade)
+  usages   ScanResultUsage[]
+
+  // ---------- Indexes ----------
+  @@unique([shopId, scanJobId, resourceType, altPlane, writeTargetId, locale])
+  @@index([shopId])
+  @@index([scanJobId])
+  @@index([shopId, scanJobId, resourceType])
+  @@index([shopId, altPlane, locale])
+  @@map("scan_result_target")
+}
+
+// ============================================================
+// 18. ScanResultUsage
+// ============================================================
+
+model ScanResultUsage {
+  id            String           @id @default(cuid())
+  shopId        String           @map("shop_id")
+  scanJobId     String           @map("scan_job_id")
+  resourceType  ScanResourceType @map("resource_type")
+  altPlane      AltPlane         @map("alt_plane")
+  writeTargetId String           @map("write_target_id")
+  locale        String           @default("default")
+  usageType     ImageUsageType   @map("usage_type")
+  usageId       String           @map("usage_id")
+  title         String?
+  handle        String?
+  positionIndex Int?             @map("position_index")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop             Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanJob          ScanJob          @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
+  scanTask         ScanTask         @relation(fields: [scanJobId, resourceType], references: [scanJobId, resourceType], onDelete: Cascade)
+  scanResultTarget ScanResultTarget @relation(fields: [shopId, scanJobId, resourceType, altPlane, writeTargetId, locale], references: [shopId, scanJobId, resourceType, altPlane, writeTargetId, locale], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, scanJobId, resourceType, altPlane, writeTargetId, usageType, usageId])
+  @@index([shopId])
+  @@index([scanJobId])
+  @@index([shopId, usageType])
+  @@index([shopId, scanJobId, resourceType])
+  @@index([shopId, scanJobId, resourceType, altPlane, writeTargetId, locale])
+  @@map("scan_result_usage")
+}
+
+// ============================================================
+// 19. AltTarget
+// ============================================================
+
+model AltTarget {
+  id                     String        @id @default(cuid())
+  shopId                 String        @map("shop_id")
+  altPlane               AltPlane      @map("alt_plane")
+  writeTargetId          String        @map("write_target_id")
+  locale                 String        @default("default")
+  displayTitle           String?       @map("display_title")
+  displayHandle          String?       @map("display_handle")
+  previewUrl             String?       @map("preview_url")
+  currentAltText         String?       @map("current_alt_text")
+  currentAltEmpty        Boolean       @default(true) @map("current_alt_empty")
+  lastPublishedScanJobId String        @map("last_published_scan_job_id")
+  lastSeenAt             DateTime      @default(now()) @map("last_seen_at")
+  presentStatus          PresentStatus @default(PRESENT) @map("present_status")
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop                 Shop                       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  lastPublishedScanJob ScanJob                    @relation("LastPublishedScanJobAltTargets", fields: [lastPublishedScanJobId], references: [id], onDelete: Cascade)
+  imageUsages          ImageUsage[]
+  decorativeMark       DecorativeMark?
+  altCandidate         AltCandidate?
+  groupProjections     CandidateGroupProjection[]
+  auditLogs            AuditLog[]
+
+  // ---------- Indexes ----------
+  @@unique([shopId, altPlane, writeTargetId, locale])
+  @@index([shopId])
+  @@index([lastPublishedScanJobId])
+  @@index([shopId, altPlane, locale, presentStatus])
+  @@map("alt_target")
+}
+
+// ============================================================
+// 20. ImageUsage
+// ============================================================
+
+model ImageUsage {
+  id                     String         @id @default(cuid())
+  shopId                 String         @map("shop_id")
+  altTargetId            String         @map("alt_target_id")
+  usageType              ImageUsageType @map("usage_type")
+  usageId                String         @map("usage_id")
+  title                  String?
+  handle                 String?
+  positionIndex          Int?           @map("position_index")
+  lastPublishedScanJobId String         @map("last_published_scan_job_id")
+  lastSeenAt             DateTime       @default(now()) @map("last_seen_at")
+  lastSeenScanJobId      String?        @map("last_seen_scan_job_id")
+  presentStatus          PresentStatus  @default(PRESENT) @map("present_status")
+  createdAt              DateTime       @default(now()) @map("created_at")
+  updatedAt              DateTime       @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop                 Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  altTarget            AltTarget @relation(fields: [altTargetId], references: [id], onDelete: Cascade)
+  lastPublishedScanJob ScanJob   @relation("LastPublishedScanJobImageUsages", fields: [lastPublishedScanJobId], references: [id], onDelete: Cascade)
+  lastSeenScanJob      ScanJob?  @relation("LastSeenScanJobImageUsages", fields: [lastSeenScanJobId], references: [id], onDelete: SetNull)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, altTargetId, usageType, usageId])
+  @@index([shopId])
+  @@index([altTargetId])
+  @@index([lastPublishedScanJobId])
+  @@index([lastSeenScanJobId])
+  @@index([shopId, usageType, presentStatus])
+  @@index([shopId, usageId])
+  @@map("image_usage")
+}
+
+// ============================================================
+// 21. DecorativeMark
+// ============================================================
+
+model DecorativeMark {
+  id          String    @id @default(cuid())
+  shopId      String    @map("shop_id")
+  altTargetId String    @unique @map("alt_target_id")
+  isActive    Boolean   @default(true) @map("is_active")
+  markedAt    DateTime  @default(now()) @map("marked_at")
+  unmarkedAt  DateTime? @map("unmarked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop      Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  altTarget AltTarget @relation(fields: [altTargetId], references: [id], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, altTargetId])
+  @@index([shopId])
+  @@index([altTargetId])
+  @@index([shopId, isActive])
+  @@map("decorative_mark")
+}
+
+// ============================================================
+// 22. AltCandidate
+// ============================================================
+
+model AltCandidate {
+  id                String                     @id @default(cuid())
+  shopId            String                     @map("shop_id")
+  altTargetId       String                     @unique @map("alt_target_id")
+  status            AltCandidateStatus         @default(MISSING)
+  missingReason     AltCandidateMissingReason? @map("missing_reason")
+  riskFlags         Json                       @default("[]") @map("risk_flags")
+  firstSeenAt       DateTime                   @default(now()) @map("first_seen_at")
+  lastSeenAt        DateTime                   @default(now()) @map("last_seen_at")
+  lastSeenScanJobId String                     @map("last_seen_scan_job_id")
+  writtenAt         DateTime?                  @map("written_at")
+  errorCode         String?                    @map("error_code")
+  errorMessage      String?                    @map("error_message")
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  updatedAt         DateTime                   @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop             Shop                       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  altTarget        AltTarget                  @relation(fields: [altTargetId], references: [id], onDelete: Cascade)
+  lastSeenScanJob  ScanJob                    @relation("LastSeenScanJobAltCandidates", fields: [lastSeenScanJobId], references: [id], onDelete: Cascade)
+  groupProjections CandidateGroupProjection[]
+  draft            AltDraft?
+  jobItems         JobItem[]
+  auditLogs        AuditLog[]
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@index([altTargetId])
+  @@index([lastSeenScanJobId])
+  @@index([shopId, status, lastSeenAt])
+  @@map("alt_candidate")
+}
+
+// ============================================================
+// 23. CandidateGroupProjection
+// ============================================================
+
+model CandidateGroupProjection {
+  id                     String                         @id @default(cuid())
+  shopId                 String                         @map("shop_id")
+  groupType              CandidateGroupType             @map("group_type")
+  altCandidateId         String                         @map("alt_candidate_id")
+  altTargetId            String                         @map("alt_target_id")
+  primaryUsageType       CandidateGroupPrimaryUsageType @map("primary_usage_type")
+  primaryUsageId         String                         @map("primary_usage_id")
+  primaryTitle           String?                        @map("primary_title")
+  primaryHandle          String?                        @map("primary_handle")
+  primaryPositionIndex   Int?                           @map("primary_position_index")
+  additionalUsageCount   Int                            @default(0) @map("additional_usage_count")
+  usageCountPresent      Int                            @default(0) @map("usage_count_present")
+  impactScopeSummary     Json                           @default("{}") @map("impact_scope_summary")
+  lastPublishedScanJobId String                         @map("last_published_scan_job_id")
+  createdAt              DateTime                       @default(now()) @map("created_at")
+  updatedAt              DateTime                       @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop                 Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  altCandidate         AltCandidate @relation(fields: [altCandidateId], references: [id], onDelete: Cascade)
+  altTarget            AltTarget    @relation(fields: [altTargetId], references: [id], onDelete: Cascade)
+  lastPublishedScanJob ScanJob      @relation(fields: [lastPublishedScanJobId], references: [id], onDelete: Cascade)
+
+  // ---------- Indexes ----------
+  @@unique([shopId, groupType, altCandidateId])
+  @@index([shopId])
+  @@index([altCandidateId])
+  @@index([altTargetId])
+  @@index([lastPublishedScanJobId])
+  @@index([shopId, groupType])
+  @@map("candidate_group_projection")
+}
+
+// ============================================================
+// 24. AltDraft
+// ============================================================
+
+model AltDraft {
+  id              String              @id @default(cuid())
+  shopId          String              @map("shop_id")
+  altCandidateId  String              @unique @map("alt_candidate_id")
+  modelUsed       String              @map("model_used")
+  contextMode     AltDraftContextMode @map("context_mode")
+  contextSnapshot Json                @map("context_snapshot")
+  generatedText   String              @map("generated_text")
+  editedText      String?             @map("edited_text")
+  finalText       String?             @map("final_text")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  expiresAt       DateTime            @map("expires_at")
+
+  // ---------- Relations ----------
+  shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  altCandidate AltCandidate @relation(fields: [altCandidateId], references: [id], onDelete: Cascade)
+  auditLogs    AuditLog[]
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@index([expiresAt])
+  @@index([shopId, expiresAt])
+  @@map("alt_draft")
+}
+
+// ============================================================
+// 25. AuditLog
+// ============================================================
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  shopId         String   @map("shop_id")
+  jobBatchId     String?  @map("job_batch_id")
+  jobItemId      String?  @map("job_item_id")
+  altTargetId    String   @map("alt_target_id")
+  altCandidateId String   @map("alt_candidate_id")
+  altDraftId     String?  @map("alt_draft_id")
+  idempotencyKey String   @unique @map("idempotency_key")
+  altPlane       AltPlane @map("alt_plane")
+  writeTargetId  String   @map("write_target_id")
+  oldAltText     String?  @map("old_alt_text")
+  newAltText     String   @map("new_alt_text")
+  writtenAt      DateTime @default(now()) @map("written_at")
+  modelUsed      String   @map("model_used")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // ---------- Relations ----------
+  shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  jobBatch     JobBatch?    @relation(fields: [jobBatchId], references: [id], onDelete: SetNull)
+  jobItem      JobItem?     @relation(fields: [jobItemId], references: [id], onDelete: SetNull)
+  altTarget    AltTarget    @relation(fields: [altTargetId], references: [id], onDelete: Cascade)
+  altCandidate AltCandidate @relation(fields: [altCandidateId], references: [id], onDelete: Cascade)
+  altDraft     AltDraft?    @relation(fields: [altDraftId], references: [id], onDelete: SetNull)
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@index([jobBatchId])
+  @@index([jobItemId])
+  @@index([altTargetId])
+  @@index([altCandidateId])
+  @@index([altDraftId])
+  @@unique([shopId, writeTargetId, altCandidateId])
+  @@index([shopId, writtenAt])
+  @@index([shopId, altPlane, writtenAt])
+  @@index([shopId, writeTargetId, writtenAt])
+  @@map("audit_log")
+}
+
+// ============================================================
+// 26. BillingSubscription
+// ============================================================
+
+model BillingSubscription {
+  id                       String                    @id @default(cuid())
+  shopId                   String                    @map("shop_id")
+  planCode                 BillingPlanCode           @map("plan_code")
+  billingInterval          BillingInterval           @map("billing_interval")
+  status                   BillingSubscriptionStatus @default(PENDING)
+  externalSubscriptionId   String?                   @unique @map("external_subscription_id")
+  externalBillingReference String?                   @map("external_billing_reference")
+  currentPeriodStart       DateTime?                 @map("current_period_start")
+  currentPeriodEnd         DateTime?                 @map("current_period_end")
+  activatedAt              DateTime?                 @map("activated_at")
+  canceledAt               DateTime?                 @map("canceled_at")
+  expiresAt                DateTime?                 @map("expires_at")
+  createdAt                DateTime                  @default(now()) @map("created_at")
+  updatedAt                DateTime                  @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop                 Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  overagePackPurchases OveragePackPurchase[]
+  creditBuckets        CreditBucket[]
+  billingLedgers       BillingLedger[]
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@index([shopId, status, currentPeriodEnd])
+  @@index([shopId, planCode, status])
+  @@index([externalBillingReference])
+  @@map("billing_subscription")
+}
+
+// ============================================================
+// 27. OveragePackPurchase
+// ============================================================
+
+model OveragePackPurchase {
+  id                       String                    @id @default(cuid())
+  shopId                   String                    @map("shop_id")
+  billingSubscriptionId    String?                   @map("billing_subscription_id")
+  status                   OveragePackPurchaseStatus @default(PENDING)
+  packCode                 String                    @map("pack_code")
+  grantedAmount            Int                       @map("granted_amount")
+  externalPurchaseId       String?                   @unique @map("external_purchase_id")
+  externalBillingReference String?                   @map("external_billing_reference")
+  idempotencyKey           String                    @unique @map("idempotency_key")
+  purchasedAt              DateTime?                 @map("purchased_at")
+  fulfilledAt              DateTime?                 @map("fulfilled_at")
+  refundedAt               DateTime?                 @map("refunded_at")
+  createdAt                DateTime                  @default(now()) @map("created_at")
+  updatedAt                DateTime                  @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop                Shop                 @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  billingSubscription BillingSubscription? @relation(fields: [billingSubscriptionId], references: [id], onDelete: SetNull)
+  creditBuckets       CreditBucket[]
+  billingLedgers      BillingLedger[]
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@index([billingSubscriptionId])
+  @@index([shopId, status, createdAt])
+  @@index([externalBillingReference])
+  @@map("overage_pack_purchase")
+}
+
+// ============================================================
+// 28. CreditBucket
+// ============================================================
+
+model CreditBucket {
+  id                    String             @id @default(cuid())
+  shopId                String             @map("shop_id")
+  billingSubscriptionId String?            @map("billing_subscription_id")
+  overagePackPurchaseId String?            @map("overage_pack_purchase_id")
+  bucketType            CreditBucketType   @map("bucket_type")
+  status                CreditBucketStatus @default(PENDING)
+  cycleKey              String?            @map("cycle_key")
+  grantedAmount         Int                @map("granted_amount")
+  reservedAmount        Int                @default(0) @map("reserved_amount")
+  consumedAmount        Int                @default(0) @map("consumed_amount")
+  effectiveAt           DateTime           @map("effective_at")
+  expiresAt             DateTime?          @map("expires_at")
+  activatedAt           DateTime?          @map("activated_at")
+  exhaustedAt           DateTime?          @map("exhausted_at")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop                Shop                    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  billingSubscription BillingSubscription?    @relation(fields: [billingSubscriptionId], references: [id], onDelete: SetNull)
+  overagePackPurchase OveragePackPurchase?    @relation(fields: [overagePackPurchaseId], references: [id], onDelete: SetNull)
+  reservationLines    CreditReservationLine[]
+  creditLedgers       CreditLedger[]
+
+  // ---------- Indexes ----------
+  @@unique([shopId, bucketType, cycleKey])
+  @@index([shopId])
+  @@index([billingSubscriptionId])
+  @@index([overagePackPurchaseId])
+  @@index([shopId, status, expiresAt])
+  @@index([shopId, bucketType, status, effectiveAt])
+  @@map("credit_bucket")
+}
+
+// ============================================================
+// 29. CreditReservation
+// ============================================================
+
+model CreditReservation {
+  id              String                  @id @default(cuid())
+  shopId          String                  @map("shop_id")
+  status          CreditReservationStatus @default(PENDING)
+  requestedAmount Int                     @map("requested_amount")
+  reservedAmount  Int                     @default(0) @map("reserved_amount")
+  consumedAmount  Int                     @default(0) @map("consumed_amount")
+  releasedAmount  Int                     @default(0) @map("released_amount")
+  idempotencyKey  String                  @unique @map("idempotency_key")
+  expiresAt       DateTime?               @map("expires_at")
+  resolvedAt      DateTime?               @map("resolved_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop          Shop                    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  jobBatch      JobBatch?               @relation("JobBatchReservation")
+  lines         CreditReservationLine[]
+  creditLedgers CreditLedger[]
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@index([expiresAt])
+  @@index([resolvedAt])
+  @@index([shopId, status, createdAt])
+  @@map("credit_reservation")
+}
+
+// ============================================================
+// 30. CreditReservationLine
+// ============================================================
+
+model CreditReservationLine {
+  id             String   @id @default(cuid())
+  shopId         String   @map("shop_id")
+  reservationId  String   @map("reservation_id")
+  bucketId       String   @map("bucket_id")
+  reservedAmount Int      @map("reserved_amount")
+  consumedAmount Int      @default(0) @map("consumed_amount")
+  releasedAmount Int      @default(0) @map("released_amount")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop          Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  reservation   CreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  bucket        CreditBucket      @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  creditLedgers CreditLedger[]
+
+  // ---------- Indexes ----------
+  @@unique([reservationId, bucketId])
+  @@index([shopId])
+  @@index([reservationId])
+  @@index([bucketId])
+  @@index([shopId, bucketId])
+  @@map("credit_reservation_line")
+}
+
+// ============================================================
+// 31. CreditLedger
+// ============================================================
+
+model CreditLedger {
+  id                       String           @id @default(cuid())
+  shopId                   String           @map("shop_id")
+  bucketId                 String           @map("bucket_id")
+  reservationId            String?          @map("reservation_id")
+  reservationLineId        String?          @map("reservation_line_id")
+  jobBatchId               String?          @map("job_batch_id")
+  type                     CreditLedgerType
+  deltaAmount              Int              @map("delta_amount")
+  balanceAfter             Int?             @map("balance_after")
+  idempotencyKey           String           @unique @map("idempotency_key")
+  externalBillingReference String?          @map("external_billing_reference")
+  eventAt                  DateTime         @default(now()) @map("event_at")
+  createdAt                DateTime         @default(now()) @map("created_at")
+
+  // ---------- Relations ----------
+  shop            Shop                   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  bucket          CreditBucket           @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  reservation     CreditReservation?     @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  reservationLine CreditReservationLine? @relation(fields: [reservationLineId], references: [id], onDelete: SetNull)
+  jobBatch        JobBatch?              @relation(fields: [jobBatchId], references: [id], onDelete: SetNull)
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@index([bucketId])
+  @@index([reservationId])
+  @@index([reservationLineId])
+  @@index([jobBatchId])
+  @@index([externalBillingReference])
+  @@index([shopId, eventAt])
+  @@index([shopId, type, eventAt])
+  @@map("credit_ledger")
+}
+
+// ============================================================
+// 32. BillingLedger
+// ============================================================
+
+model BillingLedger {
+  id                       String                 @id @default(cuid())
+  shopId                   String                 @map("shop_id")
+  billingSubscriptionId    String?                @map("billing_subscription_id")
+  overagePackPurchaseId    String?                @map("overage_pack_purchase_id")
+  entryType                BillingLedgerEntryType @map("entry_type")
+  status                   BillingLedgerStatus    @default(PENDING)
+  amountCents              Int                    @map("amount_cents")
+  currencyCode             String                 @default("USD") @map("currency_code")
+  externalBillingReference String                 @map("external_billing_reference")
+  idempotencyKey           String                 @unique @map("idempotency_key")
+  occurredAt               DateTime               @default(now()) @map("occurred_at")
+  settledAt                DateTime?              @map("settled_at")
+  createdAt                DateTime               @default(now()) @map("created_at")
+  updatedAt                DateTime               @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop                Shop                 @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  billingSubscription BillingSubscription? @relation(fields: [billingSubscriptionId], references: [id], onDelete: SetNull)
+  overagePackPurchase OveragePackPurchase? @relation(fields: [overagePackPurchaseId], references: [id], onDelete: SetNull)
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@index([billingSubscriptionId])
+  @@index([overagePackPurchaseId])
+  @@index([externalBillingReference])
+  @@index([shopId, status, occurredAt])
+  @@index([shopId, entryType, occurredAt])
+  @@map("billing_ledger")
 }

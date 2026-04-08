@@ -1,40 +1,18 @@
 /**
  * File: server/modules/shop/scope.service.ts
- * Purpose: Centralize conversion between readable scan scope flags and the
- * compact bitmask persisted in the shops table.
+ * Purpose: Centralize the canonical JSON scope state persisted in the shops
+ * table so server-side writes stay aligned with Prisma and frontend helpers.
  */
+import {
+  DEFAULT_SCOPE_FLAG_STATE,
+  normalizeScopeFlagState,
+} from "../../../app/lib/scope-utils";
 import type { ScanScopeFlags } from "./shop.types";
 
-const PRODUCTS_FLAG = 1 << 0;
-const FILES_FLAG = 1 << 1;
-const COLLECTIONS_FLAG = 1 << 2;
-const ARTICLES_FLAG = 1 << 3;
-
 export const DEFAULT_SCAN_SCOPE_FLAGS: ScanScopeFlags = {
-  products: true,
-  files: true,
-  collections: true,
-  articles: true,
+  ...DEFAULT_SCOPE_FLAG_STATE,
 };
 
-export function encodeScanScopeFlags(flags: ScanScopeFlags): number {
-  let encoded = 0;
-
-  if (flags.products) {
-    encoded |= PRODUCTS_FLAG;
-  }
-
-  if (flags.files) {
-    encoded |= FILES_FLAG;
-  }
-
-  if (flags.collections) {
-    encoded |= COLLECTIONS_FLAG;
-  }
-
-  if (flags.articles) {
-    encoded |= ARTICLES_FLAG;
-  }
-
-  return encoded;
+export function normalizeScanScopeFlags(input: unknown): ScanScopeFlags {
+  return normalizeScopeFlagState(input);
 }

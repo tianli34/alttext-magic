@@ -36,6 +36,7 @@ export async function createWebhookEventIfAbsent(
         shopDomain: envelope.shop,
         topic: envelope.topic,
         shopifyWebhookId: envelope.webhookId,
+        idempotencyKey: envelope.webhookId,
         apiVersion: envelope.apiVersion,
         payload: envelope.payload,
         status: WEBHOOK_EVENT_STATUS.pending,
@@ -49,7 +50,7 @@ export async function createWebhookEventIfAbsent(
       eventId: event.id,
       isNew: true,
     };
-  } catch (error) {
+  } catch (error: unknown) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"

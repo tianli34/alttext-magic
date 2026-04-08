@@ -21,10 +21,12 @@ git push
 
 cd E:\alt-text-magic
 shopify app dev
+pnpm run dev:web
+
 npm run dev
 curl.exe -I -k https://34.111.204.238
 
-ngrok http 4040
+ngrok http 6022
 
 cd E:\alttext-magic
 shopify app dev --tunnel-url=https://nonidolatrous-nayeli-gushily.ngrok-free.dev:6022

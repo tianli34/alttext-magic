@@ -18,8 +18,12 @@ dotenv.config();
 
 import { createDecipheriv } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
+import {
+  normalizeScopeFlagState,
+  type ScopeFlagState,
+} from "../app/lib/scope-utils";
 
 // ── Inline decryption (mirrors server/crypto/token-encryption.ts) ─────
 const ALGORITHM = "aes-256-gcm";
@@ -61,19 +65,34 @@ const prisma = new PrismaClient({ adapter });
 // ── Expected data ─────────────────────────────────────────────────────
 const EXPECTED: Record<
   string,
-  { accessToken: string; scanScopeFlags: number }
+  { accessToken: string; scanScopeFlags: ScopeFlagState }
 > = {
   "test-store-1.myshopify.com": {
     accessToken: "shpat_test_token_alpha_001",
-    scanScopeFlags: 15,
+    scanScopeFlags: {
+      PRODUCT_MEDIA: true,
+      FILES: true,
+      COLLECTION_IMAGE: true,
+      ARTICLE_IMAGE: true,
+    },
   },
   "test-store-2.myshopify.com": {
     accessToken: "shpat_test_token_beta_002",
-    scanScopeFlags: 5,
+    scanScopeFlags: {
+      PRODUCT_MEDIA: true,
+      FILES: false,
+      COLLECTION_IMAGE: true,
+      ARTICLE_IMAGE: false,
+    },
   },
   "test-store-3.myshopify.com": {
     accessToken: "shpat_test_token_gamma_003",
-    scanScopeFlags: 10,
+    scanScopeFlags: {
+      PRODUCT_MEDIA: false,
+      FILES: true,
+      COLLECTION_IMAGE: false,
+      ARTICLE_IMAGE: true,
+    },
   },
 };
 
@@ -85,12 +104,33 @@ function fail(label: string, detail: string) {
   console.error(`  ❌ ${label}: ${detail}`);
 }
 
+interface VerifiedShopRecord {
+  shopDomain: string;
+  installedAt: Date;
+  currentPlan: string;
+  scanScopeFlags: ScopeFlagState;
+  accessTokenEncrypted: string;
+  accessTokenNonce: string;
+  accessTokenTag: string;
+}
+
 async function main() {
   console.log("🔍 Verifying shops table...\n");
 
-  const shops = await prisma.shop.findMany({
-    orderBy: { createdAt: "asc" },
-  });
+  const shops = await prisma.$queryRaw<VerifiedShopRecord[]>(
+    Prisma.sql`
+      SELECT
+        "shop_domain" AS "shopDomain",
+        "installed_at" AS "installedAt",
+        "current_plan" AS "currentPlan",
+        "scan_scope_flags" AS "scanScopeFlags",
+        "access_token_encrypted" AS "accessTokenEncrypted",
+        "access_token_nonce" AS "accessTokenNonce",
+        "access_token_tag" AS "accessTokenTag"
+      FROM "shops"
+      ORDER BY "created_at" ASC
+    `,
+  );
 
   console.log(`Found ${shops.length} shop records in DB.\n`);
 
@@ -125,14 +165,19 @@ async function main() {
     }
 
     // Check 4: scanScopeFlags
-    if (shop.scanScopeFlags !== expected.scanScopeFlags) {
+    const actualScopeFlags = normalizeScopeFlagState(shop.scanScopeFlags);
+    const expectedScopeFlags = normalizeScopeFlagState(expected.scanScopeFlags);
+
+    if (
+      JSON.stringify(actualScopeFlags) !== JSON.stringify(expectedScopeFlags)
+    ) {
       fail(
         "scanScopeFlags",
-        `expected ${expected.scanScopeFlags}, got ${shop.scanScopeFlags}`,
+        `expected ${JSON.stringify(expectedScopeFlags)}, got ${JSON.stringify(actualScopeFlags)}`,
       );
       allOk = false;
     } else {
-      pass(`scanScopeFlags = ${shop.scanScopeFlags}`);
+      pass(`scanScopeFlags = ${JSON.stringify(actualScopeFlags)}`);
     }
 
     // Check 5: accessTokenEncrypted non-empty

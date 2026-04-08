@@ -3,13 +3,9 @@
  * Purpose: Define the server-side types used for shop initialization and
  * offline token persistence after Shopify authentication.
  */
+import type { ScopeFlagState } from "../../../app/lib/scope-utils";
 
-export interface ScanScopeFlags {
-  products: boolean;
-  files: boolean;
-  collections: boolean;
-  articles: boolean;
-}
+export type ScanScopeFlags = ScopeFlagState;
 
 export interface ShopifySessionSnapshot {
   id: string;

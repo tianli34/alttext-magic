@@ -13,6 +13,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:schema:check": "tsx scripts/validate-database-schema.ts",
     "prisma:studio": "prisma studio",
     "prisma:seed": "tsx prisma/seed.ts",
     "railway:build": "npm run prisma:generate && npm run build && npm run build:worker",
