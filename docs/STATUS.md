@@ -8,6 +8,9 @@
 - 新增 scope flags 校验、去重、排序工具函数与测试
 - 已补齐Prisma Schema 所有表与关系
 - 已生成 Phase 2 核心 schema migration，并新增数据库核心表与关键唯一索引校验脚本
+- 安装完成时在 shop upsert 事务内幂等初始化 `WELCOME(50)` 与当月 `FREE_MONTHLY_INCLUDED(25)` buckets
+- 完成 scan_notice_ack 基础服务：`ackNotice` upsert 确认、`getNoticeStatus` 版本检查、纯函数 `checkNeedsAck`
+- 完成 scope 服务：`getScopeSettings`、`updateScanScopeFlags`、`computeEffectiveReadScopeFlags`，默认四类全开，非法 flag zod 报错
 
 ## In Progress-本地开发
 - Phase 2：数据模型与核心服务层

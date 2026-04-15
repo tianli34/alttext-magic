@@ -1,141 +1,72 @@
-import { Prisma } from "@prisma/client";
-import prisma from "../../../../server/db/prisma.server.js";
-import {
-  WEBHOOK_EVENT_STATUS,
-  type AuthenticatedWebhookEnvelope,
-} from "./webhook.types.js";
+/**
+ * File: app/lib/server/webhooks/webhook.repository.ts
+ * Purpose: 幂等持久化 WebhookEvent 到数据库。
+ * 仅执行: 按 shopifyWebhookId 唯一约束去重 → insert 或返回已有行。
+ */
+import type { Prisma } from "@prisma/client";
+import prisma from "../../../../server/db/prisma.server";
+import { createLogger } from "../../../../server/utils/logger";
+import type {
+  ReceiveWebhookEnvelope,
+  WebhookReceipt,
+} from "./webhook.types";
 
-// [新增] 确保店铺存在的辅助函数
-async function ensureShopExists(shopDomain: string): Promise<void> {
-  await prisma.shop.upsert({
-    where: {
-      shopDomain: shopDomain, // 根据你的 schema 调整字段名，可能是 domain 或 shopDomain
-    },
-    update: {}, // 已存在则不更新
-    create: {
-      shopDomain: shopDomain, // [新增] 创建店铺记录
-      // [新增] 以下字段根据你的 schema 必填项填写，可能包括：
-      accessTokenEncrypted: "test-token", // 测试用默认值
-      scopes: "read_products,write_products", // 测试用默认值
-      accessTokenNonce: "nonce_value_from_oauth",   // 👈 补充
-      accessTokenTag: "tag_value_from_response"     // 👈 补充      
-      // 其他你的 Shop 模型必填字段...
-    },
-  });
-}
+const logger = createLogger({ module: "webhook-repository" });
 
+/**
+ * 幂等写入：若 shopifyWebhookId 已存在则直接返回已有记录。
+ *
+ * 利用 Prisma unique constraint 冲突实现原子去重，
+ * 保证并发重放也仅产生一行。
+ */
 export async function createWebhookEventIfAbsent(
-  envelope: AuthenticatedWebhookEnvelope,
-): Promise<{ eventId: string; isNew: boolean }> {
-  try {
-    // [新增] 先确保店铺存在，避免外键约束错误
-    await ensureShopExists(envelope.shop);
+  envelope: ReceiveWebhookEnvelope,
+): Promise<WebhookReceipt> {
+  const { shop, topic, webhookId, apiVersion, payload } = envelope;
+  const idempotencyKey = `${shop}:${webhookId}`;
 
+  try {
     const event = await prisma.webhookEvent.create({
       data: {
-        shopDomain: envelope.shop,
-        topic: envelope.topic,
-        shopifyWebhookId: envelope.webhookId,
-        idempotencyKey: envelope.webhookId,
-        apiVersion: envelope.apiVersion,
-        payload: envelope.payload,
-        status: WEBHOOK_EVENT_STATUS.pending,
+        shopDomain: shop,
+        topic,
+        shopifyWebhookId: webhookId,
+        idempotencyKey,
+        apiVersion: apiVersion ?? null,
+        payload: payload as Prisma.InputJsonValue,
+        status: "PENDING",
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     });
 
-    return {
-      eventId: event.id,
-      isNew: true,
-    };
+    logger.info(
+      { shop, topic, webhookId, eventId: event.id },
+      "webhook.repository.created",
+    );
+
+    return { isNew: true, eventId: event.id };
   } catch (error: unknown) {
+    // Prisma unique constraint violation (P2002) → 幂等返回
     if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "P2002"
     ) {
-      const existing = await prisma.webhookEvent.findUniqueOrThrow({
-        where: {
-          shopifyWebhookId: envelope.webhookId,
-        },
-        select: {
-          id: true,
-        },
+      const existing = await prisma.webhookEvent.findUnique({
+        where: { shopifyWebhookId: webhookId },
+        select: { id: true },
       });
 
-      return {
-        eventId: existing.id,
-        isNew: false,
-      };
+      if (existing) {
+        logger.info(
+          { shop, topic, webhookId, eventId: existing.id },
+          "webhook.repository.duplicate",
+        );
+        return { isNew: false, eventId: existing.id };
+      }
     }
 
     throw error;
   }
-}
-
-export async function markWebhookEventProcessing(
-  webhookEventId: string,
-): Promise<void> {
-  await prisma.webhookEvent.update({
-    where: {
-      id: webhookEventId,
-    },
-    data: {
-      status: WEBHOOK_EVENT_STATUS.processing,
-      attempts: {
-        increment: 1,
-      },
-      errorMessage: null,
-    },
-  });
-}
-
-export async function markWebhookEventProcessed(
-  webhookEventId: string,
-): Promise<void> {
-  await prisma.webhookEvent.update({
-    where: {
-      id: webhookEventId,
-    },
-    data: {
-      status: WEBHOOK_EVENT_STATUS.processed,
-      processedAt: new Date(),
-      errorMessage: null,
-    },
-  });
-}
-
-export async function markWebhookEventFailed(
-  webhookEventId: string,
-  errorMessage: string,
-): Promise<void> {
-  await prisma.webhookEvent.update({
-    where: {
-      id: webhookEventId,
-    },
-    data: {
-      status: WEBHOOK_EVENT_STATUS.failed,
-      errorMessage,
-    },
-  });
-}
-
-export async function getWebhookEventById(webhookEventId: string) {
-  return prisma.webhookEvent.findUniqueOrThrow({
-    where: {
-      id: webhookEventId,
-    },
-  });
-}
-
-export async function markShopUninstalled(shopDomain: string): Promise<void> {
-  await prisma.shop.updateMany({
-    where: {
-      shopDomain, // [注意] 确保这里字段名与 schema 一致
-    },
-    data: {
-      uninstalledAt: new Date(),
-    },
-  });
 }

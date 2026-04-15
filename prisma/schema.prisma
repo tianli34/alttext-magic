@@ -1,7 +1,3 @@
-// ============================================================
-// AltText Magic - Phase 1 Prisma Schema
-// ============================================================
-
 generator client {
   provider      = "prisma-client-js"
   binaryTargets = ["native", "windows"]

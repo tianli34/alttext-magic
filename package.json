@@ -24,7 +24,13 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "shopify": "shopify",
-    "generate:encryption-key": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
+    "generate:encryption-key": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    "models": "tsx E:/typescript-prisma-query-tool/src/cli.ts models --list",
+    "model": "tsx E:/typescript-prisma-query-tool/src/cli.ts model",
+    "enum": "tsx E:/typescript-prisma-query-tool/src/cli.ts enum",
+    "context": "tsx E:/typescript-prisma-query-tool/src/cli.ts context",
+    "field": "tsx E:/typescript-prisma-query-tool/src/cli.ts field",
+    "search": "tsx E:/typescript-prisma-query-tool/src/cli.ts search"
   },
   "type": "module",
   "engines": {

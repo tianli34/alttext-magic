@@ -16,9 +16,7 @@ cd 'E:\alttext-magic\docs\Specs'
 tree /f > tree.txt
 tree > tree.txt
 
-
-
-
+treer -e tree.md -i "/^node_modules|^.git|^dist/"
 
 
 cd E:\alttext-magic\docs\tool
@@ -31,8 +29,4 @@ python md_split.py E:\alttext-magic\docs\Specs.md J:\
 
 
 
-
-
-
-
-
+node -e 'const cmd = `treee -L 2 -I "node_modules|.vscode|.git|提示词|docs|.cursor|.ignored_node_modules|.react-router|.gemini"`;require("child_process").execSync(cmd, { stdio: ["ignore", require("fs").openSync("tree.md", "w"), "inherit"] })'

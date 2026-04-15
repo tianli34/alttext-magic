@@ -1,10 +1,16 @@
 /**
  * File: server/modules/shop/shop.service.ts
- * Purpose: Persist the canonical shop installation record and encrypted
- * offline access token after Shopify authentication completes.
+ * Purpose: Persist the canonical shop installation record, encrypted
+ * offline access token, and idempotently bootstrap install-time credit
+ * buckets within the same database transaction after Shopify
+ * authentication completes.
  */
 import { randomUUID } from "node:crypto";
-import { Prisma } from "@prisma/client";
+import {
+  CreditBucketStatus,
+  CreditBucketType,
+  Prisma,
+} from "@prisma/client";
 import prisma from "../../db/prisma.server";
 import { encryptToken } from "../../crypto/token-encryption";
 import { createLogger } from "../../utils/logger";
@@ -15,7 +21,11 @@ import type {
 } from "./shop.types";
 
 const logger = createLogger({ module: "shop-service" });
+
 const DEFAULT_PLAN = "FREE";
+const INSTALL_WELCOME_CYCLE_KEY = "WELCOME:INSTALL";
+const INSTALL_WELCOME_GRANT_AMOUNT = 50;
+const FREE_MONTHLY_INCLUDED_GRANT_AMOUNT = 25;
 
 function assertOfflineSession(session: ShopifySessionSnapshot): string {
   if (session.isOnline) {
@@ -27,6 +37,51 @@ function assertOfflineSession(session: ShopifySessionSnapshot): string {
   }
 
   return session.accessToken;
+}
+
+function buildFreeMonthlyCycleKey(date: Date): string {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+
+  return `FREE:${year}-${month}`;
+}
+
+function getNextUtcMonthStart(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
+}
+
+function buildInstallCreditBuckets(
+  shopId: string,
+  installedAt: Date,
+): Prisma.CreditBucketCreateManyInput[] {
+  return [
+    {
+      shopId,
+      bucketType: CreditBucketType.WELCOME,
+      status: CreditBucketStatus.ACTIVE,
+      cycleKey: INSTALL_WELCOME_CYCLE_KEY,
+      grantedAmount: INSTALL_WELCOME_GRANT_AMOUNT,
+      reservedAmount: 0,
+      consumedAmount: 0,
+      effectiveAt: installedAt,
+      expiresAt: null,
+      activatedAt: installedAt,
+      exhaustedAt: null,
+    },
+    {
+      shopId,
+      bucketType: CreditBucketType.FREE_MONTHLY_INCLUDED,
+      status: CreditBucketStatus.ACTIVE,
+      cycleKey: buildFreeMonthlyCycleKey(installedAt),
+      grantedAmount: FREE_MONTHLY_INCLUDED_GRANT_AMOUNT,
+      reservedAmount: 0,
+      consumedAmount: 0,
+      effectiveAt: installedAt,
+      expiresAt: getNextUtcMonthStart(installedAt),
+      activatedAt: installedAt,
+      exhaustedAt: null,
+    },
+  ];
 }
 
 export async function persistOfflineShopSession({
@@ -45,8 +100,8 @@ export async function persistOfflineShopSession({
   const installedAt = new Date();
   const serializedScanScopeFlags = JSON.stringify(DEFAULT_SCAN_SCOPE_FLAGS);
 
-  await prisma.$executeRaw(
-    Prisma.sql`
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
       INSERT INTO "shops" (
         "id",
         "shop_domain",
@@ -83,11 +138,25 @@ export async function persistOfflineShopSession({
         "scopes" = EXCLUDED."scopes",
         "uninstalled_at" = NULL,
         "updated_at" = EXCLUDED."updated_at"
-    `,
-  );
+    `;
 
-  logger.info(
-    { shop: session.shop, sessionId: session.id },
-    "Persisted shop installation and encrypted offline token",
-  );
+    const shop = await tx.shop.findUniqueOrThrow({
+      where: { shopDomain: session.shop },
+      select: { id: true },
+    });
+
+    const result = await tx.creditBucket.createMany({
+      data: buildInstallCreditBuckets(shop.id, installedAt),
+      skipDuplicates: true,
+    });
+
+    logger.info(
+      {
+        shop: session.shop,
+        sessionId: session.id,
+        createdBucketCount: result.count,
+      },
+      "Persisted shop installation and bootstrapped install credit buckets",
+    );
+  });
 }
