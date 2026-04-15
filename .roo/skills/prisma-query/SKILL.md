@@ -14,7 +14,7 @@ model <Name...> 查看单个或多个 Model 定义
 enum <Name...> 查看单个或多个 Enum 定义
 context <Name> [--depth <n>] 查看 Model 及其关联上下文（默认 depth=1）
 field <Model> <Field> 查看字段详细信息
-field --attr <@attribute> 查找所有含指定属性的字段
+field --attr '<@attribute>' 查找所有含指定属性的字段
 search <keyword> 全局搜索 Model/字段/类型
 models 列出所有 Model
 
@@ -25,7 +25,7 @@ pq enum Role
 pq context Post
 pq context Post --depth 2
 pq field User email
-pq field --attr @unique
-pq field --attr @relation
+pq field --attr '@unique'
+pq field --attr '@relation'
 pq search userId
 pq models
