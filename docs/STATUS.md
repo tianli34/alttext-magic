@@ -12,6 +12,7 @@
 - 完成 scan_notice_ack 基础服务：`ackNotice` upsert 确认、`getNoticeStatus` 版本检查、纯函数 `checkNeedsAck`
 - 完成 scope 服务：`getScopeSettings`、`updateScanScopeFlags`、`computeEffectiveReadScopeFlags`，默认四类全开，非法 flag zod 报错
 - 完成 `shop_operation_lock` 服务：`acquireLock` / `releaseLock` / `heartbeatLock` / `cleanupExpiredLocks` 与集成测试
+- 完成 Bootstrap 聚合服务 `getBootstrapData` 及 `GET /api/bootstrap` 路由：聚合返回计划占位、额度占位、notice 状态、scope 三件套（scan / lastPublished / effectiveRead）、最近扫描状态
 
 ## In Progress-本地开发
 - Phase 2：数据模型与核心服务层

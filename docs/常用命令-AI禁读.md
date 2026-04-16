@@ -8,7 +8,7 @@ Windows PowerShell
 
 
 git add .
-git commit -m "Task P2-06 done"
+git commit -m "Task P2-07 done"
 git push
 
 
