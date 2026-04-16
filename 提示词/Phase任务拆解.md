@@ -4,7 +4,7 @@
 
 
 【任务】
-将Phase 2拆解为适合Codex执行的任务
+将 Phase 3 拆解为适合 Agent 执行的任务
 
 
 【背景】
@@ -32,58 +32,74 @@
 
 | 阶段 | 名称 | 核心产出 |
 |:----:|:-----|:---------|
-| 1 | 基础设施与 Shopify App 骨架 | **本地可运行**的空壳 Embedded App |
 | 2 | 数据模型与核心服务层 | 完整 Schema 迁移 + Scope/Mutex/Notice 服务 |
 | 3 | 全量扫描管线 | Bulk 提交 → 流式解析 → Staging → Derive → 原子发布 |
-……
+| 4 | 仪表盘、候选列表与装饰性标记 | Dashboard 分组统计 + 候选展示投影 + 装饰性标记 |
 
 ---
 
-
-……
-
-## Phase 2：数据模型与核心服务层
+### Phase 3：全量扫描管线
 
 **阶段目标**  
-完成 MVP 完整数据模型的 Prisma Schema 定义与迁移，并交付三个基础服务模块：**扫描说明确认（Notice）**、**Scope 管理**、**Shop 级互斥锁**。此阶段结束后，所有表结构就绪，`GET /api/bootstrap` 可返回正确的初始状态。
+实现完整的 Catalog Scan 管线：从用户首次确认说明并点击“开始扫描”，到 Bulk 提交、流式下载与解析、Staging 落库、Derive 到待发布结果、原子发布到已发布表。此阶段结束后，扫描完成可产生正确的 `alt_target` / `image_usage` / `alt_candidate` / `candidate_group_projection` 数据。
 
 **功能范围**
 
 | # | 功能项 | 对应架构 |
 |---|--------|----------|
-| 2.1 | 完整 Prisma Schema 定义（§5 全部 26 张表）并执行迁移 | §5.1–5.26 |
-| 2.2 | 唯一约束与索引：`alt_target(shop_id, alt_plane, write_target_id, locale)`、`alt_candidate(alt_target_id)`、`candidate_group_projection(shop_id, group_type, alt_candidate_id)`、`credit_bucket(shop_id, bucket_type, cycle_key)` 等 | §5 各表约束 |
-| 2.3 | `scan_notice_ack` 服务：创建确认记录、版本检查 | §4.2.1 |
-| 2.4 | `shops.scan_scope_flags` 管理服务：读取 / 更新 / 计算 `effective_read_scope_flags` | §4.2.2 |
-| 2.5 | `POST /api/settings/scope` API | §4.2.3 |
-| 2.6 | `shop_operation_lock` 服务：获取锁 / 释放锁 / heartbeat / 超时检测 | §4.2.4–4.2.5 |
-| 2.7 | `GET /api/bootstrap` API（返回计划、额度占位、notice 状态、scope 状态、最近扫描状态） | §6.1 |
-| 2.8 | 安装时初始化逻辑完善：创建安装欢迎额度 bucket（50 张）+ 当月 Free 月配额 bucket（25 张） | §4.1 步骤 3 |
+| 3.1 | 首次扫描说明页前端（Polaris 组件：范围说明、用途、留存期限、AI 边界、scope 勾选） | §4.2.1 |
+| 3.2 | `POST /api/scan/start`：写 `scan_notice_ack` + 更新 `scan_scope_flags` + 获取 SCAN 锁 + 创建 `scan_job` + 按 scope 创建 `scan_task` | §6.1 / §4.3.3–4.3.4 |
+| 3.3 | 4 类 Bulk GraphQL 查询定义与真实样本验证 | §4.3.5 |
+| 3.4 | `scan_start` BullMQ Job：逐个 task 提交 `bulkOperationRunQuery`，创建 `scan_task_attempt` | §4.3.4 / §4.3.6 |
+| 3.5 | `BULK_OPERATIONS_FINISH` Webhook handler：定位 `scan_task_attempt`，更新 `bulk_result_url`，投递 `parse_bulk_to_staging` Job | §4.3.6 |
+| 3.6 | `parse_bulk_to_staging` Job：流式下载 NDJSON + 流式解析 + `__parentId` 关联 + batch upsert staging | §4.3.6 |
+| 3.7 | Staging 表数据写入：`stg_product` / `stg_media_image_product`（含 `position_index`）/ `stg_media_image_file` / `stg_collection` / `stg_article` | §5.7 |
+| 3.8 | Bulk URL 过期恢复：下载失败时标记 attempt FAILED → 创建新 attempt → 重新提交 bulk（`max_parse_attempts` 限制） | §4.3.6 |
+| 3.9 | `derive_scan_attempt_to_result` Job：从成功 attempt 的 staging 写入 `scan_result_target` / `scan_result_usage`（含去重：同一 `MediaImage` 只生成 1 条 target） | §4.3.6 Derive 规则 |
+| 3.10 | `publish_scan_result` Job：原子发布到 `alt_target` / `image_usage` / `alt_candidate` / `candidate_group_projection` | §4.3.7 |
+| 3.11 | `PARTIAL_SUCCESS` 处理：仅成功资源类型替换切片，失败类型保留旧数据 | §4.3.7 切片发布规则 |
+| 3.12 | `FILE_ALT` target 存在性判定：基于 `image_usage` PRESENT 集合重算 | §4.3.7 |
+| 3.13 | `image_usage` 全量扫描 sweep：成功 task 对应的 `usage_type` 做缺席标记 `NOT_FOUND` | §4.3.8 |
+| 3.14 | Candidate 发布收敛规则：根据 target 状态 + decorative_mark + draft 状态派生 candidate status | §4.3.7 Candidate 发布收敛 |
+| 3.15 | Group 展示投影重建：按 §4.3.7 规则为 FILE_ALT / COLLECTION / ARTICLE 生成投影 | §4.3.7 Group 展示投影重建 |
+| 3.16 | `shops.last_published_scope_flags` / `last_published_at` / `last_published_scan_job_id` 更新 | §4.3.7 发布完成 |
+| 3.17 | `GET /api/scan/status` API：返回 task 进度、attempt 状态、publish 状态 | §6.1 |
+| 3.18 | SSE 进度推送（`GET /api/sse?batchId=...`）：扫描阶段进度 | §6.1 |
+| 3.19 | 前端扫描进度页：骨架屏 / 进度动画 / “正在扫描您的店铺…” | §3 产品意图书 |
 
 **依赖关系**
-- 前置：Phase 1（App 骨架、`shops` 表基础字段、Prisma 连接）
+- 前置：Phase 2（全部表结构、Notice 服务、Scope 服务、Mutex 服务）
+- 外部：Shopify Bulk Operations API 可用、真实测试店铺有足够样本数据
 
 **技术方案**
-- 一次性迁移全部表结构，避免后续频繁 migration；字段级注释标注对应架构文档节号。
-- 本地开发阶段使用本地 Docker PostgreSQL 执行迁移：
-  - 开发期：`npx prisma migrate dev`
-  - 预发布验证：在空库上执行 `npx prisma migrate deploy`
-- `scan_scope_flags` 与 `last_published_scope_flags` 使用 Prisma `Json` 类型，值为 `string[]`（如 `["PRODUCT_MEDIA","FILES","COLLECTION_IMAGE","ARTICLE_IMAGE"]`）。
-- `effective_read_scope_flags` 为计算属性，不持久化，在服务层 / API 层实时求交集。
-- `shop_operation_lock` 使用 `unique(shop_id)` + 事务内 `SELECT ... FOR UPDATE` 实现悲观锁；`expires_at` 默认 30 分钟，worker heartbeat 每 5 分钟刷新。
-- `credit_bucket` 初始化在 OAuth 安装回调中同步执行，事务内完成 shops 创建 + bucket 创建。
-- 为保证未来 Railway 兼容：
-  - 本地生成的 migration 文件必须可在 CI / Railway 上通过 `prisma migrate deploy` 重放
-  - 不依赖本地手工改库
+- **运行环境**：
+  - PostgreSQL 与 Redis 继续使用本地 `docker-compose` 容器
+  - `web` 与 `worker` 在宿主机运行
+  - Shopify Bulk 完成通知通过本地 tunnel 回调到宿主机 `web`
+- **Bulk 提交**：每个 `scan_task` 独立提交一个 `bulkOperationRunQuery`；Shopify 同一 App 同一 Shop 同时只能有 1 个 running bulk，因此 4 个 task 需串行提交（前一个完成后再提交下一个），或利用 BullMQ 的 delayed job 排队。
+- **流式解析**：采用 `fetch → response.body (ReadableStream) → ndjson-parse transform → batch upsert` 管道，禁止整文件读入内存；batch upsert 每 500 行 flush 一次。
+- **`__parentId` 关联**：产品媒体的 NDJSON 中，`MediaImage` 行通过 `__parentId` 关联其父 `Product` 行。解析器需维护一个 `parentId → Product` 的内存 Map（按 product 维度，不会超出内存）。
+- **`position_index`**：优先读取 Shopify 返回的 position 字段；若不可用，解析器为同一 product 下的 `MediaImage` 按出现顺序赋值 `0, 1, 2, ...`。
+- **去重**：derive 阶段对 `scan_result_target` 使用 `ON CONFLICT (shop_id, scan_job_id, resource_type, alt_plane, write_target_id, locale) DO UPDATE` 实现 upsert；同一 `MediaImage` 来自 PRODUCT_MEDIA 和 FILES 两个 task 时合并为一条 `FILE_ALT` target。
+- **原子发布**：publish job 在单个 Prisma `$transaction` 中完成所有 upsert + sweep + candidate 收敛 + projection 重建 + shops 字段更新；对于大数据量店铺，可按资源类型切片事务（每个切片独立事务），但需保证同一切片内原子。
+- **SSE**：worker 将扫描进度写入 Redis（`scan:progress:{batchId}`），web 端通过 SSE 轮询 Redis 推送给前端。
+- **本地调试建议**：
+  - 将 4 类脱敏 NDJSON 固化到 `fixtures/` 目录，支持离线回放
+  - worker 日志输出 batch/task/attempt 粒度字段，方便在本地终端排查
+  - 在本地对“旧结果可读、新结果待发布”的一致性进行人工验证
 
 **验收标准**
-1. ✅ 在本地 Docker PostgreSQL 上执行 `npx prisma migrate dev` 无错误，26 张表全部创建成功；同一批 migration 在空库上执行 `npx prisma migrate deploy` 也无错误
-2. ✅ 安装新店铺后，`credit_bucket` 中存在 `WELCOME(50)` + `FREE_MONTHLY_INCLUDED(25)` 两条记录
-3. ✅ `GET /api/bootstrap` 对全新店铺返回 `needsNoticeAck: true`，scope 为默认四类
-4. ✅ `POST /api/settings/scope` 只更新 `scan_scope_flags`，不修改 `last_published_scope_flags`
-5. ✅ 互斥锁测试：acquire → 再次 acquire 返回 conflict → release → 可再次 acquire
-6. ✅ 锁超时 30 分钟后，cleanup 可回收
-
-……
+1. ✅ 首次打开 App → 展示说明页 → 确认后 → 扫描开始 → 进度可见 → 完成后 `alt_target` / `image_usage` / `alt_candidate` / `candidate_group_projection` 数据正确
+2. ✅ 4 类 Bulk 样本脱敏固化，`__parentId` 关联正确，产品媒体 `position_index` 连续
+3. ✅ 同一 `MediaImage` 在产品媒体与 Files 中仅生成 1 条 `alt_target(FILE_ALT)`，`image_usage` 有 2 条（PRODUCT + FILE）
+4. ✅ 模拟 Bulk URL 403：旧 attempt FAILED → 新 attempt 创建 → 重新 Bulk → 最终成功
+5. ✅ 达到 `max_parse_attempts`：task FAILED → scan_job 进入 PARTIAL_SUCCESS 或 FAILED
+6. ✅ PARTIAL_SUCCESS：仅成功切片 sweep，失败切片保留旧数据
+7. ✅ 扫描进行中，前端始终读取旧已发布结果（或空状态），不出现新旧混杂
+8. ✅ 扫描完成后，`shops.last_published_scope_flags` / `last_published_at` 正确更新
+9. ✅ SCAN 锁期间，`POST /api/generation/start` 返回 409
+10. ✅ 重新扫描按钮可正常触发新一轮全量扫描
 
 ---
+
+
