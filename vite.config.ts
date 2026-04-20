@@ -37,7 +37,7 @@ export default defineConfig({
     cors: {
       preflightContinue: true,
     },
-    port: Number(process.env.PORT || 3000),
+    port: Number(process.env.PORT || 3222),
     hmr: hmrConfig,
     fs: {
       allow: ["app", "node_modules"],
