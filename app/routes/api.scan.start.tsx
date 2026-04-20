@@ -1,14 +1,16 @@
 /**
  * File: app/routes/api.scan.start.tsx
- * Purpose: POST /api/scan/start —— 首次扫描启动接口。
+ * Purpose: POST /api/scan/start —— 扫描启动接口（首次扫描 + 重新扫描）。
  *          接收 scopeFlags + noticeVersion，完成：
  *          1. notice 确认写入（幂等）
  *          2. scope flags 更新
  *          3. scan lock 获取
- *          4. scan_job 创建 + BullMQ 入队
+ *          4. scan_job + scan_task 创建（事务）
+ *          5. Redis 进度键初始化
+ *          6. BullMQ 入队
  *
  * 请求体: { scopeFlags: ScopeFlagState, noticeVersion: string }
- * 响应体: { scanJobId: string, status: string }
+ * 响应体: { scanJobId: string, batchId: string, status: string }
  */
 import type { ActionFunctionArgs } from "react-router";
 import { z, ZodError } from "zod";
@@ -17,30 +19,18 @@ import prisma from "../db.server";
 import { ackNotice } from "../../server/modules/notice/scan-notice-ack.service";
 import { updateScanScopeFlags } from "../../server/modules/shop/scope.service";
 import { acquireLock, releaseLock } from "../../server/modules/lock/operation-lock.service";
+import { createScanJobWithTasks } from "../../server/modules/scan/catalog/scan-job.service";
+import { scopeFlagsToResourceTypes } from "../../server/modules/scan/scan.constants";
+import { initScanProgress } from "../../server/sse/progress-publisher";
 import { createLogger } from "../../server/utils/logger";
 import {
   scopeFlagStateSchema,
   listEnabledScopeFlags,
   type ScopeFlagState,
 } from "../lib/scope-utils";
-import { Queue } from "bullmq";
-import { queueConnection } from "../../server/queues/connection";
+import { enqueueScanStart } from "../../server/queues/scan-start.queue";
 
 const logger = createLogger({ module: "api.scan.start" });
-
-/** scan-start 队列名称 */
-const SCAN_START_QUEUE_NAME = "scan-start";
-
-/** scan-start 队列实例（惰性创建） */
-let scanStartQueue: Queue | null = null;
-function getScanStartQueue(): Queue {
-  if (!scanStartQueue) {
-    scanStartQueue = new Queue(SCAN_START_QUEUE_NAME, {
-      connection: queueConnection,
-    });
-  }
-  return scanStartQueue;
-}
 
 /** 请求体 schema：scopeFlags 各字段 + noticeVersion */
 const scanStartBodySchema = z.object({
@@ -111,20 +101,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  // 6. 尝试获取 scan 锁
-  const lockOwner = { batchId: `scan-${shop.id}-${Date.now()}` };
+  // 6. 将 ScopeFlag 转换为 ScanResourceType
+  const enabledResourceTypes = scopeFlagsToResourceTypes(enabledFlags);
+
+  // 7. 生成 lock owner（batchId 同时作为响应中的 batchId）
+  const batchId = `scan-${shop.id}-${Date.now()}`;
+  const lockOwner = { batchId };
+
+  // 8. 尝试获取 scan 锁
   const lockResult = await acquireLock(shop.id, "SCAN", lockOwner);
 
   if (!lockResult.acquired) {
     logger.warn({ shopId: shop.id }, "Scan lock conflict");
     return Response.json(
-      { error: "Another operation is running. Please try again later." },
+      { error: "Another scan is already running. Please try again later." },
       { status: 409 },
     );
   }
 
   try {
-    // 7. 写入 notice 确认（幂等）
+    // 9. 写入 notice 确认（幂等）
     await ackNotice({
       shopId: shop.id,
       noticeKey: "SCAN_NOTICE",
@@ -133,47 +129,46 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       actor: "SHOP_OWNER",
     });
 
-    // 8. 更新 scope flags
+    // 10. 更新 scope flags
     await updateScanScopeFlags(shop.id, scopeFlags);
 
-    // 9. 创建 scan_job（schema 要求 noticeVersion 字段）
-    const scanJob = await prisma.scanJob.create({
-      data: {
-        shopId: shop.id,
-        scopeFlags: JSON.parse(JSON.stringify(scopeFlags)) as Record<string, boolean>,
-        noticeVersion,
-        status: "RUNNING",
-        publishStatus: "PENDING",
-      },
-      select: { id: true, status: true },
+    // 11. 在事务内创建 scan_job + scan_task
+    const scanJobResult = await createScanJobWithTasks({
+      shopId: shop.id,
+      scopeFlags: scopeFlags as Record<string, boolean>,
+      noticeVersion,
+      enabledResourceTypes,
     });
 
-    // 10. 入队 BullMQ
-    await getScanStartQueue().add(
-      "scan-start",
-      {
-        shopId: shop.id,
-        scanJobId: scanJob.id,
-        scopeFlags,
-      },
-      {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 5000 },
-      },
-    );
+    // 12. 初始化 Redis 进度键
+    await initScanProgress(scanJobResult.scanJobId, enabledResourceTypes.length);
+
+    // 13. 入队 BullMQ
+    await enqueueScanStart({
+      shopId: shop.id,
+      scanJobId: scanJobResult.scanJobId,
+      scopeFlags,
+    });
 
     logger.info(
-      { shopId: shop.id, scanJobId: scanJob.id, enabledFlags },
-      "Scan job created and queued",
+      {
+        shopId: shop.id,
+        scanJobId: scanJobResult.scanJobId,
+        batchId,
+        enabledFlags,
+        taskCount: scanJobResult.tasks.length,
+      },
+      "Scan job created, progress initialized, and queued",
     );
 
     return Response.json({
-      scanJobId: scanJob.id,
-      status: scanJob.status,
+      scanJobId: scanJobResult.scanJobId,
+      batchId,
+      status: scanJobResult.scanJobStatus,
     });
   } catch (err) {
     // 创建失败时释放锁
-    logger.error({ shopId: shop.id, err }, "Failed to create scan job");
+    logger.error({ shopId: shop.id, err }, "Failed to start scan");
 
     try {
       await releaseLock(shop.id, lockOwner);

@@ -21,6 +21,13 @@
   - `app/components/onboarding/ScopeSelector.tsx` — 4类图片scope复选框 + 全选/取消全选 + 空选校验
   - `app/routes/app.onboarding.tsx` — 说明页路由（loader鉴权+bootstrap判断; 表单校验+提交scan/start+跳转）
   - `app/routes/api.scan.start.tsx` — POST /api/scan/start（鉴权→zod校验→获取锁→ackNotice→updateScope→createJob→入队BullMQ）
+- P3-02 完成 `POST /api/scan/start` 核心扫描启动事务：
+  - `server/modules/scan/scan.types.ts` — 扫描模块共享类型（CreateScanJobParams/Result、ScanProgressData、ScanStartResponse）
+  - `server/modules/scan/scan.constants.ts` — Redis进度键前缀、ScopeFlag→ScanResourceType映射
+  - `server/modules/scan/catalog/scan-job.service.ts` — `createScanJobWithTasks` 事务函数（原子创建 scan_job + 按 scope 创建 scan_task）
+  - `server/sse/progress-publisher.ts` — Redis进度发布器（`initScanProgress`/`incrementScanProgress`/`getScanProgress`）
+  - `app/routes/api.scan.start.tsx` — 完善流程：鉴权→zod校验→获取锁(409冲突)→ackNotice→updateScope→事务创建Job+Tasks→Redis初始化→BullMQ入队→返回scanJobId/batchId/status
+  - `tests/api.scan.start.test.ts` — 10条路由层测试（成功/部分scope/非法body/空scope/405/409锁冲突/500+锁释放/404/类型错误）
 
 ## In Progress-本地开发
 - Phase 3：首次扫描流程
