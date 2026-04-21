@@ -16,22 +16,11 @@
 - 完成 `POST /api/settings/scope` 路由：校验登录态/shop上下文、body flags 校验、调用 `updateScanScopeFlags`、返回 ScopeSettings
 
 ### Phase 3
-- P3-01 完成首次扫描说明页前端：
-  - `app/components/onboarding/ScanNotice.tsx` — 扫描范围/用途说明/留存期限/AI使用边界四块说明 + 确认勾选
-  - `app/components/onboarding/ScopeSelector.tsx` — 4类图片scope复选框 + 全选/取消全选 + 空选校验
-  - `app/routes/app.onboarding.tsx` — 说明页路由（loader鉴权+bootstrap判断; 表单校验+提交scan/start+跳转）
-  - `app/routes/api.scan.start.tsx` — POST /api/scan/start（鉴权→zod校验→获取锁→ackNotice→updateScope→createJob→入队BullMQ）
-- P3-02 完成 `POST /api/scan/start` 核心扫描启动事务：
-  - `server/modules/scan/scan.types.ts` — 扫描模块共享类型（CreateScanJobParams/Result、ScanProgressData、ScanStartResponse）
-  - `server/modules/scan/scan.constants.ts` — Redis进度键前缀、ScopeFlag→ScanResourceType映射
-  - `server/modules/scan/catalog/scan-job.service.ts` — `createScanJobWithTasks` 事务函数（原子创建 scan_job + 按 scope 创建 scan_task）
-  - `server/sse/progress-publisher.ts` — Redis进度发布器（`initScanProgress`/`incrementScanProgress`/`getScanProgress`）
-  - `app/routes/api.scan.start.tsx` — 完善流程：鉴权→zod校验→获取锁(409冲突)→ackNotice→updateScope→事务创建Job+Tasks→Redis初始化→BullMQ入队→返回scanJobId/batchId/status
-  - `tests/api.scan.start.test.ts` — 10条路由层测试（成功/部分scope/非法body/空scope/405/409锁冲突/500+锁释放/404/类型错误）
-- P3-03 完成 `GET /api/scan/status` 扫描状态查询接口：
-  - `server/modules/scan/scan.types.ts` — 新增状态响应类型（ScanStatusJob/ScanStatusTask/ScanStatusAttempt/ScanProgressSummary/ScanStatusResponse）
-  - `server/modules/scan/catalog/scan-job.service.ts` — 新增 `getScanStatus` 服务函数（并行查 scan_job + tasks + attempts + Redis 进度）
-  - `app/routes/api.scan.status.tsx` — GET /api/scan/status（鉴权→shopId查找→参数校验→getScanStatus→返回完整状态）
+- 完成首次扫描说明页前端（`ScanNotice.tsx` 四块说明+确认勾选、`ScopeSelector.tsx` 四类scope复选框）及 `app.onboarding.tsx` 路由（鉴权、表单校验、提交跳转）
+- 完成 `POST /api/scan/start`：鉴权 → zod校验 → 获取锁（409冲突）→ ackNotice + updateScope → 事务创建 scan_job/scan_task → Redis初始化进度 → BullMQ入队；含10条路由层测试
+- 完成 `GET /api/scan/status`：鉴权 → 并行查 scan_job/tasks/attempts + Redis进度 → 返回完整状态
+- 4 类 Bulk GraphQL 查询定义与真实样本验证
+- 完成 `scan_start` Worker 并行 Bulk 提交：新增 `BulkSlotManager` / `BulkSubmitService`、`trySubmitNextBatch(scanJobId)`、`BULK_OPERATIONS_FINISH` webhook 补位提交与 attempt/bulk_operation_id 落库日志
 
 ## In Progress-本地开发
-- Phase 3：首次扫描流程
+- Phase 3：全量扫描管线

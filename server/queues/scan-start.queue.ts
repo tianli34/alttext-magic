@@ -37,6 +37,7 @@ export async function enqueueScanStart(data: ScanStartJobData): Promise<void> {
   const queue = getQueue();
 
   await queue.add("scan-start", data, {
+    jobId: data.scanJobId,
     attempts: 3,
     backoff: { type: "exponential", delay: 5_000 },
   });

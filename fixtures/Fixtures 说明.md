@@ -34,18 +34,12 @@ Shopify Bulk Operation 对嵌套连接（Connection）的处理规则：
 {
   "id": "gid://shopify/MediaImage/<id>",
   "image": { "url": "<string>", "altText": "<string|null>" },
-  "position": <number>,
   "__parentId": "gid://shopify/Product/<id>"   ← 指向父 Product 的 id
 }
 ```
 
 **重要**：`__parentId` 由 Shopify 自动注入，不在 GraphQL query 中声明。
 解析时必须通过 `__parentId` 将子行与父行关联，不能依赖行的物理顺序。
-
-示例（3 个产品，共 7 个 MediaImage 子行）：
-- `Product/100001` → `MediaImage/1001`（position 1）、`MediaImage/1002`（position 2）
-- `Product/100002` → `MediaImage/1003`、`1004`、`1005`
-- `Product/100003` → `MediaImage/1006`、`1007`
 
 ---
 

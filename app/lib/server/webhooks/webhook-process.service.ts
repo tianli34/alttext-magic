@@ -6,6 +6,7 @@
 import prisma from "../../../../server/db/prisma.server";
 import { createLogger } from "../../../../server/utils/logger";
 import type { WebhookEvent } from "@prisma/client";
+import { handleBulkOperationsFinishWebhook } from "../../../../server/modules/scan/catalog/scan-start.service";
 
 const logger = createLogger({ module: "webhook-process" });
 
@@ -88,6 +89,8 @@ export async function processWebhookEvent(webhookEventId: string): Promise<void>
  * TODO: 接入各业务模块（scan-continuous / gdpr / scope-update 等）
  */
 async function dispatchByTopic(event: WebhookEvent): Promise<void> {
+  const normalizedTopic = event.topic.toUpperCase().replace(/\//g, "_");
+
   logger.info(
     {
       webhookEventId: event.id,
@@ -96,6 +99,14 @@ async function dispatchByTopic(event: WebhookEvent): Promise<void> {
     },
     "webhook.process.dispatch",
   );
+
+  if (normalizedTopic === "BULK_OPERATIONS_FINISH") {
+    await handleBulkOperationsFinishWebhook({
+      shopDomain: event.shopDomain,
+      payload: event.payload,
+    });
+    return;
+  }
 
   // 后续按 topic 路由到具体业务:
   // - PRODUCTS_CREATE / PRODUCTS_UPDATE → continuous scan
