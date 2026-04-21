@@ -8,7 +8,7 @@ Windows PowerShell
 
 
 git add .
-git commit -m "Task P3-01 done"
+git commit -m "Task P3-02 done"
 git push
 
 
@@ -38,3 +38,11 @@ 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
 
 
 notepad $PROFILE
+
+
+
+# 2. 执行查询（4 次，每次一个类型）
+npx tsx --require tsconfig-paths/register scripts/run-bulk-query.ts PRODUCT_MEDIA
+npx tsx --require tsconfig-paths/register scripts/run-bulk-query.ts FILES
+npx tsx --require tsconfig-paths/register scripts/run-bulk-query.ts COLLECTIONS
+npx tsx --require tsconfig-paths/register scripts/run-bulk-query.ts ARTICLES

@@ -28,6 +28,10 @@
   - `server/sse/progress-publisher.ts` — Redis进度发布器（`initScanProgress`/`incrementScanProgress`/`getScanProgress`）
   - `app/routes/api.scan.start.tsx` — 完善流程：鉴权→zod校验→获取锁(409冲突)→ackNotice→updateScope→事务创建Job+Tasks→Redis初始化→BullMQ入队→返回scanJobId/batchId/status
   - `tests/api.scan.start.test.ts` — 10条路由层测试（成功/部分scope/非法body/空scope/405/409锁冲突/500+锁释放/404/类型错误）
+- P3-03 完成 `GET /api/scan/status` 扫描状态查询接口：
+  - `server/modules/scan/scan.types.ts` — 新增状态响应类型（ScanStatusJob/ScanStatusTask/ScanStatusAttempt/ScanProgressSummary/ScanStatusResponse）
+  - `server/modules/scan/catalog/scan-job.service.ts` — 新增 `getScanStatus` 服务函数（并行查 scan_job + tasks + attempts + Redis 进度）
+  - `app/routes/api.scan.status.tsx` — GET /api/scan/status（鉴权→shopId查找→参数校验→getScanStatus→返回完整状态）
 
 ## In Progress-本地开发
 - Phase 3：首次扫描流程

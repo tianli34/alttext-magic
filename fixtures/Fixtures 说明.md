@@ -101,5 +101,3 @@ Shopify Bulk Operation 对嵌套连接（Connection）的处理规则：
 1. **ID 格式**：保持 `gid://shopify/<Type>/<numeric_id>` 格式，解析器依赖此格式提取类型与数字 ID。
 2. **null 值**：`image` 为 null 的行必须保留，用于测试空值处理分支。
 ```
-
----

@@ -3,10 +3,9 @@
  * 直接用 fetch + access token 调用 Shopify Admin GraphQL API
  * 绕过 shopify-api 客户端封装，避免 401 问题
  */
-
+import { parseProductMediaNdjson } from "../server/modules/scan/catalog/parsers/product-media.parser";
 import * as dotenv from "dotenv";
 dotenv.config();
-
 import * as fs from "fs";
 import * as path from "path";
 import * as https from "https";
@@ -116,12 +115,12 @@ function downloadFile(url: string, destPath: string): Promise<void> {
         response.pipe(file);
         file.on("finish", () => file.close(() => resolve()));
         file.on("error", (e) => {
-          fs.unlink(destPath, () => {});
+          fs.unlink(destPath, () => { });
           reject(e);
         });
       })
       .on("error", (e) => {
-        fs.unlink(destPath, () => {});
+        fs.unlink(destPath, () => { });
         reject(e);
       });
   });
@@ -377,6 +376,62 @@ async function pollUntilComplete(
   }
 }
 
+
+
+async function verifyProductMedia(filePath: string): Promise<void> {
+  const products = await parseProductMediaNdjson(filePath);
+
+  let totalMedia = 0;
+  const seenMediaIds = new Set<string>();
+  let duplicateCount = 0;
+  let positionError = 0;
+
+  for (const product of products) {
+    log(`  📦 ${product.title} (${product.id})`);
+    log(`     media 数量: ${product.media.length}`);
+
+    for (const m of product.media) {
+      totalMedia++;
+
+      // 验证 position_index 连续且从 1 开始
+      const expectedPosition = product.media.indexOf(m) + 1;
+      if (m.position_index !== expectedPosition) {
+        logError(
+          `position_index 异常: ${m.id} 期望 ${expectedPosition}，实际 ${m.position_index}`
+        );
+        positionError++;
+      }
+
+      // 检测跨 product 的 MediaImage 共享
+      if (seenMediaIds.has(m.id)) {
+        duplicateCount++;
+        log(`  ⚠️  共享 MediaImage: ${m.id} 出现在多个 product`);
+      }
+      seenMediaIds.add(m.id);
+
+      log(
+        `     [${m.position_index}] ${m.id} alt="${m.alt ?? ""}" ` +
+        `${m.image?.url?.slice(0, 60) ?? "(无图)"}`
+      );
+    }
+  }
+
+  log(`\n  📊 汇总:`);
+  log(`     产品数: ${products.length}`);
+  log(`     媒体总数: ${totalMedia}`);
+  log(`     唯一 MediaImage: ${seenMediaIds.size}`);
+  log(`     共享 MediaImage 实例数: ${duplicateCount}`);
+  log(`     position_index 错误数: ${positionError}`);
+
+  if (positionError === 0 && duplicateCount === 0) {
+    log(`  ✅ 验证全部通过`);
+  } else {
+    logError(`  验证发现问题，请检查上方日志`);
+  }
+}
+
+
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // 主流程
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -437,7 +492,14 @@ async function main(): Promise<void> {
   log(`   文件: ${outputPath}`);
   log(`   行数: ${lineCount}，大小: ${fileSizeKB} KB`);
   log(`${"═".repeat(60)}`);
-  log(`\n下一步脱敏：node scripts/anonymize-fixture.js ${outputPath} ${outputPath}`);
+
+  // ── 解析验证（仅 PRODUCT_MEDIA，必须在下载完成后）────────────────────────
+  if (queryName === "PRODUCT_MEDIA") {
+    log(`\n🔍 验证 position_index 推导...`);
+    await verifyProductMedia(outputPath);
+  }
+
+  // log(`\n下一步脱敏：node scripts/anonymize-fixture.js ${outputPath} ${outputPath}`);
 }
 
 main().catch((error) => {
