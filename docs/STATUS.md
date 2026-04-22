@@ -19,8 +19,9 @@
 - 完成首次扫描说明页前端（`ScanNotice.tsx` 四块说明+确认勾选、`ScopeSelector.tsx` 四类scope复选框）及 `app.onboarding.tsx` 路由（鉴权、表单校验、提交跳转）
 - 完成 `POST /api/scan/start`：鉴权 → zod校验 → 获取锁（409冲突）→ ackNotice + updateScope → 事务创建 scan_job/scan_task → Redis初始化进度 → BullMQ入队；含10条路由层测试
 - 完成 `GET /api/scan/status`：鉴权 → 并行查 scan_job/tasks/attempts + Redis进度 → 返回完整状态
-- 4 类 Bulk GraphQL 查询定义与真实样本验证
+- 完成 4 类 Bulk GraphQL 查询定义与真实样本验证
 - 完成 `scan_start` Worker 并行 Bulk 提交：新增 `BulkSlotManager` / `BulkSubmitService`、`trySubmitNextBatch(scanJobId)`、`BULK_OPERATIONS_FINISH` webhook 补位提交与 attempt/bulk_operation_id 落库日志
+- 完成 `BULK_OPERATIONS_FINISH` 终态收敛与并发补位：新增 parse 入队、Shop 级 Redis 槽位锁、重复 webhook 幂等与并发测试
 
 ## In Progress-本地开发
 - Phase 3：全量扫描管线

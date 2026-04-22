@@ -146,16 +146,25 @@ export async function failAttemptSubmission(input: {
 
 export async function markAttemptFinishedFromWebhook(input: {
   bulkOperationId: string;
-  attemptStatus: "READY_TO_PARSE" | "FAILED";
-  taskStatus: "SUCCESS" | "FAILED";
+  bulkOperationStatus: "COMPLETED" | "FAILED" | "CANCELED";
   bulkResultUrl: string | null;
   finishedAt: Date;
+  errorCode: string | null;
   errorMessage: string | null;
-}): Promise<{ scanJobId: string; scanTaskId: string } | null> {
+}): Promise<{
+  scanJobId: string;
+  scanTaskId: string;
+  scanTaskAttemptId: string;
+  shopId: string;
+  alreadyTerminal: boolean;
+  shouldEnqueueParse: boolean;
+} | null> {
   const attempt = await prisma.scanTaskAttempt.findUnique({
     where: { bulkOperationId: input.bulkOperationId },
     select: {
       id: true,
+      shopId: true,
+      status: true,
       scanTaskId: true,
       scanTask: {
         select: {
@@ -173,14 +182,46 @@ export async function markAttemptFinishedFromWebhook(input: {
     return null;
   }
 
+  if (["READY_TO_PARSE", "SUCCESS", "FAILED"].includes(attempt.status)) {
+    logger.info(
+      {
+        bulkOperationId: input.bulkOperationId,
+        attemptId: attempt.id,
+        attemptStatus: attempt.status,
+      },
+      "scan-task-attempt.bulk-operation-already-terminal",
+    );
+
+    return {
+      scanJobId: attempt.scanTask.scanJobId,
+      scanTaskId: attempt.scanTaskId,
+      scanTaskAttemptId: attempt.id,
+      shopId: attempt.shopId,
+      alreadyTerminal: true,
+      shouldEnqueueParse: false,
+    };
+  }
+
+  const attemptStatus =
+    input.bulkOperationStatus === "COMPLETED" ? "READY_TO_PARSE" : "FAILED";
+  const taskStatus =
+    input.bulkOperationStatus === "COMPLETED" ? "SUCCESS" : "FAILED";
+  const composedErrorMessage = [
+    input.bulkOperationStatus === "CANCELED" ? "BULK_OPERATION_CANCELED" : null,
+    input.errorCode,
+    input.errorMessage,
+  ]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join(": ") || null;
+
   await prisma.$transaction(async (tx) => {
     await tx.scanTaskAttempt.update({
       where: { id: attempt.id },
       data: {
-        status: input.attemptStatus,
+        status: attemptStatus,
         bulkResultUrl: input.bulkResultUrl,
         resultUrlFetchedAt: input.bulkResultUrl ? new Date() : null,
-        lastParseError: input.errorMessage,
+        lastParseError: composedErrorMessage,
         finishedAt: input.finishedAt,
       },
     });
@@ -188,10 +229,10 @@ export async function markAttemptFinishedFromWebhook(input: {
     await tx.scanTask.update({
       where: { id: attempt.scanTaskId },
       data: {
-        status: input.taskStatus,
+        status: taskStatus,
         successfulAttemptId:
-          input.taskStatus === "SUCCESS" ? attempt.id : null,
-        error: input.errorMessage,
+          taskStatus === "SUCCESS" ? attempt.id : null,
+        error: composedErrorMessage,
         finishedAt: input.finishedAt,
       },
     });
@@ -200,5 +241,9 @@ export async function markAttemptFinishedFromWebhook(input: {
   return {
     scanJobId: attempt.scanTask.scanJobId,
     scanTaskId: attempt.scanTaskId,
+    scanTaskAttemptId: attempt.id,
+    shopId: attempt.shopId,
+    alreadyTerminal: false,
+    shouldEnqueueParse: input.bulkOperationStatus === "COMPLETED",
   };
 }

@@ -13,6 +13,7 @@ node_modules
 /prisma/dev.sqlite-journal
 dist-worker/
 database.sqlite
+# docs/AI禁止
 
 .env
 .env*
