@@ -25,6 +25,7 @@ import {
   flushProductMediaStaging,
   countStagingRows,
 } from "../../server/modules/scan/catalog/staging.service";
+import { enqueueDeriveScan } from "../../server/queues/derive-scan.queue";
 import type { ProductMediaFlushItem } from "../../server/modules/scan/catalog/parsers/staging.types";
 import type { ScanResourceType } from "@prisma/client";
 
@@ -61,7 +62,7 @@ export default function createParseBulkProcessor(
 export async function processParseBulkJob(
   data: ParseBulkJobData,
 ): Promise<void> {
-  const { shopId, scanTaskId, scanTaskAttemptId } = data;
+  const { shopId, scanJobId, scanTaskId, scanTaskAttemptId } = data;
 
   logger.info({ shopId, scanTaskId, scanTaskAttemptId }, "parse-bulk.start");
 
@@ -132,6 +133,19 @@ export async function processParseBulkJob(
     logger.info(
       { shopId, scanTaskId, scanTaskAttemptId, resourceType, parsedRows },
       "parse-bulk.success",
+    );
+
+    // 6. 投递 derive job（staging → 候选目标推导）
+    await enqueueDeriveScan({
+      shopId,
+      scanJobId,
+      scanTaskId,
+      scanTaskAttemptId,
+    });
+
+    logger.info(
+      { shopId, scanTaskId, scanTaskAttemptId },
+      "parse-bulk.derive-enqueued",
     );
   } catch (error) {
     const errorMessage =

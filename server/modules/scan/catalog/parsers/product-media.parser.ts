@@ -10,6 +10,7 @@
  *   子行（MediaImage，有 __parentId）:
  *     {"id":"gid://shopify/MediaImage/456",
  *      "image":{"url":"...","altText":"..."},
+ *      "position":1,
  *      "__parentId":"gid://shopify/Product/123"}
  *
  * 特殊行（Video 等非 MediaImage 的子行，仅有 __parentId，无 id/image）:
@@ -19,7 +20,7 @@
  * - Product 行 → 缓存到 ParentIdCache，同时产出 { kind: 'product' } flush 条目
  * - MediaImage 行 → 通过 __parentId 查找父 Product，产出 { kind: 'media' } flush 条目
  * - 其他行（Video 等）→ 跳过
- * - position_index 按同一 Product 下的 media 出现顺序递增（1-based）
+ * - position_index 优先使用 Shopify 返回的 position 字段，否则按同一 Product 下出现顺序递增（0-based）
  */
 import type { RowContext } from "./ndjson-stream-parser";
 import { ParentIdCache } from "./ndjson-stream-parser";
@@ -28,7 +29,7 @@ import type {
   StgProductRow,
   StgMediaImageProductRow,
 } from "./staging.types";
-import { isObject, isShopifyGid, parseShopifyImage } from "./staging.types";
+import { isObject, parseShopifyImage } from "./staging.types";
 
 /* ------------------------------------------------------------------ */
 /*  行类型判断                                                          */
@@ -73,11 +74,12 @@ export function createProductMediaRowHandler() {
   /** 缓存 Product 行的基本信息 */
   const productCache = new ParentIdCache<{ title: string; handle: string }>();
 
-  /** 每个 productId 的 position_index 计数器（1-based） */
+  /** 每个 productId 的 position_index 自动计数器（0-based），仅在 Shopify 未返回 position 时使用 */
   const positionCounters = new Map<string, number>();
 
-  function nextPosition(productId: string): number {
-    const curr = positionCounters.get(productId) ?? 0;
+  /** 获取下一个自动递增的 position（0-based） */
+  function nextAutoPosition(productId: string): number {
+    const curr = positionCounters.get(productId) ?? -1;
     const next = curr + 1;
     positionCounters.set(productId, next);
     return next;
@@ -120,13 +122,21 @@ export function createProductMediaRowHandler() {
         `MediaImage line ${ctx.lineNo}`,
       );
 
+      // position_index 优先使用 Shopify 返回的 position 字段（Int 类型）
+      // 若无则按同一 product 下出现顺序自动递增（0-based）
+      const shopifyPosition = obj.position;
+      const positionIndex =
+        typeof shopifyPosition === "number" && Number.isFinite(shopifyPosition)
+          ? shopifyPosition
+          : nextAutoPosition(parentProductId);
+
       // image 为 null 时仍产出记录（标记缺失的图片数据）
       const mediaRow: StgMediaImageProductRow = {
         mediaImageId,
         parentProductId,
         alt: image?.altText ?? null,
         url: image?.url ?? "",
-        positionIndex: nextPosition(parentProductId),
+        positionIndex,
       };
 
       return { kind: "media", data: mediaRow };
