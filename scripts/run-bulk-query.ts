@@ -3,7 +3,9 @@
  * 直接用 fetch + access token 调用 Shopify Admin GraphQL API
  * 绕过 shopify-api 客户端封装，避免 401 问题
  */
-import { parseProductMediaNdjson } from "../server/modules/scan/catalog/parsers/product-media.parser";
+import { createProductMediaRowHandler } from "../server/modules/scan/catalog/parsers/product-media.parser";
+import { streamNdjsonFromFile } from "../server/modules/scan/catalog/parsers/ndjson-stream-parser";
+import type { ProductMediaFlushItem } from "../server/modules/scan/catalog/parsers/staging.types";
 import * as dotenv from "dotenv";
 dotenv.config();
 import * as fs from "fs";
@@ -379,7 +381,45 @@ async function pollUntilComplete(
 
 
 async function verifyProductMedia(filePath: string): Promise<void> {
-  const products = await parseProductMediaNdjson(filePath);
+  // 用流式解析器 + 行处理器收集所有 flush 条目
+  const handler = createProductMediaRowHandler();
+  const allItems: ProductMediaFlushItem[] = [];
+
+  await streamNdjsonFromFile(filePath, {
+    handleRow: handler.handleRow,
+    onFlush: async (batch) => {
+      allItems.push(...(batch as ProductMediaFlushItem[]));
+    },
+  });
+
+  handler.dispose();
+
+  // 将 flush 条目重组为 { id, title, media: [...] } 结构
+  const productMap = new Map<string, { id: string; title: string; media: Array<{ id: string; position_index: number; alt: string | null; image: { url: string } | null }> }>();
+
+  for (const item of allItems) {
+    if (item.kind === "product") {
+      const d = item.data;
+      if (!productMap.has(d.productId)) {
+        productMap.set(d.productId, { id: d.productId, title: d.title, media: [] });
+      }
+    } else if (item.kind === "media") {
+      const d = item.data;
+      let product = productMap.get(d.parentProductId);
+      if (!product) {
+        product = { id: d.parentProductId, title: "(未知)", media: [] };
+        productMap.set(d.parentProductId, product);
+      }
+      product.media.push({
+        id: d.mediaImageId,
+        position_index: d.positionIndex,
+        alt: d.alt,
+        image: d.url ? { url: d.url } : null,
+      });
+    }
+  }
+
+  const products = Array.from(productMap.values());
 
   let totalMedia = 0;
   const seenMediaIds = new Set<string>();

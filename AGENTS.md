@@ -7,6 +7,7 @@
 - **按需查阅**: 仅限 `docs/Specs/*.md`
 - **任务结束**: 极简更新 `docs/STATUS.md`
 - **严格纪律**: 禁脑补; 须报告文档/代码冲突; 未经明确指示严禁读取其他文档(.md/.txt/.pdf等)
+- **使用技能**: 需要读取schema.prisma时使用prisma-query技能`.agents\skills\prisma-query\SKILL.md`
 
 **编码规范**:
 - 全中文注释/文档; 严格TS模式, 禁用 `any`

@@ -22,6 +22,7 @@
 - 完成 4 类 Bulk GraphQL 查询定义与真实样本验证
 - 完成 `scan_start` Worker 并行 Bulk 提交：新增 `BulkSlotManager` / `BulkSubmitService`、`trySubmitNextBatch(scanJobId)`、`BULK_OPERATIONS_FINISH` webhook 补位提交与 attempt/bulk_operation_id 落库日志
 - 完成 `BULK_OPERATIONS_FINISH` 终态收敛与并发补位：新增 parse 入队、Shop 级 Redis 槽位锁、重复 webhook 幂等与并发测试
+- 完成流式 NDJSON 解析基础设施：通用流式 parser、4 类资源 parser callback、`__parentId` 缓存映射、staging batch flush 组件、fixture 回放入口、parse-bulk worker 注册
 
 ## In Progress-本地开发
 - Phase 3：全量扫描管线

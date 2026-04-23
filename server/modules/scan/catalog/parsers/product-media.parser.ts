@@ -1,66 +1,43 @@
 /**
- * app/lib/bulk/parsers/parseProductMedia.ts
+ * File: server/modules/scan/catalog/parsers/product-media.parser.ts
+ * Purpose: Product-Media 资源类型的行处理器，支持 __parentId 父子行映射。
  *
- * 解析 bulk_product_media.ndjson
- * 按同一 product 下 media 出现顺序生成稳定的 position_index（1-based）
+ * NDJSON 行结构（父子行交错）:
  *
- * 实际 NDJSON 行结构（无 __typename 字段）：
- *
- *   Product 行（无 __parentId）：
+ *   父行（Product，无 __parentId）:
  *     {"id":"gid://shopify/Product/123","title":"xxx"}
  *
- *   MediaImage 行（有 __parentId）：
+ *   子行（MediaImage，有 __parentId）:
  *     {"id":"gid://shopify/MediaImage/456",
  *      "image":{"url":"...","altText":"..."},
  *      "__parentId":"gid://shopify/Product/123"}
+ *
+ * 特殊行（Video 等非 MediaImage 的子行，仅有 __parentId，无 id/image）:
+ *     {"__parentId":"gid://shopify/Product/xxx"}
+ *
+ * 处理策略:
+ * - Product 行 → 缓存到 ParentIdCache，同时产出 { kind: 'product' } flush 条目
+ * - MediaImage 行 → 通过 __parentId 查找父 Product，产出 { kind: 'media' } flush 条目
+ * - 其他行（Video 等）→ 跳过
+ * - position_index 按同一 Product 下的 media 出现顺序递增（1-based）
  */
+import type { RowContext } from "./ndjson-stream-parser";
+import { ParentIdCache } from "./ndjson-stream-parser";
+import type {
+  ProductMediaFlushItem,
+  StgProductRow,
+  StgMediaImageProductRow,
+} from "./staging.types";
+import { isObject, isShopifyGid, parseShopifyImage } from "./staging.types";
 
-import * as fs from "fs";
-import * as readline from "readline";
-
-// ─── 输入行类型 ────────────────────────────────────────────────────────────────
-
-interface RawProductRow {
-  id: string;          // "gid://shopify/Product/..."
-  title: string;
-  handle?: string;     // query 里有，但 bulk 实际可能不返回
-  __parentId?: never;  // Product 行无此字段
-}
-
-interface RawMediaImageRow {
-  id: string;          // "gid://shopify/MediaImage/..."
-  __parentId: string;  // "gid://shopify/Product/..."
-  image: {
-    url: string;
-    altText: string | null;
-  } | null;
-}
+/* ------------------------------------------------------------------ */
+/*  行类型判断                                                          */
+/* ------------------------------------------------------------------ */
 
 type RawRow = Record<string, unknown>;
 
-// ─── 输出类型 ──────────────────────────────────────────────────────────────────
-
-export interface ParsedMediaImage {
-  id: string;
-  alt: string | null;
-  image: {
-    url: string;
-  } | null;
-  /** 在该 product 下的展示顺序，1-based，由出现顺序推导 */
-  position_index: number;
-}
-
-export interface ParsedProduct {
-  id: string;
-  title: string;
-  handle: string | null;
-  media: ParsedMediaImage[];
-}
-
-// ─── 类型守卫 ──────────────────────────────────────────────────────────────────
-
-/** Product 行：有 id、title，无 __parentId */
-function isProductRow(row: RawRow): row is RawProductRow & RawRow {
+/** Product 行：有 id 且包含 /Product/，无 __parentId */
+function isProductRow(row: RawRow): boolean {
   return (
     typeof row.id === "string" &&
     row.id.includes("/Product/") &&
@@ -69,8 +46,8 @@ function isProductRow(row: RawRow): row is RawProductRow & RawRow {
   );
 }
 
-/** MediaImage 行：有 id、__parentId，id 含 /MediaImage/ */
-function isMediaImageRow(row: RawRow): row is RawMediaImageRow & RawRow {
+/** MediaImage 行：有 id 且包含 /MediaImage/，有 __parentId */
+function isMediaImageRow(row: RawRow): boolean {
   return (
     typeof row.id === "string" &&
     row.id.includes("/MediaImage/") &&
@@ -78,85 +55,94 @@ function isMediaImageRow(row: RawRow): row is RawMediaImageRow & RawRow {
   );
 }
 
-// ─── 核心解析函数 ──────────────────────────────────────────────────────────────
+/* ------------------------------------------------------------------ */
+/*  createProductMediaRowHandler                                       */
+/* ------------------------------------------------------------------ */
 
-export async function parseProductMediaNdjson(
-  filePath: string
-): Promise<ParsedProduct[]> {
-  // insertion-order（ES2015+ 规范保证 Map 遍历顺序为插入顺序）
-  const productMap = new Map<string, Omit<ParsedProduct, "media">>();
+/**
+ * 创建 Product-Media 行处理器。
+ *
+ * 内部维护:
+ * - productCache: 缓存 Product 基本信息（title, handle），供 MediaImage 行查找
+ * - positionCounters: 每个 productId 的 position_index 计数器
+ *
+ * 返回值为 ProductMediaFlushItem 联合类型，
+ * onFlush 回调需按 kind 字段分发到 stg_product / stg_media_image_product 表。
+ */
+export function createProductMediaRowHandler() {
+  /** 缓存 Product 行的基本信息 */
+  const productCache = new ParentIdCache<{ title: string; handle: string }>();
 
-  // 每个 productId 对应的 media 列表（已带 position_index）
-  const mediaByProduct = new Map<string, ParsedMediaImage[]>();
+  /** 每个 productId 的 position_index 计数器（1-based） */
+  const positionCounters = new Map<string, number>();
 
-  // 每个 productId 一个计数器：用于生成 position_index
-  const positionByProductId = new Map<string, number>();
-  const nextPosition = (productId: string) => {
-    const curr = positionByProductId.get(productId) ?? 0;
+  function nextPosition(productId: string): number {
+    const curr = positionCounters.get(productId) ?? 0;
     const next = curr + 1;
-    positionByProductId.set(productId, next);
+    positionCounters.set(productId, next);
     return next;
-  };
+  }
 
-  const rl = readline.createInterface({
-    input: fs.createReadStream(filePath, { encoding: "utf8" }),
-    crlfDelay: Infinity,
-  });
+  /** @returns 产品缓存（供外部检查/排障） */
+  function getProductCache() {
+    return productCache;
+  }
 
-  for await (const line of rl) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+  /** 行处理函数 */
+  function handleProductMediaRow(
+    obj: unknown,
+    ctx: RowContext,
+  ): ProductMediaFlushItem | undefined {
+    if (!isObject(obj)) {
+      throw new Error(`Product-Media line ${ctx.lineNo}: must be an object`);
+    }
 
-    let row: RawRow;
-    try {
-      row = JSON.parse(trimmed) as RawRow;
-    } catch {
-      console.warn(
-        `[parseProductMedia] 跳过无效 JSON 行: ${trimmed.slice(0, 80)}`
+    // ── Product 父行 ──
+    if (isProductRow(obj)) {
+      const productId = obj.id as string;
+      const title = obj.title as string;
+      const handle =
+        typeof obj.handle === "string" ? obj.handle : "";
+
+      productCache.set(productId, { title, handle });
+
+      const productRow: StgProductRow = { productId, title, handle };
+      return { kind: "product", data: productRow };
+    }
+
+    // ── MediaImage 子行 ──
+    if (isMediaImageRow(obj)) {
+      const mediaImageId = obj.id as string;
+      const parentProductId = obj.__parentId as string;
+
+      const image = parseShopifyImage(
+        obj.image,
+        `MediaImage line ${ctx.lineNo}`,
       );
-      continue;
-    }
 
-    if (isProductRow(row)) {
-      productMap.set(row.id, {
-        id: row.id,
-        title: row.title,
-        handle: typeof row.handle === "string" ? row.handle : null,
-      });
-
-      // 初始化，保证无 media 的 product 也出现在结果里
-      if (!mediaByProduct.has(row.id)) mediaByProduct.set(row.id, []);
-      continue;
-    }
-
-    if (isMediaImageRow(row)) {
-      const productId = row.__parentId;
-
-      // 初始化该 product 的 media 列表（即使 product 行稍后才出现也没关系）
-      if (!mediaByProduct.has(productId)) mediaByProduct.set(productId, []);
-
-      const position_index = nextPosition(productId);
-
-      const parsed: ParsedMediaImage = {
-        id: row.id,
-        alt: row.image?.altText ?? null,
-        image: row.image ? { url: row.image.url } : null,
-        position_index,
+      // image 为 null 时仍产出记录（标记缺失的图片数据）
+      const mediaRow: StgMediaImageProductRow = {
+        mediaImageId,
+        parentProductId,
+        alt: image?.altText ?? null,
+        url: image?.url ?? "",
+        positionIndex: nextPosition(parentProductId),
       };
 
-      mediaByProduct.get(productId)!.push(parsed);
-      continue;
+      return { kind: "media", data: mediaRow };
     }
 
-    // 其他类型（Video、ExternalVideo 等）暂不处理
+    // ── 其他行（Video、仅 __parentId 的空行等）→ 跳过 ──
+    return undefined;
   }
 
-  // ── 组装结果：按 productMap 插入顺序输出 ───────────────────────────────────
-  const result: ParsedProduct[] = [];
-  for (const [productId, productBase] of productMap) {
-    const media = mediaByProduct.get(productId) ?? [];
-    result.push({ ...productBase, media });
-  }
-
-  return result;
+  return {
+    handleRow: handleProductMediaRow,
+    getProductCache,
+    /** 清除内部缓存，释放内存（流处理结束后调用） */
+    dispose() {
+      productCache.clear();
+      positionCounters.clear();
+    },
+  };
 }
