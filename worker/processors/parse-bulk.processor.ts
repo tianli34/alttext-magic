@@ -27,9 +27,140 @@ import {
 } from "../../server/modules/scan/catalog/staging.service";
 import { enqueueDeriveScan } from "../../server/queues/derive-scan.queue";
 import type { ProductMediaFlushItem } from "../../server/modules/scan/catalog/parsers/staging.types";
-import type { ScanResourceType } from "@prisma/client";
+import type { ScanResourceType, ScanTaskAttemptStatus } from "@prisma/client";
+import { bulkSubmitService, type BulkSubmitResult } from "../../server/modules/scan/catalog/bulk-submit.service";
+import {
+  finalizeScanJobIfTerminal as finalizeScanJobIfTerminalInDb,
+  markScanTaskFailed,
+  markScanTaskSucceeded,
+  resetScanTaskToPendingForRetry,
+} from "../../server/modules/scan/catalog/scan-task.service";
 
 const logger = createLogger({ module: "parse-bulk-processor" });
+
+type ParseFailureCategory =
+  | "BULK_URL_EXPIRED"
+  | "BULK_URL_NOT_FOUND"
+  | "BULK_DOWNLOAD_TIMEOUT"
+  | "BULK_DOWNLOAD_FETCH_FAILED"
+  | "PARSE_FATAL";
+
+interface ParseAttemptRecord {
+  id: string;
+  scanTaskId: string;
+  status: ScanTaskAttemptStatus;
+  bulkResultUrl: string | null;
+  attemptNo: number;
+  scanTask: {
+    resourceType: ScanResourceType;
+    maxParseAttempts: number;
+  };
+}
+
+interface ParseBulkProcessorDependencies {
+  findAttempt(scanTaskAttemptId: string): Promise<ParseAttemptRecord | null>;
+  markAttemptParsing(scanTaskAttemptId: string): Promise<void>;
+  parseByResourceType(
+    shopId: string,
+    scanTaskAttemptId: string,
+    resourceType: ScanResourceType,
+    bulkResultUrl: string,
+  ): Promise<void>;
+  countStagingRows(
+    scanTaskAttemptId: string,
+    resourceType: ScanResourceType,
+  ): Promise<number>;
+  markAttemptSuccess(input: {
+    scanTaskAttemptId: string;
+    parsedRows: number;
+    finishedAt: Date;
+  }): Promise<void>;
+  markAttemptFailed(input: {
+    scanTaskAttemptId: string;
+    errorMessage: string;
+    finishedAt: Date;
+  }): Promise<void>;
+  enqueueDeriveScan: typeof enqueueDeriveScan;
+  markScanTaskSucceeded: typeof markScanTaskSucceeded;
+  markScanTaskFailed: typeof markScanTaskFailed;
+  resetScanTaskToPendingForRetry: typeof resetScanTaskToPendingForRetry;
+  submitTask(scanTaskId: string): Promise<BulkSubmitResult>;
+  finalizeScanJobIfTerminal(scanJobId: string): Promise<void>;
+}
+
+const defaultDependencies: ParseBulkProcessorDependencies = {
+  async findAttempt(scanTaskAttemptId) {
+    return prisma.scanTaskAttempt.findUnique({
+      where: { id: scanTaskAttemptId },
+      select: {
+        id: true,
+        scanTaskId: true,
+        status: true,
+        bulkResultUrl: true,
+        attemptNo: true,
+        scanTask: {
+          select: {
+            resourceType: true,
+            maxParseAttempts: true,
+          },
+        },
+      },
+    });
+  },
+  async markAttemptParsing(scanTaskAttemptId) {
+    await prisma.scanTaskAttempt.update({
+      where: { id: scanTaskAttemptId },
+      data: { status: "PARSING" },
+    });
+  },
+  parseByResourceType,
+  countStagingRows,
+  async markAttemptSuccess(input) {
+    await prisma.scanTaskAttempt.update({
+      where: { id: input.scanTaskAttemptId },
+      data: {
+        status: "SUCCESS",
+        parsedRows: input.parsedRows,
+        finishedAt: input.finishedAt,
+        lastParseError: null,
+      },
+    });
+  },
+  async markAttemptFailed(input) {
+    await prisma.scanTaskAttempt.update({
+      where: { id: input.scanTaskAttemptId },
+      data: {
+        status: "FAILED",
+        lastParseError: input.errorMessage,
+        finishedAt: input.finishedAt,
+      },
+    });
+  },
+  enqueueDeriveScan,
+  markScanTaskSucceeded,
+  markScanTaskFailed,
+  resetScanTaskToPendingForRetry,
+  submitTask(scanTaskId) {
+    return bulkSubmitService.submitTask(scanTaskId);
+  },
+  async finalizeScanJobIfTerminal(scanJobId) {
+    await finalizeScanJobIfTerminalInDb(scanJobId);
+  },
+};
+
+const parseBulkProcessorDependencies: ParseBulkProcessorDependencies = {
+  ...defaultDependencies,
+};
+
+export function setParseBulkProcessorDependenciesForTests(
+  overrides: Partial<ParseBulkProcessorDependencies>,
+): void {
+  Object.assign(parseBulkProcessorDependencies, overrides);
+}
+
+export function resetParseBulkProcessorDependenciesForTests(): void {
+  Object.assign(parseBulkProcessorDependencies, defaultDependencies);
+}
 
 /* ------------------------------------------------------------------ */
 /*  Processor 工厂                                                     */
@@ -67,20 +198,7 @@ export async function processParseBulkJob(
   logger.info({ shopId, scanTaskId, scanTaskAttemptId }, "parse-bulk.start");
 
   // 1. 读取 attempt 信息，获取 bulkResultUrl 和 resourceType
-  const attempt = await prisma.scanTaskAttempt.findUnique({
-    where: { id: scanTaskAttemptId },
-    select: {
-      id: true,
-      scanTaskId: true,
-      status: true,
-      bulkResultUrl: true,
-      scanTask: {
-        select: {
-          resourceType: true,
-        },
-      },
-    },
-  });
+  const attempt = await parseBulkProcessorDependencies.findAttempt(scanTaskAttemptId);
 
   if (!attempt) {
     throw new Error(`ScanTaskAttempt not found: ${scanTaskAttemptId}`);
@@ -103,14 +221,11 @@ export async function processParseBulkJob(
   const resourceType = attempt.scanTask.resourceType as ScanResourceType;
 
   // 2. 标记 attempt 为 PARSING
-  await prisma.scanTaskAttempt.update({
-    where: { id: scanTaskAttemptId },
-    data: { status: "PARSING" },
-  });
+  await parseBulkProcessorDependencies.markAttemptParsing(scanTaskAttemptId);
 
   try {
     // 3. 根据资源类型选择 parser 并执行流式解析
-    await parseByResourceType(
+    await parseBulkProcessorDependencies.parseByResourceType(
       shopId,
       scanTaskAttemptId,
       resourceType,
@@ -118,16 +233,22 @@ export async function processParseBulkJob(
     );
 
     // 4. 统计已写入行数
-    const parsedRows = await countStagingRows(scanTaskAttemptId, resourceType);
+    const parsedRows = await parseBulkProcessorDependencies.countStagingRows(
+      scanTaskAttemptId,
+      resourceType,
+    );
+    const finishedAt = new Date();
 
     // 5. 标记 attempt 为 SUCCESS
-    await prisma.scanTaskAttempt.update({
-      where: { id: scanTaskAttemptId },
-      data: {
-        status: "SUCCESS",
-        parsedRows,
-        finishedAt: new Date(),
-      },
+    await parseBulkProcessorDependencies.markAttemptSuccess({
+      scanTaskAttemptId,
+      parsedRows,
+      finishedAt,
+    });
+    await parseBulkProcessorDependencies.markScanTaskSucceeded({
+      scanTaskId,
+      scanTaskAttemptId,
+      finishedAt,
     });
 
     logger.info(
@@ -147,33 +268,156 @@ export async function processParseBulkJob(
       { shopId, scanTaskId, scanTaskAttemptId },
       "parse-bulk.derive-enqueued",
     );
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
 
-    // 标记 attempt 为 FAILED
-    await prisma.scanTaskAttempt.update({
-      where: { id: scanTaskAttemptId },
-      data: {
-        status: "FAILED",
-        lastParseError: errorMessage,
-        finishedAt: new Date(),
-      },
+    await parseBulkProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+  } catch (error) {
+    const failure = classifyParseFailure(error);
+    const finishedAt = new Date();
+    const errorMessage = `[${failure.category}] ${failure.message}`;
+
+    await parseBulkProcessorDependencies.markAttemptFailed({
+      scanTaskAttemptId,
+      errorMessage,
+      finishedAt,
     });
 
     logger.error(
       {
         shopId,
+        scanJobId,
         scanTaskId,
         scanTaskAttemptId,
         resourceType,
-        error: errorMessage,
+        attemptNo: attempt.attemptNo,
+        maxParseAttempts: attempt.scanTask.maxParseAttempts,
+        errorCategory: failure.category,
+        error: failure.message,
+        retryable: failure.retryable,
       },
       "parse-bulk.error",
     );
 
-    throw error;
+    if (
+      failure.retryable &&
+      attempt.attemptNo < attempt.scanTask.maxParseAttempts
+    ) {
+      await parseBulkProcessorDependencies.resetScanTaskToPendingForRetry({
+        scanTaskId,
+      });
+
+      const retrySubmitResult = await parseBulkProcessorDependencies.submitTask(
+        scanTaskId,
+      );
+
+      logger.warn(
+        {
+          shopId,
+          scanJobId,
+          scanTaskId,
+          scanTaskAttemptId,
+          previousAttemptNo: attempt.attemptNo,
+          nextAttemptNo: attempt.attemptNo + 1,
+          maxParseAttempts: attempt.scanTask.maxParseAttempts,
+          errorCategory: failure.category,
+          submitStatus: retrySubmitResult.status,
+        },
+        "parse-bulk.retry-submitted",
+      );
+
+      if (retrySubmitResult.status === "submitted") {
+        return;
+      }
+
+      if (retrySubmitResult.status === "slot_exhausted") {
+        return;
+      }
+
+      const terminalErrorMessage =
+        retrySubmitResult.status === "failed"
+          ? `[PARSE_RETRY_SUBMIT_FAILED] ${retrySubmitResult.errorMessage}`
+          : `[PARSE_RETRY_SUBMIT_SKIPPED] scan task is not pending`;
+
+      await parseBulkProcessorDependencies.markScanTaskFailed({
+        scanTaskId,
+        errorMessage: terminalErrorMessage,
+        finishedAt: new Date(),
+      });
+      await parseBulkProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+      return;
+    }
+
+    await parseBulkProcessorDependencies.markScanTaskFailed({
+      scanTaskId,
+      errorMessage,
+      finishedAt,
+    });
+    await parseBulkProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
   }
+}
+
+function classifyParseFailure(error: unknown): {
+  category: ParseFailureCategory;
+  message: string;
+  retryable: boolean;
+} {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const message = rawMessage.trim().length > 0 ? rawMessage.trim() : "Unknown parse error";
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    normalizedMessage.includes("403") ||
+    normalizedMessage.includes("forbidden") ||
+    normalizedMessage.includes("expired")
+  ) {
+    return {
+      category: "BULK_URL_EXPIRED",
+      message,
+      retryable: true,
+    };
+  }
+
+  if (
+    normalizedMessage.includes("404") ||
+    normalizedMessage.includes("not found")
+  ) {
+    return {
+      category: "BULK_URL_NOT_FOUND",
+      message,
+      retryable: true,
+    };
+  }
+
+  if (
+    normalizedMessage.includes("timeout") ||
+    normalizedMessage.includes("timed out") ||
+    normalizedMessage.includes("abort")
+  ) {
+    return {
+      category: "BULK_DOWNLOAD_TIMEOUT",
+      message,
+      retryable: true,
+    };
+  }
+
+  if (
+    normalizedMessage.includes("fetch failed") ||
+    normalizedMessage.includes("response body is null") ||
+    normalizedMessage.includes("econnreset") ||
+    normalizedMessage.includes("enotfound") ||
+    normalizedMessage.includes("socket hang up")
+  ) {
+    return {
+      category: "BULK_DOWNLOAD_FETCH_FAILED",
+      message,
+      retryable: true,
+    };
+  }
+
+  return {
+    category: "PARSE_FATAL",
+    message,
+    retryable: false,
+  };
 }
 
 /* ------------------------------------------------------------------ */

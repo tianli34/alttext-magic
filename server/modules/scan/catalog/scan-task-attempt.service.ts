@@ -205,7 +205,7 @@ export async function markAttemptFinishedFromWebhook(input: {
   const attemptStatus =
     input.bulkOperationStatus === "COMPLETED" ? "READY_TO_PARSE" : "FAILED";
   const taskStatus =
-    input.bulkOperationStatus === "COMPLETED" ? "SUCCESS" : "FAILED";
+    input.bulkOperationStatus === "COMPLETED" ? "RUNNING" : "FAILED";
   const composedErrorMessage = [
     input.bulkOperationStatus === "CANCELED" ? "BULK_OPERATION_CANCELED" : null,
     input.errorCode,
@@ -230,10 +230,9 @@ export async function markAttemptFinishedFromWebhook(input: {
       where: { id: attempt.scanTaskId },
       data: {
         status: taskStatus,
-        successfulAttemptId:
-          taskStatus === "SUCCESS" ? attempt.id : null,
-        error: composedErrorMessage,
-        finishedAt: input.finishedAt,
+        successfulAttemptId: null,
+        error: taskStatus === "FAILED" ? composedErrorMessage : null,
+        finishedAt: taskStatus === "FAILED" ? input.finishedAt : null,
       },
     });
   });

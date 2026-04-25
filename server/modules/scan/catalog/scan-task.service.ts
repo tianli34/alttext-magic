@@ -98,3 +98,48 @@ export async function finalizeScanJobIfTerminal(
 
   return nextStatus;
 }
+
+export async function markScanTaskSucceeded(input: {
+  scanTaskId: string;
+  scanTaskAttemptId: string;
+  finishedAt: Date;
+}): Promise<void> {
+  await prisma.scanTask.update({
+    where: { id: input.scanTaskId },
+    data: {
+      status: "SUCCESS",
+      successfulAttemptId: input.scanTaskAttemptId,
+      error: null,
+      finishedAt: input.finishedAt,
+    },
+  });
+}
+
+export async function markScanTaskFailed(input: {
+  scanTaskId: string;
+  errorMessage: string;
+  finishedAt: Date;
+}): Promise<void> {
+  await prisma.scanTask.update({
+    where: { id: input.scanTaskId },
+    data: {
+      status: "FAILED",
+      error: input.errorMessage,
+      finishedAt: input.finishedAt,
+    },
+  });
+}
+
+export async function resetScanTaskToPendingForRetry(input: {
+  scanTaskId: string;
+}): Promise<void> {
+  await prisma.scanTask.update({
+    where: { id: input.scanTaskId },
+    data: {
+      status: "PENDING",
+      successfulAttemptId: null,
+      error: null,
+      finishedAt: null,
+    },
+  });
+}
