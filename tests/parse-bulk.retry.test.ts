@@ -32,6 +32,8 @@ async function run(): Promise<void> {
             scanTask: {
               resourceType: "FILES",
               maxParseAttempts: 3,
+              status: "RUNNING",
+              successfulAttemptId: null,
             },
           };
         },
@@ -50,9 +52,6 @@ async function run(): Promise<void> {
         },
         async enqueueDeriveScan() {
           throw new Error("此用例不应投递 derive");
-        },
-        async markScanTaskSucceeded() {
-          throw new Error("此用例不应标记 task 成功");
         },
         async markScanTaskFailed() {
           throw new Error("自动恢复场景不应直接标记 task 失败");
@@ -111,6 +110,8 @@ async function run(): Promise<void> {
             scanTask: {
               resourceType: "PRODUCT_MEDIA",
               maxParseAttempts: 3,
+              status: "RUNNING",
+              successfulAttemptId: null,
             },
           };
         },
@@ -129,9 +130,6 @@ async function run(): Promise<void> {
         },
         async enqueueDeriveScan() {
           throw new Error("此用例不应投递 derive");
-        },
-        async markScanTaskSucceeded() {
-          throw new Error("此用例不应标记 task 成功");
         },
         async markScanTaskFailed(input) {
           taskFailures.push(input.errorMessage);

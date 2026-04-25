@@ -32,7 +32,6 @@ import { bulkSubmitService, type BulkSubmitResult } from "../../server/modules/s
 import {
   finalizeScanJobIfTerminal as finalizeScanJobIfTerminalInDb,
   markScanTaskFailed,
-  markScanTaskSucceeded,
   resetScanTaskToPendingForRetry,
 } from "../../server/modules/scan/catalog/scan-task.service";
 
@@ -54,6 +53,8 @@ interface ParseAttemptRecord {
   scanTask: {
     resourceType: ScanResourceType;
     maxParseAttempts: number;
+    status: "PENDING" | "RUNNING" | "SUCCESS" | "FAILED";
+    successfulAttemptId: string | null;
   };
 }
 
@@ -81,7 +82,6 @@ interface ParseBulkProcessorDependencies {
     finishedAt: Date;
   }): Promise<void>;
   enqueueDeriveScan: typeof enqueueDeriveScan;
-  markScanTaskSucceeded: typeof markScanTaskSucceeded;
   markScanTaskFailed: typeof markScanTaskFailed;
   resetScanTaskToPendingForRetry: typeof resetScanTaskToPendingForRetry;
   submitTask(scanTaskId: string): Promise<BulkSubmitResult>;
@@ -102,6 +102,8 @@ const defaultDependencies: ParseBulkProcessorDependencies = {
           select: {
             resourceType: true,
             maxParseAttempts: true,
+            status: true,
+            successfulAttemptId: true,
           },
         },
       },
@@ -137,7 +139,6 @@ const defaultDependencies: ParseBulkProcessorDependencies = {
     });
   },
   enqueueDeriveScan,
-  markScanTaskSucceeded,
   markScanTaskFailed,
   resetScanTaskToPendingForRetry,
   submitTask(scanTaskId) {
@@ -204,9 +205,45 @@ export async function processParseBulkJob(
     throw new Error(`ScanTaskAttempt not found: ${scanTaskAttemptId}`);
   }
 
+  if (
+    attempt.status === "SUCCESS" &&
+    attempt.scanTask.successfulAttemptId === scanTaskAttemptId
+  ) {
+    logger.warn(
+      {
+        attemptId: scanTaskAttemptId,
+        status: attempt.status,
+        taskStatus: attempt.scanTask.status,
+        successfulAttemptId: attempt.scanTask.successfulAttemptId,
+      },
+      "parse-bulk.attempt-already-derived",
+    );
+    return;
+  }
+
+  if (attempt.status === "SUCCESS") {
+    await parseBulkProcessorDependencies.enqueueDeriveScan({
+      shopId,
+      scanJobId,
+      scanTaskId,
+      scanTaskAttemptId,
+    });
+
+    logger.info(
+      { shopId, scanTaskId, scanTaskAttemptId },
+      "parse-bulk.derive-reenqueued",
+    );
+
+    return;
+  }
+
   if (attempt.status !== "READY_TO_PARSE") {
     logger.warn(
-      { attemptId: scanTaskAttemptId, status: attempt.status },
+      {
+        attemptId: scanTaskAttemptId,
+        status: attempt.status,
+        taskStatus: attempt.scanTask.status,
+      },
       "parse-bulk.attempt-not-ready",
     );
     return;
@@ -245,11 +282,6 @@ export async function processParseBulkJob(
       parsedRows,
       finishedAt,
     });
-    await parseBulkProcessorDependencies.markScanTaskSucceeded({
-      scanTaskId,
-      scanTaskAttemptId,
-      finishedAt,
-    });
 
     logger.info(
       { shopId, scanTaskId, scanTaskAttemptId, resourceType, parsedRows },
@@ -268,8 +300,6 @@ export async function processParseBulkJob(
       { shopId, scanTaskId, scanTaskAttemptId },
       "parse-bulk.derive-enqueued",
     );
-
-    await parseBulkProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
   } catch (error) {
     const failure = classifyParseFailure(error);
     const finishedAt = new Date();

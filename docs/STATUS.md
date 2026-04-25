@@ -25,6 +25,7 @@
 - 完成流式 NDJSON 解析基础设施：通用流式 parser、4 类资源 parser callback、`__parentId` 缓存映射、staging batch flush 组件、fixture 回放入口、parse-bulk worker 注册
 - 完成 Staging 写入闭环：5 张 staging 表 batch upsert（stg_product/stg_media_image_product/stg_media_image_file/stg_collection/stg_article）、`__parentId` 关联、position_index 优先 Shopify 字段 + 0-based fallback、parse 成功后投递 derive job
 - 完成 parse_bulk_to_staging 过期恢复：403/404/过期/超时等下载失败分类、按 `max_parse_attempts` 自动重提 bulk、超限 task 失败收敛与测试
+- 完成 derive_scan_attempt_to_result：从 staging upsert `scan_result_target/scan_result_usage`，实现 `FILE_ALT` 跨 `PRODUCT_MEDIA/FILES` 单 target 去重、双 usage 保留，并补齐 derive/parse 交接与幂等测试
 
 ## In Progress-本地开发
 - Phase 3：全量扫描管线

@@ -1,20 +1,68 @@
 /**
  * File: worker/processors/derive-scan.processor.ts
- * Purpose: derive-scan Job 处理器 — 将 staging 数据推导为候选目标（AltTarget + ImageUsage）。
+ * Purpose: derive-scan Job 处理器 — 将 staging 数据推导为待发布结果层。
  *
  * 流程:
- * 1. 从 scan_task_attempt 读取关联的 staging 数据
- * 2. 根据 resourceType 调用对应的 derive 逻辑
- * 3. 将推导结果写入 alt_target / image_usage 表
- * 4. 更新 scanTask 状态
- *
- * 注意: 当前为骨架实现，derive 核心逻辑将在后续任务中完成。
+ * 1. 读取成功 attempt 的 staging 数据
+ * 2. derive 为 `scan_result_target` / `scan_result_usage`
+ * 3. derive 成功后再把 scan_task 标记为 SUCCESS
+ * 4. 触发 scan_job 终态收敛
  */
 import type { Worker } from "bullmq";
 import { createLogger } from "../../server/utils/logger";
 import type { DeriveScanJobData } from "../../server/queues/derive-scan.queue";
+import {
+  deriveAndPersistScanResults,
+} from "../../server/modules/scan/catalog/derive.service";
+import prisma from "../../server/db/prisma.server";
+import {
+  finalizeScanJobIfTerminal as finalizeScanJobIfTerminalInDb,
+  markScanTaskFailed,
+  markScanTaskSucceeded,
+} from "../../server/modules/scan/catalog/scan-task.service";
 
 const logger = createLogger({ module: "derive-scan-processor" });
+
+interface DeriveProcessorDependencies {
+  deriveAndPersistScanResults: typeof deriveAndPersistScanResults;
+  markScanTaskSucceeded: typeof markScanTaskSucceeded;
+  markScanTaskFailed: typeof markScanTaskFailed;
+  finalizeScanJobIfTerminal(scanJobId: string): Promise<void>;
+  getTaskSuccessfulAttemptId(scanTaskId: string): Promise<string | null>;
+}
+
+const defaultDependencies: DeriveProcessorDependencies = {
+  deriveAndPersistScanResults,
+  markScanTaskSucceeded,
+  markScanTaskFailed,
+  async finalizeScanJobIfTerminal(scanJobId) {
+    await finalizeScanJobIfTerminalInDb(scanJobId);
+  },
+  async getTaskSuccessfulAttemptId(scanTaskId) {
+    const task = await prisma.scanTask.findUnique({
+      where: { id: scanTaskId },
+      select: {
+        successfulAttemptId: true,
+      },
+    });
+
+    return task?.successfulAttemptId ?? null;
+  },
+};
+
+const deriveProcessorDependencies: DeriveProcessorDependencies = {
+  ...defaultDependencies,
+};
+
+export function setDeriveProcessorDependenciesForTests(
+  overrides: Partial<DeriveProcessorDependencies>,
+): void {
+  Object.assign(deriveProcessorDependencies, overrides);
+}
+
+export function resetDeriveProcessorDependenciesForTests(): void {
+  Object.assign(deriveProcessorDependencies, defaultDependencies);
+}
 
 /* ------------------------------------------------------------------ */
 /*  Processor 工厂                                                     */
@@ -47,22 +95,71 @@ export default function createDeriveScanProcessor(
 export async function processDeriveScanJob(
   data: DeriveScanJobData,
 ): Promise<void> {
-  const { shopId, scanTaskId, scanTaskAttemptId } = data;
+  const { shopId, scanJobId, scanTaskId, scanTaskAttemptId } = data;
 
   logger.info(
     { shopId, scanTaskId, scanTaskAttemptId },
     "derive-scan.start",
   );
 
-  // TODO: derive 核心逻辑将在后续任务中实现
-  // 预期流程:
-  // 1. 查询 staging 数据
-  // 2. 推导 alt_target + image_usage
-  // 3. 写入结果表
-  // 4. 更新 scanTask 状态
+  try {
+    const result = await deriveProcessorDependencies.deriveAndPersistScanResults({
+      scanTaskAttemptId,
+    });
 
-  logger.info(
-    { shopId, scanTaskId, scanTaskAttemptId },
-    "derive-scan.success",
-  );
+    if (result.skipped) {
+      const successfulAttemptId =
+        await deriveProcessorDependencies.getTaskSuccessfulAttemptId(scanTaskId);
+
+      if (successfulAttemptId !== scanTaskAttemptId) {
+        logger.warn(
+          {
+            shopId,
+            scanJobId,
+            scanTaskId,
+            scanTaskAttemptId,
+            reason: result.reason,
+          },
+          "derive-scan.skipped",
+        );
+      }
+
+      return;
+    }
+
+    const finishedAt = new Date();
+    await deriveProcessorDependencies.markScanTaskSucceeded({
+      scanTaskId,
+      scanTaskAttemptId,
+      finishedAt,
+    });
+    await deriveProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+
+    logger.info(
+      {
+        shopId,
+        scanJobId,
+        scanTaskId,
+        scanTaskAttemptId,
+        resourceType: result.resourceType,
+        targetCount: result.targetCount,
+        usageCount: result.usageCount,
+        warningCount: result.warnings.length,
+      },
+      "derive-scan.success",
+    );
+  } catch (error) {
+    const finishedAt = new Date();
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+
+    await deriveProcessorDependencies.markScanTaskFailed({
+      scanTaskId,
+      errorMessage: `[DERIVE_FAILED] ${errorMessage}`,
+      finishedAt,
+    });
+    await deriveProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+
+    throw error;
+  }
 }
