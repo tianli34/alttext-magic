@@ -119,6 +119,8 @@ export interface ScanProgressSummary {
   completedTasks: number;
   totalTasks: number;
   status: string;
+  phase: string;
+  message: string;
 }
 
 /** GET /api/scan/status 完整响应体 */

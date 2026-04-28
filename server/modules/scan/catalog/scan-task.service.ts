@@ -2,7 +2,11 @@
  * File: server/modules/scan/catalog/scan-task.service.ts
  * Purpose: scan_task 查询与终态收敛服务。
  */
-import type { ScanJobStatus, ScanResourceType } from "@prisma/client";
+import type {
+  ScanJobPublishStatus,
+  ScanJobStatus,
+  ScanResourceType,
+} from "@prisma/client";
 import prisma from "../../../db/prisma.server";
 import { createLogger } from "../../../utils/logger";
 import { compareScanResourcePriority } from "./bulk-query-builder";
@@ -15,6 +19,12 @@ export interface PendingScanTaskRow {
   shopId: string;
   resourceType: ScanResourceType;
   currentAttemptNo: number;
+}
+
+export interface FinalizeScanJobResult {
+  status: ScanJobStatus;
+  publishStatus: ScanJobPublishStatus;
+  transitioned: boolean;
 }
 
 export async function getPendingScanTasksOrdered(
@@ -44,7 +54,7 @@ export async function getPendingScanTasksOrdered(
 
 export async function finalizeScanJobIfTerminal(
   scanJobId: string,
-): Promise<ScanJobStatus | null> {
+): Promise<FinalizeScanJobResult | null> {
   const tasks = await prisma.scanTask.findMany({
     where: { scanJobId },
     select: {
@@ -76,15 +86,42 @@ export async function finalizeScanJobIfTerminal(
     nextStatus = "FAILED";
   }
 
-  await prisma.scanJob.update({
-    where: { id: scanJobId },
+  const nextPublishStatus: ScanJobPublishStatus =
+    nextStatus === "FAILED" ? "NOT_PUBLISHED" : "PENDING";
+
+  const updateResult = await prisma.scanJob.updateMany({
+    where: {
+      id: scanJobId,
+      status: "RUNNING",
+    },
     data: {
       status: nextStatus,
+      publishStatus: nextPublishStatus,
       finishedAt: new Date(),
       successfulResourceTypes: successTasks.map((task) => task.resourceType),
       failedResourceTypes: failedTasks.map((task) => task.resourceType),
     },
   });
+
+  if (updateResult.count === 0) {
+    const existing = await prisma.scanJob.findUnique({
+      where: { id: scanJobId },
+      select: {
+        status: true,
+        publishStatus: true,
+      },
+    });
+
+    if (!existing) {
+      return null;
+    }
+
+    return {
+      status: existing.status,
+      publishStatus: existing.publishStatus,
+      transitioned: false,
+    };
+  }
 
   logger.info(
     {
@@ -96,7 +133,11 @@ export async function finalizeScanJobIfTerminal(
     "scan-task.scan-job-finalized",
   );
 
-  return nextStatus;
+  return {
+    status: nextStatus,
+    publishStatus: nextPublishStatus,
+    transitioned: true,
+  };
 }
 
 export async function markScanTaskSucceeded(input: {

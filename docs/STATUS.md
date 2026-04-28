@@ -26,6 +26,10 @@
 - 完成 Staging 写入闭环：5 张 staging 表 batch upsert（stg_product/stg_media_image_product/stg_media_image_file/stg_collection/stg_article）、`__parentId` 关联、position_index 优先 Shopify 字段 + 0-based fallback、parse 成功后投递 derive job
 - 完成 parse_bulk_to_staging 过期恢复：403/404/过期/超时等下载失败分类、按 `max_parse_attempts` 自动重提 bulk、超限 task 失败收敛与测试
 - 完成 derive_scan_attempt_to_result：从 staging upsert `scan_result_target/scan_result_usage`，实现 `FILE_ALT` 跨 `PRODUCT_MEDIA/FILES` 单 target 去重、双 usage 保留，并补齐 derive/parse 交接与幂等测试
+- 已收紧结果层 schema：`scan_result_target` 唯一键改为 target 级 `(shopId, scanJobId, altPlane, writeTargetId, locale)`，并新增迁移去除 `resourceType` 造成的 FILE_ALT 双 target 张力
+- 完成 `publish_scan_result`：新增 publish 队列/worker，单事务按成功资源类型发布 `alt_target` / `image_usage`、失败切片保留旧发布、成功切片 sweep 为 `NOT_FOUND`，并收敛 `alt_candidate` / `candidate_group_projection`
+- 完成 publish 后收敛补强：发布成功后更新 `shops.last_published_*`、`FILE_ALT` 按 `image_usage PRESENT` 重算 target 存在性，`FAILED`/publish 完成后释放 SCAN 锁
+- 完成 SSE 进度推送 + 扫描进度页前端（P3-13）：Worker 关键阶段写 Redis 进度（started→bulk_submitted→parsing→derive→publish→done/failed）、`GET /api/sse` 轮询式 SSE 端点、`useSSE`/`useScanStatus`/`useBatchProgress` hooks、`ProgressBar`/`StatusBadge`/`ScanStatusBanner` 组件、Dashboard 进度页集成
 
 ## In Progress-本地开发
 - Phase 3：全量扫描管线

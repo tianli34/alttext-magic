@@ -71,7 +71,11 @@ async function run(): Promise<void> {
         },
         async finalizeScanJobIfTerminal() {
           finalizeCount += 1;
-          return "SUCCESS";
+          return {
+            status: "SUCCESS",
+            publishStatus: "PENDING",
+            transitioned: true,
+          };
         },
       });
 
@@ -169,7 +173,11 @@ async function run(): Promise<void> {
         },
         async finalizeScanJobIfTerminal() {
           finalizeCount += 1;
-          return "SUCCESS";
+          return {
+            status: "SUCCESS",
+            publishStatus: "PENDING",
+            transitioned: true,
+          };
         },
       });
 

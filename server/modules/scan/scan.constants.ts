@@ -12,6 +12,22 @@ export const SCAN_PROGRESS_KEY_PREFIX = "scan:progress";
 /** Redis 扫描进度键过期时间（秒）：24 小时 */
 export const SCAN_PROGRESS_TTL_SECONDS = 24 * 60 * 60;
 
+/**
+ * 扫描进度阶段枚举。
+ * Worker 在关键阶段写 Redis phase 字段，前端通过 SSE 实时读取。
+ */
+export const SCAN_PHASE = {
+  STARTED: "started",
+  BULK_SUBMITTED: "bulk_submitted",
+  PARSING: "parsing",
+  DERIVE: "derive",
+  PUBLISH: "publish",
+  DONE: "done",
+  FAILED: "failed",
+} as const;
+
+export type ScanPhase = (typeof SCAN_PHASE)[keyof typeof SCAN_PHASE];
+
 /** ScanResourceType 枚举所有值，用于校验 */
 export const ALL_SCAN_RESOURCE_TYPES: ScanResourceType[] = [
   "PRODUCT_MEDIA",

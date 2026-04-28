@@ -20,6 +20,7 @@ import type {
   HeartbeatLockResult,
   OperationLockTimingOptions,
   ReleaseLockResult,
+  ReleaseLockByTypeResult,
   ShopOperationLockOwner,
   ShopOperationLockSnapshot,
   ShopOperationLockStatus,
@@ -171,6 +172,68 @@ export async function releaseLock(
     logger.info(
       { shopId, batchId: owner.batchId, operationType: currentLock.operationType },
       "Operation lock released",
+    );
+
+    return {
+      released: true,
+      reason: "RELEASED",
+      lock: releasedLock,
+    };
+  });
+}
+
+/**
+ * 按类型释放当前 RUNNING 锁。
+ *
+ * 适用于异步 worker 场景：只知道 shopId + operationType，
+ * 但无法持有最初的 batchId owner。
+ */
+export async function releaseLockByType(
+  shopId: string,
+  operationType: ShopOperationType,
+): Promise<ReleaseLockByTypeResult> {
+  return prisma.$transaction(async (tx) => {
+    const currentLock = await selectLockForUpdate(tx, shopId);
+
+    if (currentLock === null) {
+      return {
+        released: false,
+        reason: "NOT_FOUND",
+        lock: null,
+      };
+    }
+
+    if (currentLock.status !== "RUNNING") {
+      return {
+        released: false,
+        reason: "NOT_RUNNING",
+        lock: currentLock,
+      };
+    }
+
+    if (currentLock.operationType !== operationType) {
+      return {
+        released: false,
+        reason: "TYPE_MISMATCH",
+        lock: currentLock,
+      };
+    }
+
+    const releasedAt = new Date();
+    const releasedLock = await updateLock(tx, {
+      shopId,
+      operationType: currentLock.operationType,
+      batchId: currentLock.batchId,
+      acquiredAt: currentLock.acquiredAt,
+      heartbeatAt: releasedAt,
+      expiresAt: releasedAt,
+      releasedAt,
+      status: "RELEASED",
+    });
+
+    logger.info(
+      { shopId, batchId: currentLock.batchId, operationType },
+      "Operation lock released by operation type",
     );
 
     return {

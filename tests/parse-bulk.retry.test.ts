@@ -70,6 +70,7 @@ async function run(): Promise<void> {
         },
         async finalizeScanJobIfTerminal() {
           finalizeCount += 1;
+          return null;
         },
       });
 
@@ -143,6 +144,7 @@ async function run(): Promise<void> {
         },
         async finalizeScanJobIfTerminal() {
           finalizeCount += 1;
+          return null;
         },
       });
 

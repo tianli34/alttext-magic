@@ -51,3 +51,5 @@ function Add-ToPath {
 Add-ToPath -NewPath "C:\MyApp\bin"                        # 添加到用户变量
 Add-ToPath -NewPath "C:\MyApp\bin" -Scope "Machine"       # 添加到系统变量（需管理员）
 Add-ToPath -NewPath "C:\MyApp\bin"                        # 再次添加，触发"已存在"提示
+
+整个复制到PS运行

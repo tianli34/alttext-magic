@@ -457,7 +457,6 @@ model ScanTask {
   scanJob           ScanJob            @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
   attempts          ScanTaskAttempt[]  @relation("ScanTaskAttempts")
   successfulAttempt ScanTaskAttempt?   @relation("SuccessfulScanTaskAttempt", fields: [successfulAttemptId], references: [id], onDelete: SetNull)
-  scanResultTargets ScanResultTarget[]
   scanResultUsages  ScanResultUsage[]
 
   // ---------- Indexes ----------
@@ -740,16 +739,16 @@ model ScanResultTarget {
   updatedAt       DateTime         @updatedAt @map("updated_at")
 
   // ---------- Relations ----------
-  shop     Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  scanJob  ScanJob           @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
-  scanTask ScanTask          @relation(fields: [scanJobId, resourceType], references: [scanJobId, resourceType], onDelete: Cascade)
-  usages   ScanResultUsage[]
+  shop    Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanJob ScanJob           @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
+  usages  ScanResultUsage[]
 
   // ---------- Indexes ----------
-  @@unique([shopId, scanJobId, resourceType, altPlane, writeTargetId, locale])
+  @@unique([shopId, scanJobId, altPlane, writeTargetId, locale])
   @@index([shopId])
   @@index([scanJobId])
   @@index([shopId, scanJobId, resourceType])
+  @@index([shopId, scanJobId, altPlane, writeTargetId, locale])
   @@index([shopId, altPlane, locale])
   @@map("scan_result_target")
 }
@@ -778,7 +777,7 @@ model ScanResultUsage {
   shop             Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
   scanJob          ScanJob          @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
   scanTask         ScanTask         @relation(fields: [scanJobId, resourceType], references: [scanJobId, resourceType], onDelete: Cascade)
-  scanResultTarget ScanResultTarget @relation(fields: [shopId, scanJobId, resourceType, altPlane, writeTargetId, locale], references: [shopId, scanJobId, resourceType, altPlane, writeTargetId, locale], onDelete: Cascade)
+  scanResultTarget ScanResultTarget @relation(fields: [shopId, scanJobId, altPlane, writeTargetId, locale], references: [shopId, scanJobId, altPlane, writeTargetId, locale], onDelete: Cascade)
 
   // ---------- Indexes ----------
   @@unique([shopId, scanJobId, resourceType, altPlane, writeTargetId, usageType, usageId])
@@ -786,6 +785,7 @@ model ScanResultUsage {
   @@index([scanJobId])
   @@index([shopId, usageType])
   @@index([shopId, scanJobId, resourceType])
+  @@index([shopId, scanJobId, altPlane, writeTargetId, locale])
   @@index([shopId, scanJobId, resourceType, altPlane, writeTargetId, locale])
   @@map("scan_result_usage")
 }

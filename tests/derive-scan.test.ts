@@ -229,9 +229,13 @@ async function run(): Promise<void> {
         },
         async finalizeScanJobIfTerminal() {
           finalizeCount += 1;
+          return null;
         },
         async getTaskSuccessfulAttemptId() {
           return null;
+        },
+        async releaseLockByType() {
+          throw new Error("此用例不应释放锁");
         },
       });
 
@@ -248,6 +252,61 @@ async function run(): Promise<void> {
         "derive 成功后才应把 task 标记为 SUCCESS",
       );
       assert.equal(finalizeCount, 1, "derive 成功后应触发 scan_job 汇总收敛");
+    }
+
+    resetDeriveProcessorDependenciesForTests();
+
+    {
+      const releasedLocks: string[] = [];
+      let enqueueCount = 0;
+
+      setDeriveProcessorDependenciesForTests({
+        async deriveAndPersistScanResults() {
+          throw new Error("derive failed");
+        },
+        async markScanTaskSucceeded() {
+          throw new Error("失败用例不应标记成功");
+        },
+        async markScanTaskFailed() {
+          return;
+        },
+        async finalizeScanJobIfTerminal() {
+          return {
+            status: "FAILED",
+            transitioned: true,
+          };
+        },
+        async enqueuePublishScanResult() {
+          enqueueCount += 1;
+        },
+        async getTaskSuccessfulAttemptId() {
+          return null;
+        },
+        async releaseLockByType(shopId, operationType) {
+          releasedLocks.push(`${shopId}:${operationType}`);
+          return {
+            released: true,
+            reason: "RELEASED",
+            lock: null,
+          };
+        },
+      });
+
+      await assert.rejects(
+        processDeriveScanJob({
+          shopId: "shop-1",
+          scanJobId: "scan-job-1",
+          scanTaskId: "task-3",
+          scanTaskAttemptId: "attempt-3",
+        }),
+      );
+
+      assert.deepEqual(
+        releasedLocks,
+        ["shop-1:SCAN"],
+        "scan_job 收敛为 FAILED 时应立即释放 SCAN 锁",
+      );
+      assert.equal(enqueueCount, 0, "FAILED 不应再投递 publish");
     }
 
     resetDeriveProcessorDependenciesForTests();
@@ -301,6 +360,7 @@ async function run(): Promise<void> {
         },
         async finalizeScanJobIfTerminal() {
           finalizeCount += 1;
+          return null;
         },
       });
 

@@ -34,6 +34,9 @@ import {
   markScanTaskFailed,
   resetScanTaskToPendingForRetry,
 } from "../../server/modules/scan/catalog/scan-task.service";
+import { enqueuePublishScanResult } from "../../server/queues/publish-scan.queue";
+import { updateScanProgressPhase } from "../../server/sse/progress-publisher";
+import { SCAN_PHASE } from "../../server/modules/scan/scan.constants";
 
 const logger = createLogger({ module: "parse-bulk-processor" });
 
@@ -85,7 +88,10 @@ interface ParseBulkProcessorDependencies {
   markScanTaskFailed: typeof markScanTaskFailed;
   resetScanTaskToPendingForRetry: typeof resetScanTaskToPendingForRetry;
   submitTask(scanTaskId: string): Promise<BulkSubmitResult>;
-  finalizeScanJobIfTerminal(scanJobId: string): Promise<void>;
+  finalizeScanJobIfTerminal(
+    scanJobId: string,
+  ): Promise<{ status: "SUCCESS" | "PARTIAL_SUCCESS" | "FAILED" | "RUNNING"; transitioned: boolean } | null>;
+  enqueuePublishScanResult: typeof enqueuePublishScanResult;
 }
 
 const defaultDependencies: ParseBulkProcessorDependencies = {
@@ -145,8 +151,9 @@ const defaultDependencies: ParseBulkProcessorDependencies = {
     return bulkSubmitService.submitTask(scanTaskId);
   },
   async finalizeScanJobIfTerminal(scanJobId) {
-    await finalizeScanJobIfTerminalInDb(scanJobId);
+    return finalizeScanJobIfTerminalInDb(scanJobId);
   },
+  enqueuePublishScanResult,
 };
 
 const parseBulkProcessorDependencies: ParseBulkProcessorDependencies = {
@@ -260,6 +267,13 @@ export async function processParseBulkJob(
   // 2. 标记 attempt 为 PARSING
   await parseBulkProcessorDependencies.markAttemptParsing(scanTaskAttemptId);
 
+  // 更新 Redis 进度阶段为 parsing
+  await updateScanProgressPhase(
+    scanJobId,
+    SCAN_PHASE.PARSING,
+    `正在解析 ${resourceType} 数据…`,
+  );
+
   try {
     // 3. 根据资源类型选择 parser 并执行流式解析
     await parseBulkProcessorDependencies.parseByResourceType(
@@ -372,7 +386,19 @@ export async function processParseBulkJob(
         errorMessage: terminalErrorMessage,
         finishedAt: new Date(),
       });
-      await parseBulkProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+      const finalizeResult =
+        await parseBulkProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+
+      if (
+        finalizeResult?.transitioned &&
+        (finalizeResult.status === "SUCCESS" ||
+          finalizeResult.status === "PARTIAL_SUCCESS")
+      ) {
+        await parseBulkProcessorDependencies.enqueuePublishScanResult({
+          shopId,
+          scanJobId,
+        });
+      }
       return;
     }
 
@@ -381,7 +407,19 @@ export async function processParseBulkJob(
       errorMessage,
       finishedAt,
     });
-    await parseBulkProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+    const finalizeResult =
+      await parseBulkProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+
+    if (
+      finalizeResult?.transitioned &&
+      (finalizeResult.status === "SUCCESS" ||
+        finalizeResult.status === "PARTIAL_SUCCESS")
+    ) {
+      await parseBulkProcessorDependencies.enqueuePublishScanResult({
+        shopId,
+        scanJobId,
+      });
+    }
   }
 }
 

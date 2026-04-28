@@ -865,10 +865,9 @@ async function upsertResultTarget(
 ): Promise<void> {
   await tx.scanResultTarget.upsert({
     where: {
-      shopId_scanJobId_resourceType_altPlane_writeTargetId_locale: {
+      shopId_scanJobId_altPlane_writeTargetId_locale: {
         shopId: target.shopId,
         scanJobId: target.scanJobId,
-        resourceType: target.resourceType,
         altPlane: target.altPlane,
         writeTargetId: target.writeTargetId,
         locale: target.locale,

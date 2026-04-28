@@ -8,6 +8,8 @@ import { queueConnection } from "../queues/connection";
 import {
   SCAN_PROGRESS_KEY_PREFIX,
   SCAN_PROGRESS_TTL_SECONDS,
+  SCAN_PHASE,
+  type ScanPhase,
 } from "../modules/scan/scan.constants";
 import { createLogger } from "../utils/logger";
 
@@ -24,7 +26,7 @@ export function getScanProgressKey(scanJobId: string): string {
 /**
  * 初始化扫描进度 Redis 键。
  *
- * 在 scan_job 创建后立即调用，设置初始进度（0/totalTasks）和 RUNNING 状态。
+ * 在 scan_job 创建后立即调用，设置初始进度（0/totalTasks）、RUNNING 状态和 started 阶段。
  * 设置 24 小时 TTL 防止孤立键。
  *
  * @param scanJobId scan_job 的主键
@@ -41,6 +43,8 @@ export async function initScanProgress(
     completedTasks: 0,
     totalTasks,
     status: "RUNNING",
+    phase: SCAN_PHASE.STARTED,
+    message: "扫描已启动，正在准备提交批量查询…",
   });
 
   await redis.expire(key, SCAN_PROGRESS_TTL_SECONDS);
@@ -49,6 +53,31 @@ export async function initScanProgress(
     { scanJobId, totalTasks, key },
     "Redis scan progress initialized",
   );
+}
+
+/**
+ * 更新扫描进度阶段和消息。
+ *
+ * @param scanJobId scan_job 的主键
+ * @param phase 当前阶段
+ * @param message 阶段描述消息（可选）
+ */
+export async function updateScanProgressPhase(
+  scanJobId: string,
+  phase: ScanPhase,
+  message?: string,
+): Promise<void> {
+  const key = getScanProgressKey(scanJobId);
+  const redis = queueConnection;
+
+  const update: Record<string, string> = { phase };
+  if (message) {
+    update.message = message;
+  }
+
+  await redis.hset(key, update);
+
+  logger.info({ scanJobId, phase, message }, "Redis scan progress phase updated");
 }
 
 /**
@@ -78,17 +107,30 @@ export async function incrementScanProgress(
  *
  * @param scanJobId scan_job 的主键
  * @param status 最终状态
+ * @param phase 最终阶段（默认根据 status 自动推导）
  */
 export async function setScanProgressStatus(
   scanJobId: string,
   status: string,
+  phase?: ScanPhase,
 ): Promise<void> {
   const key = getScanProgressKey(scanJobId);
   const redis = queueConnection;
 
-  await redis.hset(key, { status });
+  const resolvedPhase =
+    phase ??
+    (status === "FAILED" ? SCAN_PHASE.FAILED : SCAN_PHASE.DONE);
 
-  logger.info({ scanJobId, status }, "Redis scan progress status updated");
+  const message =
+    status === "FAILED"
+      ? "扫描失败，请检查或重试"
+      : status === "PARTIAL_SUCCESS"
+        ? "扫描部分完成，正在发布结果…"
+        : "扫描完成";
+
+  await redis.hset(key, { status, phase: resolvedPhase, message });
+
+  logger.info({ scanJobId, status, phase: resolvedPhase }, "Redis scan progress status updated");
 }
 
 /**
@@ -101,6 +143,8 @@ export async function getScanProgress(scanJobId: string): Promise<{
   completedTasks: number;
   totalTasks: number;
   status: string;
+  phase: string;
+  message: string;
 } | null> {
   const key = getScanProgressKey(scanJobId);
   const redis = queueConnection;
@@ -115,5 +159,7 @@ export async function getScanProgress(scanJobId: string): Promise<{
     completedTasks: Number(data.completedTasks) || 0,
     totalTasks: Number(data.totalTasks) || 0,
     status: data.status ?? "UNKNOWN",
+    phase: data.phase ?? "started",
+    message: data.message ?? "",
   };
 }

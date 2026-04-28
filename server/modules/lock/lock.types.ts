@@ -64,6 +64,13 @@ export interface ReleaseLockResult {
   lock: ShopOperationLockSnapshot | null;
 }
 
+/** 按类型释放锁结果。用于异步 worker 无法持有原始 owner 时的收尾。 */
+export interface ReleaseLockByTypeResult {
+  released: boolean;
+  reason: "RELEASED" | "NOT_FOUND" | "NOT_RUNNING" | "TYPE_MISMATCH";
+  lock: ShopOperationLockSnapshot | null;
+}
+
 /** 心跳结果。 */
 export interface HeartbeatLockResult {
   heartbeated: boolean;

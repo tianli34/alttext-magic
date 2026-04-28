@@ -15,9 +15,15 @@ import {
 } from "./bulk-slot-lock.server";
 import { bulkSlotManager } from "./bulk-slot-manager.service";
 import { bulkSubmitService, type BulkSubmitResult } from "./bulk-submit.service";
-import { finalizeScanJobIfTerminal, getPendingScanTasksOrdered } from "./scan-task.service";
+import {
+  finalizeScanJobIfTerminal,
+  getPendingScanTasksOrdered,
+  type FinalizeScanJobResult,
+} from "./scan-task.service";
 import { getBulkOperationById } from "./shopify-bulk.client.server";
 import { markAttemptFinishedFromWebhook } from "./scan-task-attempt.service";
+import { updateScanProgressPhase } from "../../../sse/progress-publisher";
+import { SCAN_PHASE } from "../scan.constants";
 
 const logger = createLogger({ module: "scan-start-service" });
 
@@ -46,7 +52,7 @@ interface ScanStartServiceDependencies {
   getAvailableSlots(shopId: string): Promise<number>;
   getPendingScanTasksOrdered: typeof getPendingScanTasksOrdered;
   submitTask(scanTaskId: string): Promise<BulkSubmitResult>;
-  finalizeScanJobIfTerminal(scanJobId: string): Promise<ScanJobStatus | null>;
+  finalizeScanJobIfTerminal(scanJobId: string): Promise<FinalizeScanJobResult | null>;
   getBulkOperationById: typeof getBulkOperationById;
   markAttemptFinishedFromWebhook: typeof markAttemptFinishedFromWebhook;
   enqueueParseBulkToStaging: typeof enqueueParseBulkToStaging;
@@ -231,9 +237,14 @@ export async function trySubmitNextBatch(
     );
   }
 }
-
 export async function processScanStartJob(scanJobId: string): Promise<void> {
   await trySubmitNextBatch(scanJobId);
+  // 批量查询已提交，更新进度阶段
+  await updateScanProgressPhase(
+    scanJobId,
+    SCAN_PHASE.BULK_SUBMITTED,
+    "批量查询已提交，等待 Shopify 返回数据…",
+  );
 }
 
 export async function handleBulkOperationsFinishWebhook(input: {

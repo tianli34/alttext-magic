@@ -8,6 +8,7 @@
  * 3. derive 成功后再把 scan_task 标记为 SUCCESS
  * 4. 触发 scan_job 终态收敛
  */
+import type { ScanJobStatus } from "@prisma/client";
 import type { Worker } from "bullmq";
 import { createLogger } from "../../server/utils/logger";
 import type { DeriveScanJobData } from "../../server/queues/derive-scan.queue";
@@ -20,6 +21,14 @@ import {
   markScanTaskFailed,
   markScanTaskSucceeded,
 } from "../../server/modules/scan/catalog/scan-task.service";
+import { enqueuePublishScanResult } from "../../server/queues/publish-scan.queue";
+import { releaseLockByType } from "../../server/modules/lock/operation-lock.service";
+import {
+  updateScanProgressPhase,
+  incrementScanProgress,
+  setScanProgressStatus,
+} from "../../server/sse/progress-publisher";
+import { SCAN_PHASE } from "../../server/modules/scan/scan.constants";
 
 const logger = createLogger({ module: "derive-scan-processor" });
 
@@ -27,8 +36,12 @@ interface DeriveProcessorDependencies {
   deriveAndPersistScanResults: typeof deriveAndPersistScanResults;
   markScanTaskSucceeded: typeof markScanTaskSucceeded;
   markScanTaskFailed: typeof markScanTaskFailed;
-  finalizeScanJobIfTerminal(scanJobId: string): Promise<void>;
+  finalizeScanJobIfTerminal(
+    scanJobId: string,
+  ): Promise<{ status: ScanJobStatus; transitioned: boolean } | null>;
+  enqueuePublishScanResult: typeof enqueuePublishScanResult;
   getTaskSuccessfulAttemptId(scanTaskId: string): Promise<string | null>;
+  releaseLockByType: typeof releaseLockByType;
 }
 
 const defaultDependencies: DeriveProcessorDependencies = {
@@ -36,8 +49,10 @@ const defaultDependencies: DeriveProcessorDependencies = {
   markScanTaskSucceeded,
   markScanTaskFailed,
   async finalizeScanJobIfTerminal(scanJobId) {
-    await finalizeScanJobIfTerminalInDb(scanJobId);
+    return finalizeScanJobIfTerminalInDb(scanJobId);
   },
+  enqueuePublishScanResult,
+  releaseLockByType,
   async getTaskSuccessfulAttemptId(scanTaskId) {
     const task = await prisma.scanTask.findUnique({
       where: { id: scanTaskId },
@@ -102,6 +117,13 @@ export async function processDeriveScanJob(
     "derive-scan.start",
   );
 
+  // 更新 Redis 进度阶段为 derive
+  await updateScanProgressPhase(
+    scanJobId,
+    SCAN_PHASE.DERIVE,
+    "正在推导扫描结果…",
+  );
+
   try {
     const result = await deriveProcessorDependencies.deriveAndPersistScanResults({
       scanTaskAttemptId,
@@ -133,7 +155,30 @@ export async function processDeriveScanJob(
       scanTaskAttemptId,
       finishedAt,
     });
-    await deriveProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+
+    // 递增 Redis 进度已完成任务数
+    await incrementScanProgress(scanJobId);
+
+    const finalizeResult =
+      await deriveProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+
+    if (
+      finalizeResult?.transitioned &&
+      (finalizeResult.status === "SUCCESS" ||
+        finalizeResult.status === "PARTIAL_SUCCESS")
+    ) {
+      // 标记 Redis 进度为最终状态
+      await setScanProgressStatus(scanJobId, finalizeResult.status);
+      await deriveProcessorDependencies.enqueuePublishScanResult({
+        shopId,
+        scanJobId,
+      });
+    }
+
+    if (finalizeResult?.transitioned && finalizeResult.status === "FAILED") {
+      await setScanProgressStatus(scanJobId, finalizeResult.status);
+      await deriveProcessorDependencies.releaseLockByType(shopId, "SCAN");
+    }
 
     logger.info(
       {
@@ -158,7 +203,29 @@ export async function processDeriveScanJob(
       errorMessage: `[DERIVE_FAILED] ${errorMessage}`,
       finishedAt,
     });
-    await deriveProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+
+    // 递增 Redis 进度（即使是失败的 task 也算"处理完毕"）
+    await incrementScanProgress(scanJobId);
+
+    const finalizeResult =
+      await deriveProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
+
+    if (
+      finalizeResult?.transitioned &&
+      (finalizeResult.status === "SUCCESS" ||
+        finalizeResult.status === "PARTIAL_SUCCESS")
+    ) {
+      await setScanProgressStatus(scanJobId, finalizeResult.status);
+      await deriveProcessorDependencies.enqueuePublishScanResult({
+        shopId,
+        scanJobId,
+      });
+    }
+
+    if (finalizeResult?.transitioned && finalizeResult.status === "FAILED") {
+      await setScanProgressStatus(scanJobId, finalizeResult.status);
+      await deriveProcessorDependencies.releaseLockByType(shopId, "SCAN");
+    }
 
     throw error;
   }
