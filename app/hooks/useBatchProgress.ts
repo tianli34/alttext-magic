@@ -33,6 +33,27 @@ const PHASE_LABELS: Record<string, string> = {
   failed: "失败",
   unknown: "未知",
 };
+const STATUS_POLL_INTERVAL_MS = 5_000;
+
+function isTerminalPhase(phase: string | null | undefined): boolean {
+  return phase === "done" || phase === "failed";
+}
+
+function isTerminalJobStatus(status: string | null | undefined): boolean {
+  return status === "SUCCESS" || status === "PARTIAL_SUCCESS" || status === "FAILED";
+}
+
+function resolveTerminalPhaseFromJobStatus(status: string | null | undefined): string {
+  if (status === "FAILED") {
+    return "failed";
+  }
+
+  if (status === "SUCCESS" || status === "PARTIAL_SUCCESS") {
+    return "done";
+  }
+
+  return "";
+}
 
 interface UseBatchProgressReturn {
   /** 实时进度（SSE 推送） */
@@ -61,6 +82,14 @@ interface UseBatchProgressReturn {
   rescanning: boolean;
   /** 重新扫描错误 */
   rescanError: string | null;
+  /** 是否允许停止当前扫描 */
+  canStop: boolean;
+  /** 停止扫描回调 */
+  handleStop: () => Promise<void>;
+  /** 停止扫描提交中 */
+  stopping: boolean;
+  /** 停止扫描错误 */
+  stopError: string | null;
 }
 
 /**
@@ -85,19 +114,25 @@ export function useBatchProgress(
   // 3. 重新扫描状态
   const [rescanning, setRescanning] = useState(false);
   const [rescanError, setRescanError] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
 
   // 4. 计算进度百分比
   const currentProgress = progress ?? scanStatus?.progress ?? null;
+  const jobStatus = scanStatus?.scanJob?.status ?? null;
+  const fallbackTerminalPhase = resolveTerminalPhaseFromJobStatus(jobStatus);
+  const currentPhase = currentProgress?.phase ?? fallbackTerminalPhase;
   const percent =
     currentProgress && currentProgress.totalTasks > 0
       ? Math.round(
           (currentProgress.completedTasks / currentProgress.totalTasks) * 100,
         )
+      : isTerminalJobStatus(jobStatus)
+        ? 100
       : 0;
 
   // 5. 判断是否终态
-  const currentPhase = currentProgress?.phase ?? "";
-  const isTerminal = ["done", "failed", "unknown"].includes(currentPhase);
+  const isTerminal = isTerminalPhase(currentPhase) || isTerminalJobStatus(jobStatus);
   const isScanning = !!scanJobId && !isTerminal;
 
   // 6. 阶段中文标签
@@ -144,16 +179,67 @@ export function useBatchProgress(
   // 当 SSE 连接但 scanStatus 未加载时，使用 SSE 数据
   // 当 SSE 未连接（刷新恢复场景）时，使用 scanStatus 数据
   const effectiveProgress = progress ?? scanStatus?.progress ?? null;
-  const effectivePhase = effectiveProgress?.phase ?? "";
-  const effectiveIsTerminal = ["done", "failed", "unknown"].includes(effectivePhase);
+  const effectivePhase = effectiveProgress?.phase ?? fallbackTerminalPhase;
+  const effectiveIsTerminal =
+    isTerminalPhase(effectivePhase) || isTerminalJobStatus(jobStatus);
   const effectivePercent =
     effectiveProgress && effectiveProgress.totalTasks > 0
       ? Math.round(
           (effectiveProgress.completedTasks / effectiveProgress.totalTasks) * 100,
         )
+      : isTerminalJobStatus(jobStatus)
+        ? 100
       : 0;
   const effectivePhaseLabel = PHASE_LABELS[effectivePhase] ?? effectivePhase;
   const effectiveIsScanning = !!scanJobId && !effectiveIsTerminal;
+  const canStop = !!scanStatus &&
+    scanStatus.scanJob.status === "RUNNING" &&
+    scanStatus.tasks.length > 0 &&
+    scanStatus.tasks.every((task) => task.status === "PENDING");
+
+  useEffect(() => {
+    if (!scanJobId || effectiveIsTerminal) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      refreshStatus();
+    }, STATUS_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [effectiveIsTerminal, refreshStatus, scanJobId]);
+
+  const handleStop = useCallback(async () => {
+    if (!scanJobId) {
+      return;
+    }
+
+    setStopping(true);
+    setStopError(null);
+
+    try {
+      const response = await fetch("/api/scan/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scanJobId }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json() as { error?: string };
+        setStopError(body.error ?? `请求失败 (${response.status})`);
+        setStopping(false);
+        return;
+      }
+
+      await refreshStatus();
+      window.location.reload();
+    } catch {
+      setStopError("网络错误，请稍后重试");
+      setStopping(false);
+    }
+  }, [refreshStatus, scanJobId]);
 
   return {
     progress: effectiveProgress as SSEProgressData | null,
@@ -169,5 +255,9 @@ export function useBatchProgress(
     handleRescan,
     rescanning,
     rescanError,
+    canStop,
+    handleStop,
+    stopping,
+    stopError,
   };
 }

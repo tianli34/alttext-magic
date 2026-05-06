@@ -47,3 +47,18 @@ export async function enqueueScanStart(data: ScanStartJobData): Promise<void> {
     "scan-start.queue.enqueued",
   );
 }
+
+export async function removeQueuedScanStartJob(
+  scanJobId: string,
+): Promise<boolean> {
+  const job = await getQueue().getJob(scanJobId);
+
+  if (!job) {
+    return false;
+  }
+
+  await job.remove();
+
+  logger.info({ scanJobId }, "scan-start.queue.removed");
+  return true;
+}

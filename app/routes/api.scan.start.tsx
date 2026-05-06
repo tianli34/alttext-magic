@@ -32,12 +32,9 @@ import { enqueueScanStart } from "../../server/queues/scan-start.queue";
 
 const logger = createLogger({ module: "api.scan.start" });
 
-/** 请求体 schema：scopeFlags 各字段 + noticeVersion */
+/** 请求体 schema：仅接受契约形态 { scopeFlags, noticeVersion } */
 const scanStartBodySchema = z.object({
-  PRODUCT_MEDIA: z.boolean(),
-  FILES: z.boolean(),
-  COLLECTION_IMAGE: z.boolean(),
-  ARTICLE_IMAGE: z.boolean(),
+  scopeFlags: scopeFlagStateSchema,
   noticeVersion: z.string().min(1),
 });
 
@@ -84,13 +81,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { noticeVersion, ...scopeFlagsRaw } = parsed;
-  const scopeFlags: ScopeFlagState = {
-    PRODUCT_MEDIA: scopeFlagsRaw.PRODUCT_MEDIA,
-    FILES: scopeFlagsRaw.FILES,
-    COLLECTION_IMAGE: scopeFlagsRaw.COLLECTION_IMAGE,
-    ARTICLE_IMAGE: scopeFlagsRaw.ARTICLE_IMAGE,
-  };
+  const { noticeVersion, scopeFlags } = parsed;
 
   // 5. 校验至少选择一个 scope
   const enabledFlags = listEnabledScopeFlags(scopeFlags);

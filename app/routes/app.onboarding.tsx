@@ -6,7 +6,7 @@
  */
 import { useState, useCallback } from "react";
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useNavigate } from "react-router";
+import { useLoaderData, useLocation, useNavigate } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getBootstrapData } from "../../server/modules/bootstrap/bootstrap.service";
@@ -17,7 +17,7 @@ import {
   DEFAULT_SCOPE_FLAG_STATE,
   listEnabledScopeFlags,
 } from "../lib/scope-utils";
-import { SCAN_NOTICE_VERSION } from "../../server/config/constants";
+import { SCAN_NOTICE_VERSION } from "../../shared/constants";
 
 /** Bootstrap 数据类型（前端需要的子集） */
 interface OnboardingLoaderData {
@@ -41,14 +41,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const bootstrap = await getBootstrapData(shop.id);
 
-  // 如果不需要确认说明页，直接重定向到首页
-  if (!bootstrap.needsNoticeAck) {
-    return new Response(null, {
-      status: 302,
-      headers: { Location: "/app" },
-    });
-  }
-
   return Response.json({
     needsNoticeAck: bootstrap.needsNoticeAck,
     noticeVersion: bootstrap.noticeVersion,
@@ -58,6 +50,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function OnboardingPage() {
   const loaderData = useLoaderData<typeof loader>();
+  const location = useLocation();
   const navigate = useNavigate();
 
   const { noticeVersion, scanScopeFlags } = loaderData as OnboardingLoaderData;
@@ -78,9 +71,21 @@ export default function OnboardingPage() {
 
   // 是否至少选择了一个 scope
   const hasAnyScope = listEnabledScopeFlags(scopeFlags).length > 0;
-
-  // 是否可以提交
   const canSubmit = acknowledged && hasAnyScope && !submitting;
+  const submitButtonStyle: React.CSSProperties = {
+    padding: "0.625rem 1rem",
+    border: "none",
+    borderRadius: "0.75rem",
+    background: canSubmit
+      ? "var(--p-color-bg-fill-brand)"
+      : "var(--p-color-bg-fill-disabled)",
+    color: canSubmit
+      ? "var(--p-color-text-brand-on-bg-fill)"
+      : "var(--p-color-text-disabled)",
+    font: "inherit",
+    fontWeight: 600,
+    cursor: canSubmit ? "pointer" : "not-allowed",
+  };
 
   const handleScopeChange = useCallback((flags: ScopeFlagState) => {
     setScopeFlags(flags);
@@ -101,7 +106,7 @@ export default function OnboardingPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...scopeFlags,
+          scopeFlags,
           noticeVersion: noticeVersion || SCAN_NOTICE_VERSION,
         }),
       });
@@ -113,13 +118,15 @@ export default function OnboardingPage() {
         return;
       }
 
-      // 成功后跳转到首页（Dashboard 将展示扫描进度）
-      navigate("/app");
+      navigate({
+        pathname: "/app",
+        search: location.search,
+      });
     } catch {
       setError("网络错误，请稍后重试");
       setSubmitting(false);
     }
-  }, [canSubmit, scopeFlags, noticeVersion, navigate]);
+  }, [canSubmit, scopeFlags, noticeVersion, navigate, location.search]);
 
   return (
     <s-page heading="首次扫描说明">
@@ -157,16 +164,16 @@ export default function OnboardingPage() {
             </s-box>
           )}
 
-          {/* 提交按钮 */}
           <s-stack direction="inline" gap="base">
-            <s-button
-              variant="primary"
+            <button
+              type="button"
               onClick={handleSubmit}
               disabled={!canSubmit}
-              accessibilityLabel="开始扫描"
+              aria-label="开始扫描"
+              style={submitButtonStyle}
             >
               {submitting ? "正在启动..." : "开始扫描"}
-            </s-button>
+            </button>
             {submitting && (
               <s-text tone="neutral">正在创建扫描任务，请稍候...</s-text>
             )}

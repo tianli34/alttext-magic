@@ -40,7 +40,7 @@ export default defineConfig({
     port: Number(process.env.PORT || 3222),
     hmr: hmrConfig,
     fs: {
-      allow: ["app", "node_modules"],
+      allow: ["app", "node_modules",'./shared'],
     },
   },
   plugins: [

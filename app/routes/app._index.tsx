@@ -5,7 +5,7 @@
  *          否则展示仪表盘占位内容。
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useNavigate } from "react-router";
+import { useLoaderData, useLocation, useNavigate } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getBootstrapData } from "../../server/modules/bootstrap/bootstrap.service";
@@ -45,6 +45,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function AppDashboardPage() {
   const loaderData = useLoaderData<typeof loader>();
+  const location = useLocation();
   const navigate = useNavigate();
   const data = loaderData as DashboardLoaderData;
 
@@ -55,12 +56,26 @@ export default function AppDashboardPage() {
         <s-section heading="开始使用">
           <s-stack direction="block" gap="base">
             <s-paragraph>请先完成首次扫描说明确认。</s-paragraph>
-            <s-button
-              variant="primary"
-              onClick={() => navigate("/app/onboarding")}
+            <button
+              type="button"
+              onClick={() => navigate({
+                pathname: "/app/onboarding",
+                search: location.search,
+              })}
+              style={{
+                display: "inline-block",
+                padding: "0.625rem 1rem",
+                border: "none",
+                borderRadius: "0.75rem",
+                background: "var(--p-color-bg-fill-brand)",
+                color: "var(--p-color-text-brand-on-bg-fill)",
+                font: "inherit",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
             >
               前往确认
-            </s-button>
+            </button>
           </s-stack>
         </s-section>
       </s-page>

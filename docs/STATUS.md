@@ -17,6 +17,7 @@
 
 ### Phase 3
 - 完成首次扫描说明页前端（`ScanNotice.tsx` 四块说明+确认勾选、`ScopeSelector.tsx` 四类scope复选框）及 `app.onboarding.tsx` 路由（鉴权、表单校验、提交跳转）
+- 修复首次扫描入口与说明页交互：`前往确认`/`全选`/`取消全选`/`开始扫描` 改用原生按钮
 - 完成 `POST /api/scan/start`：鉴权 → zod校验 → 获取锁（409冲突）→ ackNotice + updateScope → 事务创建 scan_job/scan_task → Redis初始化进度 → BullMQ入队；含10条路由层测试
 - 完成 `GET /api/scan/status`：鉴权 → 并行查 scan_job/tasks/attempts + Redis进度 → 返回完整状态
 - 完成 4 类 Bulk GraphQL 查询定义与真实样本验证
@@ -30,6 +31,10 @@
 - 完成 `publish_scan_result`：新增 publish 队列/worker，单事务按成功资源类型发布 `alt_target` / `image_usage`、失败切片保留旧发布、成功切片 sweep 为 `NOT_FOUND`，并收敛 `alt_candidate` / `candidate_group_projection`
 - 完成 publish 后收敛补强：发布成功后更新 `shops.last_published_*`、`FILE_ALT` 按 `image_usage PRESENT` 重算 target 存在性，`FAILED`/publish 完成后释放 SCAN 锁
 - 完成 SSE 进度推送 + 扫描进度页前端（P3-13）：Worker 关键阶段写 Redis 进度（started→bulk_submitted→parsing→derive→publish→done/failed）、`GET /api/sse` 轮询式 SSE 端点、`useSSE`/`useScanStatus`/`useBatchProgress` hooks、`ProgressBar`/`StatusBadge`/`ScanStatusBanner` 组件、Dashboard 进度页集成
+- 修复扫描页 SSE 中断后长期卡在 `0%/等待中`：新增自动重连 + `scan/status` 轮询兜底，并支持停止“尚未开始执行”的挂起扫描
+- 修复扫描终态误判与误跳转：`SSE unknown` 不再直接视为完成，扫描页终态不再 3 秒强制跳回占位 Dashboard，改由 `scan/status`/数据库状态兜底判定
+- 完成 SSE 鉴权升级：前端使用 App Bridge `idToken()` + `@microsoft/fetch-event-source` 发送 `Authorization: Bearer <token>`，后端 SSE 未认证/Token 失效固定返回 401
+- 修复 Worker/ Web 进程数据库配置加载不一致：`Prisma Pool` 改为统一读取 `zod` 校验后的 `env.DATABASE_URL`
 
 ## In Progress-本地开发
 - Phase 3：全量扫描管线

@@ -44,6 +44,17 @@ export function ScopeSelector({
   onChange,
   disabled = false,
 }: ScopeSelectorProps) {
+  const quickActionButtonStyle: React.CSSProperties = {
+    padding: "0.5rem 0.875rem",
+    border: "1px solid var(--p-color-border)",
+    borderRadius: "0.75rem",
+    background: "var(--p-color-bg-surface)",
+    color: "var(--p-color-text)",
+    font: "inherit",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.5 : 1,
+  };
+
   const handleToggle = useCallback(
     (flag: ScopeFlag) => {
       onChange({
@@ -92,22 +103,22 @@ export function ScopeSelector({
 
         {/* 全选/取消全选快捷操作 */}
         <s-stack direction="inline" gap="small">
-          <s-button
-            variant="tertiary"
+          <button
+            type="button"
             onClick={handleSelectAll}
             disabled={disabled}
-            accessibilityLabel="全选"
+            style={quickActionButtonStyle}
           >
             全选
-          </s-button>
-          <s-button
-            variant="tertiary"
+          </button>
+          <button
+            type="button"
             onClick={handleDeselectAll}
             disabled={disabled}
-            accessibilityLabel="取消全选"
+            style={quickActionButtonStyle}
           >
             取消全选
-          </s-button>
+          </button>
         </s-stack>
 
         {/* 各 scope 勾选项 */}

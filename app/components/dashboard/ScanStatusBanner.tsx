@@ -4,7 +4,6 @@
  *          展示实时扫描进度、task 粒度状态、异常提示和重新扫描按钮。
  *          整合 SSE 实时推送 + scan/status 刷新恢复。
  */
-import { useCallback } from "react";
 import { useNavigate } from "react-router";
 import { useBatchProgress } from "../../hooks/useBatchProgress";
 import { ProgressBar } from "../common/ProgressBar";
@@ -30,13 +29,6 @@ const RESOURCE_LABELS: Record<string, string> = {
 export function ScanProgressPage({ scanJobId }: ScanProgressPageProps) {
   const navigate = useNavigate();
 
-  const handleTerminal = useCallback(() => {
-    // 终态后 3 秒自动刷新到 Dashboard
-    setTimeout(() => {
-      navigate("/app");
-    }, 3000);
-  }, [navigate]);
-
   const {
     progress,
     scanStatus,
@@ -49,7 +41,11 @@ export function ScanProgressPage({ scanJobId }: ScanProgressPageProps) {
     handleRescan,
     rescanning,
     rescanError,
-  } = useBatchProgress(scanJobId, handleTerminal);
+    canStop,
+    handleStop,
+    stopping,
+    stopError,
+  } = useBatchProgress(scanJobId);
 
   // 加载中骨架屏
   if (loading && !progress) {
@@ -146,7 +142,7 @@ export function ScanProgressPage({ scanJobId }: ScanProgressPageProps) {
               background="strong"
             >
               <s-text tone="caution">
-                实时推送连接中断（{sseError}），页面将在下次数据更新时自动恢复。
+                实时推送连接异常（{sseError}），页面会自动重连，并通过状态轮询继续刷新。
               </s-text>
             </s-box>
           )}
@@ -200,25 +196,49 @@ export function ScanProgressPage({ scanJobId }: ScanProgressPageProps) {
             </s-box>
           )}
 
-          {/* 操作按钮 */}
+          {/* 操作按钮：React 18 的 onClick/disabled 在 Polaris WC 上不可靠，用原生 div 包裹 */}
           {isTerminal && (
             <s-stack direction="inline" gap="base">
-              <s-button
-                variant="primary"
+              <div
                 onClick={() => navigate("/app")}
-                accessibilityLabel="返回仪表盘"
+                style={{ display: "inline-block", cursor: "pointer" }}
               >
-                返回仪表盘
-              </s-button>
+                <s-button
+                  variant="primary"
+                  accessibilityLabel="返回仪表盘"
+                >
+                  返回仪表盘
+                </s-button>
+              </div>
+              <div
+                onClick={rescanning ? undefined : handleRescan}
+                style={{ display: "inline-block" }}
+              >
+                <s-button
+                  variant="secondary"
+                  {...(rescanning ? { disabled: true } : {})}
+                  accessibilityLabel="重新扫描"
+                >
+                  {rescanning ? "正在启动…" : "重新扫描"}
+                </s-button>
+              </div>
+            </s-stack>
+          )}
+
+          {!isTerminal && canStop && (
+            <div
+              onClick={stopping ? undefined : handleStop}
+              style={{ display: "inline-block" }}
+            >
               <s-button
                 variant="secondary"
-                onClick={handleRescan}
-                disabled={rescanning}
-                accessibilityLabel="重新扫描"
+                tone="critical"
+                {...(stopping ? { disabled: true } : {})}
+                accessibilityLabel="停止扫描"
               >
-                {rescanning ? "正在启动…" : "重新扫描"}
+                {stopping ? "正在停止…" : "停止扫描"}
               </s-button>
-            </s-stack>
+            </div>
           )}
 
           {/* 重新扫描错误 */}
@@ -229,6 +249,16 @@ export function ScanProgressPage({ scanJobId }: ScanProgressPageProps) {
               background="strong"
             >
               <s-text tone="critical">{rescanError}</s-text>
+            </s-box>
+          )}
+
+          {stopError && (
+            <s-box
+              padding="small"
+              borderRadius="base"
+              background="strong"
+            >
+              <s-text tone="critical">{stopError}</s-text>
             </s-box>
           )}
         </s-stack>

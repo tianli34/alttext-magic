@@ -13,10 +13,36 @@ import { createLogger } from "../../server/utils/logger";
 
 const logger = createLogger({ module: "api.sse" });
 
+function unauthorizedResponse(): Response {
+  return Response.json({ error: "Unauthorized" }, { status: 401 });
+}
+
+function hasBearerToken(request: Request): boolean {
+  const authorization = request.headers.get("authorization");
+  const token = authorization?.replace(/^Bearer\s+/i, "").trim();
+  return authorization?.toLowerCase().startsWith("bearer ") === true && !!token;
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   // 1. 鉴权
-  const { session } = await authenticate.admin(request);
-  const shopDomain = session.shop;
+  if (!hasBearerToken(request)) {
+    return unauthorizedResponse();
+  }
+
+  let shopDomain: string;
+  try {
+    const { session } = await authenticate.admin(request);
+    shopDomain = session.shop;
+  } catch (error) {
+    if (
+      error instanceof Response &&
+      (error.status === 401 || (error.status >= 300 && error.status < 400))
+    ) {
+      return unauthorizedResponse();
+    }
+
+    throw error;
+  }
 
   // 2. 校验 shop 存在
   const shop = await prisma.shop.findUnique({

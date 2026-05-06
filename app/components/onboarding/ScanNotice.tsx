@@ -2,7 +2,7 @@
  * File: app/components/onboarding/ScanNotice.tsx
  * Purpose: 首次扫描说明页的说明内容展示组件。
  *          展示扫描范围、用途说明、留存期限、AI 使用边界四块信息。
- *          内容来源：docs/首次扫描前说明.md
+ *          内容依据：docs/Specs/4. 核心流程设计/4.2 首次打开、扫描说明确认、scope 闭环与 Shop 级互斥.md
  */
 
 export interface ScanNoticeProps {

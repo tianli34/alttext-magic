@@ -303,7 +303,7 @@ export async function processParseBulkJob(
     );
 
     // 6. 投递 derive job（staging → 候选目标推导）
-    await enqueueDeriveScan({
+    await parseBulkProcessorDependencies.enqueueDeriveScan({
       shopId,
       scanJobId,
       scanTaskId,

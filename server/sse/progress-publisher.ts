@@ -113,6 +113,7 @@ export async function setScanProgressStatus(
   scanJobId: string,
   status: string,
   phase?: ScanPhase,
+  messageOverride?: string,
 ): Promise<void> {
   const key = getScanProgressKey(scanJobId);
   const redis = queueConnection;
@@ -122,11 +123,12 @@ export async function setScanProgressStatus(
     (status === "FAILED" ? SCAN_PHASE.FAILED : SCAN_PHASE.DONE);
 
   const message =
-    status === "FAILED"
+    messageOverride ??
+    (status === "FAILED"
       ? "扫描失败，请检查或重试"
       : status === "PARTIAL_SUCCESS"
         ? "扫描部分完成，正在发布结果…"
-        : "扫描完成";
+        : "扫描完成");
 
   await redis.hset(key, { status, phase: resolvedPhase, message });
 

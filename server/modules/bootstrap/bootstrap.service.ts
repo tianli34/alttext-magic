@@ -10,7 +10,7 @@
  */
 import { ScanJobStatus } from "@prisma/client";
 import prisma from "../../db/prisma.server";
-import { SCAN_NOTICE_VERSION } from "../../config/constants";
+import { SCAN_NOTICE_VERSION } from "../../../shared/constants";
 import { createLogger } from "../../utils/logger";
 import { getNoticeStatus } from "../notice/scan-notice-ack.service";
 import {

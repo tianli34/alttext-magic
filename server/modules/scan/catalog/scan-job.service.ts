@@ -7,7 +7,9 @@
 import type { PrismaClient, ScanResourceType } from "@prisma/client";
 import prisma from "../../../db/prisma.server";
 import { createLogger } from "../../../utils/logger";
-import { getScanProgress } from "../../../sse/progress-publisher";
+import { getScanProgress, setScanProgressStatus } from "../../../sse/progress-publisher";
+import { releaseLockByType } from "../../lock/operation-lock.service";
+import { removeQueuedScanStartJob } from "../../../queues/scan-start.queue";
 import type {
   CreateScanJobParams,
   CreateScanJobResult,
@@ -248,4 +250,84 @@ export async function getScanStatus(
     progress,
     lastPublishedAt,
   };
+}
+
+export async function stopPendingScanJob(
+  scanJobId: string,
+  shopId: string,
+): Promise<
+  | { ok: true }
+  | { ok: false; reason: "NOT_FOUND" | "NOT_RUNNING" | "ALREADY_STARTED" }
+> {
+  const [scanJob, tasks] = await Promise.all([
+    prisma.scanJob.findUnique({
+      where: { id: scanJobId },
+      select: {
+        id: true,
+        shopId: true,
+        status: true,
+      },
+    }),
+    prisma.scanTask.findMany({
+      where: { scanJobId },
+      select: {
+        id: true,
+        resourceType: true,
+        status: true,
+        currentAttemptNo: true,
+      },
+    }),
+  ]);
+
+  if (!scanJob || scanJob.shopId !== shopId) {
+    return { ok: false, reason: "NOT_FOUND" };
+  }
+
+  if (scanJob.status !== "RUNNING") {
+    return { ok: false, reason: "NOT_RUNNING" };
+  }
+
+  const canStop = tasks.length > 0 &&
+    tasks.every((task) => task.status === "PENDING" && task.currentAttemptNo === 0);
+
+  if (!canStop) {
+    return { ok: false, reason: "ALREADY_STARTED" };
+  }
+
+  const now = new Date();
+  const errorMessage = "用户手动停止了尚未开始执行的扫描";
+
+  await removeQueuedScanStartJob(scanJobId);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.scanTask.updateMany({
+      where: {
+        scanJobId,
+        status: "PENDING",
+      },
+      data: {
+        status: "FAILED",
+        error: errorMessage,
+        finishedAt: now,
+      },
+    });
+
+    await tx.scanJob.update({
+      where: { id: scanJobId },
+      data: {
+        status: "FAILED",
+        publishStatus: "NOT_PUBLISHED",
+        finishedAt: now,
+        failedResourceTypes: tasks.map((task) => task.resourceType),
+        error: errorMessage,
+      },
+    });
+  });
+
+  await releaseLockByType(shopId, "SCAN");
+  await setScanProgressStatus(scanJobId, "FAILED", "failed", "扫描已停止");
+
+  logger.info({ scanJobId, shopId }, "scan-job.pending-stopped");
+
+  return { ok: true };
 }
