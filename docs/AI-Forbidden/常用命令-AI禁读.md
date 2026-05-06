@@ -8,7 +8,7 @@ Windows PowerShell
 
 
 git add .
-git commit -m "Task P3-05 done 未完全验收"
+git commit -m "已实现 SSE 鉴权升级"
 git push
 
 

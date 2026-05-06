@@ -1,40 +1,18 @@
 ## Completed
-- 已配置 Shopify 嵌入式应用外壳、模板认证和 Prisma 会话存储
-- 授权后已自动 upsert 店铺记录并保存加密离线令牌
-- 已完成第一阶段 Webhook 注册
-- 已完成 Webhook 接收鉴权、幂等落库、BullMQ 入队、worker 处理闭环
-- 已完成 Embedded App 壳层导航：Dashboard/Review/History/Billing/Settings/Help 占位页
-- server\config\constants.ts
-- 新增 scope flags 校验、去重、排序工具函数与测试
-- 已补齐Prisma Schema 所有表与关系
-- 已生成 Phase 2 核心 schema migration，并新增数据库核心表与关键唯一索引校验脚本
-- 安装完成时在 shop upsert 事务内幂等初始化 `WELCOME(50)` 与当月 `FREE_MONTHLY_INCLUDED(25)` buckets
-- 完成 scan_notice_ack 基础服务：`ackNotice` upsert 确认、`getNoticeStatus` 版本检查、纯函数 `checkNeedsAck`
-- 完成 scope 服务：`getScopeSettings`、`updateScanScopeFlags`、`computeEffectiveReadScopeFlags`，默认四类全开，非法 flag zod 报错
-- 完成 `shop_operation_lock` 服务：`acquireLock` / `releaseLock` / `heartbeatLock` / `cleanupExpiredLocks` 与集成测试
-- 完成 Bootstrap 聚合服务 `getBootstrapData` 及 `GET /api/bootstrap` 路由：聚合返回计划占位、额度占位、notice 状态、scope 三件套（scan / lastPublished / effectiveRead）、最近扫描状态
-- 完成 `POST /api/settings/scope` 路由：校验登录态/shop上下文、body flags 校验、调用 `updateScanScopeFlags`、返回 ScopeSettings
+### 1. 已就绪的基础设施
+- **技术栈**：Shopify Embedded App (React/Polaris Web Components) + Node.js + Prisma (PostgreSQL) + BullMQ。
+- **全局状态与组件**：
+  - `/api/bootstrap` 接口已通，可返回套餐配额、`effectiveRead` Scope、上次发布时间及最近扫描状态。
+  - Scope 工具已就绪：支持计算 `effective_read_scope_flags`，用于后续数据过滤。
+  - 扫描进度组件已就绪：`useScanStatus` hook 与 `ScanStatusBanner` 组件支持 SSE 实时扫描状态，Dashboard 可直接集成以显示“正在重新扫描”状态。
 
-### Phase 3
-- 完成首次扫描说明页前端（`ScanNotice.tsx` 四块说明+确认勾选、`ScopeSelector.tsx` 四类scope复选框）及 `app.onboarding.tsx` 路由（鉴权、表单校验、提交跳转）
-- 修复首次扫描入口与说明页交互：`前往确认`/`全选`/`取消全选`/`开始扫描` 改用原生按钮
-- 完成 `POST /api/scan/start`：鉴权 → zod校验 → 获取锁（409冲突）→ ackNotice + updateScope → 事务创建 scan_job/scan_task → Redis初始化进度 → BullMQ入队；含10条路由层测试
-- 完成 `GET /api/scan/status`：鉴权 → 并行查 scan_job/tasks/attempts + Redis进度 → 返回完整状态
-- 完成 4 类 Bulk GraphQL 查询定义与真实样本验证
-- 完成 `scan_start` Worker 并行 Bulk 提交：新增 `BulkSlotManager` / `BulkSubmitService`、`trySubmitNextBatch(scanJobId)`、`BULK_OPERATIONS_FINISH` webhook 补位提交与 attempt/bulk_operation_id 落库日志
-- 完成 `BULK_OPERATIONS_FINISH` 终态收敛与并发补位：新增 parse 入队、Shop 级 Redis 槽位锁、重复 webhook 幂等与并发测试
-- 完成流式 NDJSON 解析基础设施：通用流式 parser、4 类资源 parser callback、`__parentId` 缓存映射、staging batch flush 组件、fixture 回放入口、parse-bulk worker 注册
-- 完成 Staging 写入闭环：5 张 staging 表 batch upsert（stg_product/stg_media_image_product/stg_media_image_file/stg_collection/stg_article）、`__parentId` 关联、position_index 优先 Shopify 字段 + 0-based fallback、parse 成功后投递 derive job
-- 完成 parse_bulk_to_staging 过期恢复：403/404/过期/超时等下载失败分类、按 `max_parse_attempts` 自动重提 bulk、超限 task 失败收敛与测试
-- 完成 derive_scan_attempt_to_result：从 staging upsert `scan_result_target/scan_result_usage`，实现 `FILE_ALT` 跨 `PRODUCT_MEDIA/FILES` 单 target 去重、双 usage 保留，并补齐 derive/parse 交接与幂等测试
-- 已收紧结果层 schema：`scan_result_target` 唯一键改为 target 级 `(shopId, scanJobId, altPlane, writeTargetId, locale)`，并新增迁移去除 `resourceType` 造成的 FILE_ALT 双 target 张力
-- 完成 `publish_scan_result`：新增 publish 队列/worker，单事务按成功资源类型发布 `alt_target` / `image_usage`、失败切片保留旧发布、成功切片 sweep 为 `NOT_FOUND`，并收敛 `alt_candidate` / `candidate_group_projection`
-- 完成 publish 后收敛补强：发布成功后更新 `shops.last_published_*`、`FILE_ALT` 按 `image_usage PRESENT` 重算 target 存在性，`FAILED`/publish 完成后释放 SCAN 锁
-- 完成 SSE 进度推送 + 扫描进度页前端（P3-13）：Worker 关键阶段写 Redis 进度（started→bulk_submitted→parsing→derive→publish→done/failed）、`GET /api/sse` 轮询式 SSE 端点、`useSSE`/`useScanStatus`/`useBatchProgress` hooks、`ProgressBar`/`StatusBadge`/`ScanStatusBanner` 组件、Dashboard 进度页集成
-- 修复扫描页 SSE 中断后长期卡在 `0%/等待中`：新增自动重连 + `scan/status` 轮询兜底，并支持停止“尚未开始执行”的挂起扫描
-- 修复扫描终态误判与误跳转：`SSE unknown` 不再直接视为完成，扫描页终态不再 3 秒强制跳回占位 Dashboard，改由 `scan/status`/数据库状态兜底判定
-- 完成 SSE 鉴权升级：前端使用 App Bridge `idToken()` + `@microsoft/fetch-event-source` 发送 `Authorization: Bearer <token>`，后端 SSE 未认证/Token 失效固定返回 401
-- 修复 Worker/ Web 进程数据库配置加载不一致：`Prisma Pool` 改为统一读取 `zod` 校验后的 `env.DATABASE_URL`
+### 2. 数据层上下文
+Phase 3 后台扫描已闭环，**Phase 4 绝对禁止读取 staging 表，仅限面向以下已发布模型进行只读/更新**：
+- `candidate_group_projection`: 聚合分组主表，Phase 4 列表和统计的主查询入口。
+- `alt_candidate` / `alt_target` / `alt_draft`: 候选数据与目标详情（注意：`alt_candidate.status` 需支持更新为 `DECORATIVE_SKIPPED`）。
+- `image_usage`: 图片的具体引用位置。复用去重已在底层处理，同一文件在 Product/Files 分组中会自动正确统计。
+- `decorative_mark`: 用于 Phase 4 的装饰性标记存储表。
+- `shops`: 发布后 `last_published_*` 字段已更新。
 
-## In Progress-本地开发
-- Phase 3：全量扫描管线
+## In Progress（本地开发）- Phase 4：仪表盘、候选列表与装饰性标记
+
