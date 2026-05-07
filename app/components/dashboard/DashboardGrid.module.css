@@ -1,0 +1,23 @@
+/**
+ * Dashboard 卡片网格响应式布局。
+ * 桌面端四列 / 平板两列 / 移动端单列。
+ */
+.dashboardGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--p-space-4, 16px);
+}
+
+/* 平板（<=768px）：两列 */
+@media (max-width: 768px) {
+  .dashboardGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* 手机（<=480px）：单列 */
+@media (max-width: 480px) {
+  .dashboardGrid {
+    grid-template-columns: 1fr;
+  }
+}

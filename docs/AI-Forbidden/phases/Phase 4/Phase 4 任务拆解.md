@@ -8,8 +8,8 @@
 实现 `GET /api/dashboard`，为前端仪表盘提供按组分类的图片统计数据。
 
 **输入 / 前置**  
-- Phase 3 已发布的 `candidate_group_projection`、`alt_candidate`、`alt_target` 表中有数据  
-- Phase 2 的 `effective_read_scope_flags` 计算逻辑与 `decorative_mark` 表可用
+- `candidate_group_projection`、`alt_candidate`、`alt_target` 表中有数据  
+- `effective_read_scope_flags` 计算逻辑与 `decorative_mark` 表可用
 
 **实现要点**  
 1. 新建路由 `GET /api/dashboard`，挂载到 web 路由层  
