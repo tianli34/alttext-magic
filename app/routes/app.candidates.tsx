@@ -2,6 +2,7 @@
  * File: app/routes/app.candidates.tsx
  * Purpose: 候选列表页面。
  *          展示 scope 内候选图片，支持 group/status 过滤、usage 展开和游标分页。
+ *          支持 装饰性标记 / 取消标记 交互，含确认弹窗、loading 态和错误 Toast。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
@@ -200,6 +201,12 @@ export default function AppCandidatesPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [usageByCandidateId, setUsageByCandidateId] = useState<Record<string, UsageState>>({});
+  const [markingIds, setMarkingIds] = useState<Set<string>>(new Set());
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; visible: boolean }>({
+    message: "",
+    visible: false,
+  });
 
   const selectedGroupValue = selectedGroup || "";
 
@@ -343,7 +350,62 @@ export default function AppCandidatesPage() {
     [expandedId, selectedGroup, usageByCandidateId],
   );
 
+  /* ---- Toast helper ---- */
+  const showToast = useCallback((message: string) => {
+    setToast({ message, visible: true });
+    window.setTimeout(() => setToast({ message: "", visible: false }), 4000);
+  }, []);
+
+  /* ---- 装饰性标记 / 取消标记 ---- */
+  const handleDecorativeConfirm = useCallback(
+    async (item: CandidateItem, action: "mark" | "unmark") => {
+      setConfirmId(null);
+      setMarkingIds((prev) => {
+        const next = new Set(prev);
+        next.add(item.altCandidateId);
+        return next;
+      });
+
+      try {
+        const endpoint =
+          action === "mark" ? "/api/decorative/mark" : "/api/decorative/unmark";
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ altCandidateId: item.altCandidateId }),
+        });
+
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? `操作失败 (${response.status})`);
+        }
+
+        const data = (await response.json()) as {
+          candidate: { status: CandidateStatus };
+        };
+        // 实时更新列表项状态（无需整页刷新）
+        setItems((current) =>
+          current.map((i) =>
+            i.altCandidateId === item.altCandidateId
+              ? { ...i, status: data.candidate.status }
+              : i,
+          ),
+        );
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : "操作失败，请重试");
+      } finally {
+        setMarkingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.altCandidateId);
+          return next;
+        });
+      }
+    },
+    [showToast],
+  );
+
   return (
+    <>
     <s-page heading="候选列表">
       <s-section heading="筛选">
         <s-stack direction="block" gap="base">
@@ -470,6 +532,59 @@ export default function AppCandidatesPage() {
                       </s-stack>
 
                       <div className={styles.rowAction}>
+                        {/* 装饰性标记 / 取消标记 */}
+                        {(item.status === "MISSING" ||
+                          item.status === "DECORATIVE_SKIPPED") && (
+                          <>
+                            {confirmId === item.altCandidateId ? (
+                              <div className={styles.confirmRow}>
+                                <span style={{ fontSize: "0.8125rem" }}>
+                                  确认?
+                                </span>
+                                <button
+                                  type="button"
+                                  className={styles.confirmYes}
+                                  onClick={() =>
+                                    void handleDecorativeConfirm(
+                                      item,
+                                      item.status === "MISSING"
+                                        ? "mark"
+                                        : "unmark",
+                                    )
+                                  }
+                                >
+                                  确认
+                                </button>
+                                <button
+                                  type="button"
+                                  className={styles.confirmNo}
+                                  onClick={() => setConfirmId(null)}
+                                >
+                                  取消
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className={`${styles.decorativeBtn} ${
+                                  item.status === "DECORATIVE_SKIPPED"
+                                    ? styles.decorativeBtnActive
+                                    : ""
+                                }`}
+                                disabled={markingIds.has(item.altCandidateId)}
+                                onClick={() =>
+                                  setConfirmId(item.altCandidateId)
+                                }
+                              >
+                                {markingIds.has(item.altCandidateId)
+                                  ? "处理中…"
+                                  : item.status === "MISSING"
+                                    ? "标记为装饰性"
+                                    : "取消装饰性标记"}
+                              </button>
+                            )}
+                          </>
+                        )}
                         <button
                           type="button"
                           className={styles.linkButton}
@@ -532,5 +647,13 @@ export default function AppCandidatesPage() {
         )}
       </s-section>
     </s-page>
-  );
+
+    {/* 错误 Toast */}
+    {toast.visible && (
+      <div className={styles.toast}>
+        <s-text tone="critical">{toast.message}</s-text>
+      </div>
+    )}
+  </>
+);
 }
