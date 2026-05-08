@@ -46,6 +46,9 @@ interface GroupStatsCardProps {
 export function GroupStatsCard({ stats }: GroupStatsCardProps) {
   const label = GROUP_TYPE_LABELS[stats.groupType] ?? stats.groupType;
   const icon = GROUP_TYPE_ICONS[stats.groupType] ?? "📊";
+  const missingHref = `/app/candidates?group=${encodeURIComponent(
+    stats.groupType,
+  )}&status=MISSING`;
 
   // 计算 hasAlt 百分比（用于进度条）
   const hasAltPercent =
@@ -105,9 +108,11 @@ export function GroupStatsCard({ stats }: GroupStatsCardProps) {
 
           {/* 缺失 */}
           <s-stack direction="block" gap="small">
-            <s-text tone="critical">
-              {stats.missing.toLocaleString("zh-CN")}
-            </s-text>
+            <s-link href={missingHref}>
+              <s-text tone="critical">
+                {stats.missing.toLocaleString("zh-CN")}
+              </s-text>
+            </s-link>
             <s-text tone="neutral">缺失</s-text>
           </s-stack>
 
