@@ -45,6 +45,7 @@ export async function initScanProgress(
     status: "RUNNING",
     phase: SCAN_PHASE.STARTED,
     message: "扫描已启动，正在准备提交批量查询…",
+    updatedAt: new Date().toISOString(),
   });
 
   await redis.expire(key, SCAN_PROGRESS_TTL_SECONDS);
@@ -70,12 +71,16 @@ export async function updateScanProgressPhase(
   const key = getScanProgressKey(scanJobId);
   const redis = queueConnection;
 
-  const update: Record<string, string> = { phase };
+  const update: Record<string, string> = {
+    phase,
+    updatedAt: new Date().toISOString(),
+  };
   if (message) {
     update.message = message;
   }
 
   await redis.hset(key, update);
+  await redis.expire(key, SCAN_PROGRESS_TTL_SECONDS);
 
   logger.info({ scanJobId, phase, message }, "Redis scan progress phase updated");
 }
@@ -93,6 +98,8 @@ export async function incrementScanProgress(
   const redis = queueConnection;
 
   const completedTasks = await redis.hincrby(key, "completedTasks", 1);
+  await redis.hset(key, { updatedAt: new Date().toISOString() });
+  await redis.expire(key, SCAN_PROGRESS_TTL_SECONDS);
 
   logger.info(
     { scanJobId, completedTasks },
@@ -130,7 +137,13 @@ export async function setScanProgressStatus(
         ? "扫描部分完成，正在发布结果…"
         : "扫描完成");
 
-  await redis.hset(key, { status, phase: resolvedPhase, message });
+  await redis.hset(key, {
+    status,
+    phase: resolvedPhase,
+    message,
+    updatedAt: new Date().toISOString(),
+  });
+  await redis.expire(key, SCAN_PROGRESS_TTL_SECONDS);
 
   logger.info({ scanJobId, status, phase: resolvedPhase }, "Redis scan progress status updated");
 }
@@ -164,4 +177,21 @@ export async function getScanProgress(scanJobId: string): Promise<{
     phase: data.phase ?? "started",
     message: data.message ?? "",
   };
+}
+
+/**
+ * 删除扫描进度键。
+ *
+ * 用于后台兜底清理已终止但 Redis 仍残留的 RUNNING 进度。
+ *
+ * @param scanJobId scan_job 的主键
+ * @returns 删除的键数量
+ */
+export async function deleteScanProgress(scanJobId: string): Promise<number> {
+  const key = getScanProgressKey(scanJobId);
+  const deletedCount = await queueConnection.del(key);
+
+  logger.info({ scanJobId, key, deletedCount }, "Redis scan progress deleted");
+
+  return deletedCount;
 }

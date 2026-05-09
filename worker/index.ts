@@ -25,6 +25,10 @@ import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.s
 import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
 import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
 import { processPublishScanJob } from "./processors/publish-scan.processor.js";
+import {
+  DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS,
+  runScanTimeoutSweepOnce,
+} from "./schedulers/scan-timeout.scheduler.js";
 
 const logger = createLogger({ module: "worker-runtime" });
 const webhookConnection = createRedisConnection();
@@ -32,6 +36,24 @@ const scanStartConnection = createRedisConnection();
 const parseBulkConnection = createRedisConnection();
 const deriveScanConnection = createRedisConnection();
 const publishScanConnection = createRedisConnection();
+let scanTimeoutSweepRunning = false;
+
+const scanTimeoutSweepInterval = setInterval(() => {
+  if (scanTimeoutSweepRunning) {
+    return;
+  }
+
+  scanTimeoutSweepRunning = true;
+  void runScanTimeoutSweepOnce()
+    .catch((error: unknown) => {
+      logger.error({ err: error }, "scan-timeout-scheduler.failed");
+    })
+    .finally(() => {
+      scanTimeoutSweepRunning = false;
+    });
+}, DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS);
+
+scanTimeoutSweepInterval.unref();
 
 const webhookWorker = new Worker<WebhookQueueJobData>(
   WEBHOOK_QUEUE_NAME,
@@ -283,6 +305,7 @@ publishScanWorker.on("error", (error) => {
 
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "worker.shutdown");
+  clearInterval(scanTimeoutSweepInterval);
   await Promise.all([
     webhookWorker.close(),
     scanStartWorker.close(),

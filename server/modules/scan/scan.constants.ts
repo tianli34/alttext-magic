@@ -12,6 +12,9 @@ export const SCAN_PROGRESS_KEY_PREFIX = "scan:progress";
 /** Redis 扫描进度键过期时间（秒）：24 小时 */
 export const SCAN_PROGRESS_TTL_SECONDS = 24 * 60 * 60;
 
+/** RUNNING 扫描无进度更新的兜底超时时间：10 分钟 */
+export const RUNNING_SCAN_STALE_TIMEOUT_MS = 10 * 60 * 1000;
+
 /**
  * 扫描进度阶段枚举。
  * Worker 在关键阶段写 Redis phase 字段，前端通过 SSE 实时读取。
