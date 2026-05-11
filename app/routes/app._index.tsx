@@ -31,6 +31,8 @@ interface DashboardData {
   groups: GroupStats[];
   lastPublishedAt: string | null;
   isScanning: boolean;
+  /** 当前运行中的扫描任务 ID */
+  activeScanJobId: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -114,6 +116,7 @@ export default function AppDashboardPage() {
 /* ------------------------------------------------------------------ */
 
 function DashboardContent() {
+  const navigate = useNavigate();
   /** Dashboard API 数据 */
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   /** 数据加载中 */
@@ -183,7 +186,8 @@ function DashboardContent() {
   }, [dashboardData?.isScanning]);
 
   /* ---------------------------------------------------------------- */
-  /*  重新扫描                                                         */
+  /* ---------------------------------------------------------------- */
+  /*  重新扫描 → 提取 scanJobId → 导航到进度页                          */
   /* ---------------------------------------------------------------- */
   const handleRescan = useCallback(async () => {
     setRescanning(true);
@@ -206,22 +210,19 @@ function DashboardContent() {
         return;
       }
 
-      // 扫描已启动，刷新 dashboard 数据
-      setRefreshKey((prev) => prev + 1);
-      // 保持 rescanning=true，等 dashboard 数据返回 isScanning 后由 UI 自动切换
+      const result = await response.json() as { scanJobId?: string };
+      if (result.scanJobId) {
+        // 拿到 scanJobId → 导航到扫描进度页
+        navigate(`/app/scan-progress?scanJobId=${result.scanJobId}`);
+      } else {
+        // 兜底：无 scanJobId 时刷新 dashboard 数据
+        setRefreshKey((prev) => prev + 1);
+      }
     } catch {
       setRescanError("网络错误，请稍后重试");
       setRescanning(false);
     }
-  }, []);
-
-  // 当 dashboard 数据返回 isScanning 后，关闭 rescanning 态
-  useEffect(() => {
-    if (dashboardData?.isScanning && rescanning) {
-      setRescanning(false);
-    }
-  }, [dashboardData?.isScanning, rescanning]);
-
+  }, [navigate]);
   /* ---------------------------------------------------------------- */
   /*  渲染                                                             */
   /* ---------------------------------------------------------------- */
@@ -229,6 +230,7 @@ function DashboardContent() {
   const groups = dashboardData?.groups ?? [];
   const lastPublishedAt = dashboardData?.lastPublishedAt ?? null;
   const isScanning = dashboardData?.isScanning ?? false;
+  const activeScanJobId = dashboardData?.activeScanJobId ?? null;
   // 当 isScanning 或 rescanning 时，按钮 disabled
   const isScanButtonDisabled = isScanning || rescanning;
 
@@ -291,8 +293,20 @@ function DashboardContent() {
             >
               <s-stack direction="inline" gap="small">
                 <s-text tone="info">⏳</s-text>
-                <s-text>正在重新扫描…</s-text>
-                <s-text tone="neutral">数据可能会暂时滞后，扫描完成后将自动刷新。</s-text>
+                <s-text>正在扫描…</s-text>
+                <s-text tone="neutral">数据可能会暂时滞后。</s-text>
+                {activeScanJobId && (
+                  <div
+                    onClick={() =>
+                      navigate(`/app/scan-progress?scanJobId=${activeScanJobId}`)
+                    }
+                    style={{ display: "inline-block", cursor: "pointer", marginLeft: "0.5rem" }}
+                  >
+                    <s-button variant="secondary" accessibilityLabel="查看进度">
+                      查看进度
+                    </s-button>
+                  </div>
+                )}
               </s-stack>
             </s-box>
           )}

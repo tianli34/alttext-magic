@@ -68,8 +68,8 @@ async function run(): Promise<void> {
           },
         ];
       },
-      async hasRunningScan() {
-        return true;
+      async getActiveScanJobId() {
+        return "scan-job-running-id";
       },
     };
 
@@ -91,6 +91,7 @@ async function run(): Promise<void> {
       "lastPublishedAt 应序列化为 ISO 字符串",
     );
     assert.equal(data.isScanning, true, "RUNNING scan_job 应返回 isScanning=true");
+    assert.equal(data.activeScanJobId, "scan-job-running-id", "RUNNING scan_job 应返回 activeScanJobId");
   }
 
   {
@@ -108,8 +109,8 @@ async function run(): Promise<void> {
         assert.deepEqual(allowedGroups, [], "无发布 scope 时 allowedGroups 应为空");
         return [];
       },
-      async hasRunningScan() {
-        return false;
+      async getActiveScanJobId() {
+        return null;
       },
     };
 
@@ -119,6 +120,7 @@ async function run(): Promise<void> {
     assert.deepEqual(data.groups, [], "fresh shop 不应返回任何分组");
     assert.equal(data.lastPublishedAt, null, "fresh shop lastPublishedAt 应为 null");
     assert.equal(data.isScanning, false, "无 RUNNING scan_job 应返回 isScanning=false");
+    assert.equal(data.activeScanJobId, null, "无 RUNNING scan_job 应返回 activeScanJobId=null");
   }
 
   console.log("✅ dashboard.service 单测全部通过");

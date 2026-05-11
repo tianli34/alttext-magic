@@ -36,7 +36,8 @@ export interface DashboardDataAccess {
     shopId: string,
     allowedGroups: readonly CandidateGroupType[],
   ): Promise<DashboardGroupStatsRow[]>;
-  hasRunningScan(shopId: string): Promise<boolean>;
+  /** 返回运行中扫描的 scanJobId，无则 null */
+  getActiveScanJobId(shopId: string): Promise<string | null>;
 }
 
 const scopeFlagToGroupType: Record<keyof ScanScopeFlags, CandidateGroupType> = {
@@ -109,7 +110,7 @@ const prismaDashboardDataAccess: DashboardDataAccess = {
     );
   },
 
-  async hasRunningScan(shopId) {
+  async getActiveScanJobId(shopId) {
     const runningJob = await prisma.scanJob.findFirst({
       where: {
         shopId,
@@ -119,7 +120,7 @@ const prismaDashboardDataAccess: DashboardDataAccess = {
       orderBy: { startedAt: "desc" },
     });
 
-    return runningJob !== null;
+    return runningJob?.id ?? null;
   },
 };
 
@@ -147,6 +148,7 @@ export async function getDashboardData(
       groups: [],
       lastPublishedAt: null,
       isScanning: false,
+      activeScanJobId: null,
     };
   }
 
@@ -160,9 +162,9 @@ export async function getDashboardData(
   );
   const allowedGroups = mapScopeFlagsToGroupTypes(effectiveReadScopeFlags);
 
-  const [groupRows, isScanning] = await Promise.all([
+  const [groupRows, activeScanJobId] = await Promise.all([
     dataAccess.getGroupStats(shopId, allowedGroups),
-    dataAccess.hasRunningScan(shopId),
+    dataAccess.getActiveScanJobId(shopId),
   ]);
 
   return {
@@ -170,6 +172,7 @@ export async function getDashboardData(
     lastPublishedAt: shop.lastPublishedAt
       ? shop.lastPublishedAt.toISOString()
       : null,
-    isScanning,
+    isScanning: activeScanJobId !== null,
+    activeScanJobId,
   };
 }

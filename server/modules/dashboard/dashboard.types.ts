@@ -16,5 +16,7 @@ export interface DashboardData {
   groups: DashboardGroupStats[];
   lastPublishedAt: string | null;
   isScanning: boolean;
+  /** 当前运行中的扫描任务 ID（用于导航到进度页） */
+  activeScanJobId: string | null;
 }
 

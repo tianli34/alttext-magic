@@ -211,8 +211,13 @@ export function ScanProgressPage({ scanJobId }: ScanProgressPageProps) {
                 </s-button>
               </div>
               <div
-                onClick={rescanning ? undefined : handleRescan}
-                style={{ display: "inline-block" }}
+                onClick={rescanning ? undefined : async () => {
+                  const newScanJobId = await handleRescan();
+                  if (newScanJobId) {
+                    navigate(`/app/scan-progress?scanJobId=${newScanJobId}`);
+                  }
+                }}
+                style={{ display: "inline-block", cursor: rescanning ? "not-allowed" : "pointer" }}
               >
                 <s-button
                   variant="secondary"

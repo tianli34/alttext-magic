@@ -76,8 +76,8 @@ interface UseBatchProgressReturn {
   phaseLabels: typeof PHASE_LABELS;
   /** SSE 连接错误 */
   sseError: string | null;
-  /** 重新扫描回调 */
-  handleRescan: () => Promise<void>;
+  /** 重新扫描回调，成功时返回新的 scanJobId */
+  handleRescan: () => Promise<string | null>;
   /** 重新扫描提交中 */
   rescanning: boolean;
   /** 重新扫描错误 */
@@ -138,8 +138,8 @@ export function useBatchProgress(
   // 6. 阶段中文标签
   const phaseLabel = PHASE_LABELS[currentPhase] ?? currentPhase;
 
-  // 7. 重新扫描
-  const handleRescan = useCallback(async () => {
+  // 7. 重新扫描（返回新的 scanJobId 供调用方导航到进度页）
+  const handleRescan = useCallback(async (): Promise<string | null> => {
     setRescanning(true);
     setRescanError(null);
 
@@ -156,7 +156,7 @@ export function useBatchProgress(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...scopeFlags,
+          scopeFlags,
           noticeVersion: "1.3",
         }),
       });
@@ -165,14 +165,16 @@ export function useBatchProgress(
         const body = await response.json() as { error?: string };
         setRescanError(body.error ?? `请求失败 (${response.status})`);
         setRescanning(false);
-        return;
+        return null;
       }
 
-      // 重新扫描成功，刷新页面以重新加载
-      window.location.reload();
+      const result = await response.json() as { scanJobId?: string };
+      setRescanning(false);
+      return result.scanJobId ?? null;
     } catch {
       setRescanError("网络错误，请稍后重试");
       setRescanning(false);
+      return null;
     }
   }, [scanStatus]);
 
@@ -233,8 +235,9 @@ export function useBatchProgress(
         return;
       }
 
+      // 停止成功，刷新状态即可，无需暴力 reload
       await refreshStatus();
-      window.location.reload();
+      setStopping(false);
     } catch {
       setStopError("网络错误，请稍后重试");
       setStopping(false);
