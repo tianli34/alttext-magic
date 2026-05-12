@@ -79,6 +79,11 @@ const envSchema = z.object({
 
   // ── Logging ──────────────────────────────────────────────
   LOG_LEVEL: LogLevel.default("info"),
+
+  // ── Billing Adapter ─────────────────────────────────────
+  BILLING_ADAPTER: z
+    .enum(["shopify", "fake"])
+    .default("fake"),
 });
 
 /**
