@@ -5,6 +5,7 @@
 import { Worker } from "bullmq";
 import { processWebhookEvent } from "../app/lib/server/webhooks/webhook-process.service.js";
 import {
+  BILLING_SYNC_QUEUE_NAME,
   DERIVE_SCAN_QUEUE_NAME,
   PARSE_BULK_QUEUE_NAME,
   PUBLISH_SCAN_QUEUE_NAME,
@@ -21,10 +22,12 @@ import type { ScanStartJobData } from "../server/queues/scan-start.queue.js";
 import type { ParseBulkJobData } from "../server/queues/parse-bulk.queue.js";
 import type { DeriveScanJobData } from "../server/queues/derive-scan.queue.js";
 import type { PublishScanJobData } from "../server/queues/publish-scan.queue.js";
+import type { BillingSyncJobData } from "../server/queues/billing-sync.queue.js";
 import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.service.js";
 import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
 import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
 import { processPublishScanJob } from "./processors/publish-scan.processor.js";
+import { processBillingSyncJob } from "./processors/billing-sync.processor.js";
 import {
   DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS,
   runScanTimeoutSweepOnce,
@@ -36,6 +39,7 @@ const scanStartConnection = createRedisConnection();
 const parseBulkConnection = createRedisConnection();
 const deriveScanConnection = createRedisConnection();
 const publishScanConnection = createRedisConnection();
+const billingSyncConnection = createRedisConnection();
 let scanTimeoutSweepRunning = false;
 
 const scanTimeoutSweepInterval = setInterval(() => {
@@ -110,6 +114,17 @@ const publishScanWorker = new Worker<PublishScanJobData>(
   },
 );
 
+const billingSyncWorker = new Worker<BillingSyncJobData>(
+  BILLING_SYNC_QUEUE_NAME,
+  async (job) => {
+    await processBillingSyncJob(job.data);
+  },
+  {
+    connection: billingSyncConnection,
+    concurrency: 2,
+  },
+);
+
 webhookWorker.on("ready", () => {
   logger.info(
     {
@@ -154,6 +169,16 @@ publishScanWorker.on("ready", () => {
   logger.info(
     {
       queue: PUBLISH_SCAN_QUEUE_NAME,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
+billingSyncWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: BILLING_SYNC_QUEUE_NAME,
       redis: getRedisConnectionSummary(),
     },
     "worker.ready",

@@ -1,12 +1,13 @@
 /**
  * File: app/lib/server/webhooks/webhook-process.service.ts
  * Purpose: Worker 端消费 WebhookEvent 的业务处理入口。
- * 根据 topic 分发到对应的业务模块（scan / gdpr / scope 等）。
+ * 根据 topic 分发到对应的业务模块（scan / gdpr / scope / billing 等）。
  */
 import prisma from "../../../../server/db/prisma.server";
 import { createLogger } from "../../../../server/utils/logger";
 import type { WebhookEvent } from "@prisma/client";
 import { handleBulkOperationsFinishWebhook } from "../../../../server/modules/scan/catalog/scan-start.service";
+import { syncSubscriptionFromShopify } from "../../../../server/modules/billing/subscription.service";
 
 const logger = createLogger({ module: "webhook-process" });
 
@@ -105,6 +106,16 @@ async function dispatchByTopic(event: WebhookEvent): Promise<void> {
       shopDomain: event.shopDomain,
       payload: event.payload,
     });
+    return;
+  }
+
+  // APP_SUBSCRIPTIONS_UPDATE: 订阅状态变化 → 调用统一订阅同步服务
+  if (normalizedTopic === "APP_SUBSCRIPTIONS_UPDATE") {
+    logger.info(
+      { webhookEventId: event.id, shopDomain: event.shopDomain },
+      "webhook.process.billing-sync",
+    );
+    await syncSubscriptionFromShopify(event.shopDomain);
     return;
   }
 

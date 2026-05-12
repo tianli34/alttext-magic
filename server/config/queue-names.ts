@@ -8,6 +8,7 @@ export const SCAN_START_QUEUE_NAME = "scan-start";
 export const PARSE_BULK_QUEUE_NAME = "parse-bulk";
 export const DERIVE_SCAN_QUEUE_NAME = "derive-scan";
 export const PUBLISH_SCAN_QUEUE_NAME = "publish-scan";
+export const BILLING_SYNC_QUEUE_NAME = "billing-sync";
 
 export const queueNames = {
   webhook: WEBHOOK_QUEUE_NAME,
@@ -15,4 +16,5 @@ export const queueNames = {
   parseBulk: PARSE_BULK_QUEUE_NAME,
   deriveScan: DERIVE_SCAN_QUEUE_NAME,
   publishScan: PUBLISH_SCAN_QUEUE_NAME,
+  billingSync: BILLING_SYNC_QUEUE_NAME,
 } as const;
