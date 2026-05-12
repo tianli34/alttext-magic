@@ -1,16 +1,10 @@
 /**
  * File: server/modules/shop/shop.service.ts
- * Purpose: Persist the canonical shop installation record, encrypted
- * offline access token, and idempotently bootstrap install-time credit
- * buckets within the same database transaction after Shopify
- * authentication completes.
+ * Purpose: Persist the canonical shop installation record and encrypted
+ * offline access token after Shopify authentication completes。
+ * 计费与额度初始化已迁移至 bootstrapShopBilling 服务。
  */
 import { randomUUID } from "node:crypto";
-import {
-  CreditBucketStatus,
-  CreditBucketType,
-  Prisma,
-} from "@prisma/client";
 import prisma from "../../db/prisma.server";
 import { encryptToken } from "../../crypto/token-encryption";
 import { createLogger } from "../../utils/logger";
@@ -23,9 +17,6 @@ import type {
 const logger = createLogger({ module: "shop-service" });
 
 const DEFAULT_PLAN = "FREE";
-const INSTALL_WELCOME_CYCLE_KEY = "WELCOME:INSTALL";
-const INSTALL_WELCOME_GRANT_AMOUNT = 50;
-const FREE_MONTHLY_INCLUDED_GRANT_AMOUNT = 25;
 
 function assertOfflineSession(session: ShopifySessionSnapshot): string {
   if (session.isOnline) {
@@ -39,60 +30,20 @@ function assertOfflineSession(session: ShopifySessionSnapshot): string {
   return session.accessToken;
 }
 
-function buildFreeMonthlyCycleKey(date: Date): string {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-
-  return `FREE:${year}-${month}`;
-}
-
-function getNextUtcMonthStart(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
-}
-
-function buildInstallCreditBuckets(
-  shopId: string,
-  installedAt: Date,
-): Prisma.CreditBucketCreateManyInput[] {
-  return [
-    {
-      shopId,
-      bucketType: CreditBucketType.WELCOME,
-      status: CreditBucketStatus.ACTIVE,
-      cycleKey: INSTALL_WELCOME_CYCLE_KEY,
-      grantedAmount: INSTALL_WELCOME_GRANT_AMOUNT,
-      reservedAmount: 0,
-      consumedAmount: 0,
-      effectiveAt: installedAt,
-      expiresAt: null,
-      activatedAt: installedAt,
-      exhaustedAt: null,
-    },
-    {
-      shopId,
-      bucketType: CreditBucketType.FREE_MONTHLY_INCLUDED,
-      status: CreditBucketStatus.ACTIVE,
-      cycleKey: buildFreeMonthlyCycleKey(installedAt),
-      grantedAmount: FREE_MONTHLY_INCLUDED_GRANT_AMOUNT,
-      reservedAmount: 0,
-      consumedAmount: 0,
-      effectiveAt: installedAt,
-      expiresAt: getNextUtcMonthStart(installedAt),
-      activatedAt: installedAt,
-      exhaustedAt: null,
-    },
-  ];
-}
-
+/**
+ * 持久化店铺安装记录（upsert）。
+ * 仅负责 shop 表写入，不再直接创建 credit_bucket。
+ * 计费与额度初始化由调用方在 afterAuth 流程中通过 bootstrapShopBilling 完成。
+ */
 export async function persistOfflineShopSession({
   session,
-}: PersistOfflineShopSessionInput): Promise<void> {
+}: PersistOfflineShopSessionInput): Promise<{ shopId: string }> {
   if (session.isOnline) {
     logger.debug(
       { shop: session.shop, sessionId: session.id },
       "Skipping shop persistence for online session",
     );
-    return;
+    throw new Error("Online session not supported");
   }
 
   const accessToken = assertOfflineSession(session);
@@ -100,7 +51,7 @@ export async function persistOfflineShopSession({
   const installedAt = new Date();
   const serializedScanScopeFlags = JSON.stringify(DEFAULT_SCAN_SCOPE_FLAGS);
 
-  await prisma.$transaction(async (tx) => {
+  const shopId = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`
       INSERT INTO "shops" (
         "id",
@@ -145,18 +96,13 @@ export async function persistOfflineShopSession({
       select: { id: true },
     });
 
-    const result = await tx.creditBucket.createMany({
-      data: buildInstallCreditBuckets(shop.id, installedAt),
-      skipDuplicates: true,
-    });
-
-    logger.info(
-      {
-        shop: session.shop,
-        sessionId: session.id,
-        createdBucketCount: result.count,
-      },
-      "Persisted shop installation and bootstrapped install credit buckets",
-    );
+    return shop.id;
   });
+
+  logger.info(
+    { shop: session.shop, sessionId: session.id, shopId },
+    "Persisted shop installation record",
+  );
+
+  return { shopId };
 }

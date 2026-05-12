@@ -7,6 +7,7 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 import { persistOfflineShopSession } from "../server/modules/shop/shop.service";
+import { bootstrapShopBilling } from "../server/modules/billing/bootstrap-shop-billing.server";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -22,7 +23,10 @@ const shopify = shopifyApp({
   },
   hooks: {
     afterAuth: async ({ session }) => {
-      await persistOfflineShopSession({ session });
+      // 1. 持久化店铺安装记录
+      const { shopId } = await persistOfflineShopSession({ session });
+      // 2. 初始化计费订阅与安装欢迎额度（幂等）
+      await bootstrapShopBilling(shopId);
     },
   },
   ...(process.env.SHOP_CUSTOM_DOMAIN

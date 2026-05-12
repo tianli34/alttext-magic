@@ -1,6 +1,6 @@
 # AGENTS.md
 **项目**: Shopify自动生成图片Alt Text应用
-**技术栈**: TS, React Router, Prisma+PG, Redis+BullMQ, Polaris+App Bridge
+**技术栈**: TS, React Router, Prisma+PG, Redis+BullMQ, Polaris Web Components + App Bridge
 
 **工作流限制**:
 - **始前必读**: `docs/Specs/tree.txt` & `docs/STATUS.md`
