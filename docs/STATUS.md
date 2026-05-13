@@ -33,4 +33,8 @@ billing.types.ts、server/config/plans.ts、plan-config.ts
 ### Task 5.14：GET /api/billing/summary
 `app/routes/api.billing.summary.tsx` — GET /api/billing/summary
 ### Task 5.15：Reservation Reaper Job
-`server/queues/reservation-reaper.queue.ts` — BullMQ 队列定义、`worker/processors/reservation-reaper.processor.ts` — 过期 reservation 清理 processor、`worker/schedulers/reservation-reaper.scheduler.ts` — 每 5 分钟 repeatable job 注册
+`server/queues/reservation-reaper.queue.ts` — BullMQ 队列定义、`worker/processors/reservation-reaper.processor.ts` — 过期 reservation 清理 processor、`worker/schedulers/reservation-reaper.scheduler.ts`
+### Task 5.16：Billing 前端页面
+types.ts useBillingSummary.ts useChangePlan.ts usePurchasePack.ts useQuota.ts BillingIntervalToggle.tsx PlanCard.tsx QuotaBreakdown.tsx OveragePackCard.tsx BillingGrid.module.css app.billing.tsx
+### Task 5.17：Dashboard 首页配额摘要集成
+`app/components/dashboard/QuotaSummary.tsx` — 接入 useBillingSummary 展示真实计费数据，含 loading/error 降级处理
