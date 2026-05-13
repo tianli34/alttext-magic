@@ -18,3 +18,5 @@ billing.types.ts、server/config/plans.ts、plan-config.ts
 `app/routes/api.billing.change-plan.tsx`、`server/modules/billing/plan-change.service.ts`、`tests/api.billing.change-plan.test.ts`
 ### Task 5.7：订阅回调与 Webhook 同步入口
 `server/modules/billing/subscription.service.ts`（统一订阅同步服务）、`app/routes/api.billing.callback.tsx`（GET /api/billing/callback）、`app/routes/webhooks.app.subscriptions_update.tsx`（APP_SUBSCRIPTIONS_UPDATE webhook handler）、`server/queues/billing-sync.queue.ts`、`worker/processors/billing-sync.processor.ts`
+### Task 5.8：订阅升级 / 降级业务处理服务
+`server/modules/billing/apply-subscription-change.server.ts` — 订阅变更处理服务（included bucket 发放、首次付费欢迎额度、增量扫描开关、Free 降级补发）、`tests/apply-subscription-change.server.test.ts`
