@@ -9,6 +9,7 @@ export const PARSE_BULK_QUEUE_NAME = "parse-bulk";
 export const DERIVE_SCAN_QUEUE_NAME = "derive-scan";
 export const PUBLISH_SCAN_QUEUE_NAME = "publish-scan";
 export const BILLING_SYNC_QUEUE_NAME = "billing-sync";
+export const QUOTA_GRANT_QUEUE_NAME = "quota-grant";
 
 export const queueNames = {
   webhook: WEBHOOK_QUEUE_NAME,
@@ -17,4 +18,5 @@ export const queueNames = {
   deriveScan: DERIVE_SCAN_QUEUE_NAME,
   publishScan: PUBLISH_SCAN_QUEUE_NAME,
   billingSync: BILLING_SYNC_QUEUE_NAME,
+  quotaGrant: QUOTA_GRANT_QUEUE_NAME,
 } as const;

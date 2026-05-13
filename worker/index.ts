@@ -1,6 +1,6 @@
 /**
  * File: worker/index.ts
- * Purpose: Boot BullMQ workers for persisted Shopify webhook events, scan-start, and parse-bulk jobs.
+ * Purpose: Boot BullMQ workers for persisted Shopify webhook events, scan-start, parse-bulk, and quota-grant jobs.
  */
 import { Worker } from "bullmq";
 import { processWebhookEvent } from "../app/lib/server/webhooks/webhook-process.service.js";
@@ -9,6 +9,7 @@ import {
   DERIVE_SCAN_QUEUE_NAME,
   PARSE_BULK_QUEUE_NAME,
   PUBLISH_SCAN_QUEUE_NAME,
+  QUOTA_GRANT_QUEUE_NAME,
   SCAN_START_QUEUE_NAME,
   WEBHOOK_QUEUE_NAME,
 } from "../server/config/queue-names.js";
@@ -23,15 +24,18 @@ import type { ParseBulkJobData } from "../server/queues/parse-bulk.queue.js";
 import type { DeriveScanJobData } from "../server/queues/derive-scan.queue.js";
 import type { PublishScanJobData } from "../server/queues/publish-scan.queue.js";
 import type { BillingSyncJobData } from "../server/queues/billing-sync.queue.js";
+import type { QuotaGrantJobData } from "../server/queues/quota-grant.queue.js";
 import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.service.js";
 import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
 import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
 import { processPublishScanJob } from "./processors/publish-scan.processor.js";
 import { processBillingSyncJob } from "./processors/billing-sync.processor.js";
+import { processQuotaGrantJob } from "./processors/quota-grant.processor.js";
 import {
   DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS,
   runScanTimeoutSweepOnce,
 } from "./schedulers/scan-timeout.scheduler.js";
+import { registerFreeMonthlyGrantScheduler } from "./schedulers/free-monthly-grant.scheduler.js";
 
 const logger = createLogger({ module: "worker-runtime" });
 const webhookConnection = createRedisConnection();
@@ -40,6 +44,7 @@ const parseBulkConnection = createRedisConnection();
 const deriveScanConnection = createRedisConnection();
 const publishScanConnection = createRedisConnection();
 const billingSyncConnection = createRedisConnection();
+const quotaGrantConnection = createRedisConnection();
 let scanTimeoutSweepRunning = false;
 
 const scanTimeoutSweepInterval = setInterval(() => {
@@ -125,6 +130,22 @@ const billingSyncWorker = new Worker<BillingSyncJobData>(
   },
 );
 
+const quotaGrantWorker = new Worker<QuotaGrantJobData>(
+  QUOTA_GRANT_QUEUE_NAME,
+  async (job) => {
+    await processQuotaGrantJob(job.data);
+  },
+  {
+    connection: quotaGrantConnection,
+    concurrency: 1,
+  },
+);
+
+// ---- 注册 Free 月配额每日 repeatable job ----
+void registerFreeMonthlyGrantScheduler().catch((error: unknown) => {
+  logger.error({ err: error }, "quota-grant-scheduler.register.failed");
+});
+
 webhookWorker.on("ready", () => {
   logger.info(
     {
@@ -185,6 +206,16 @@ billingSyncWorker.on("ready", () => {
   );
 });
 
+quotaGrantWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: QUOTA_GRANT_QUEUE_NAME,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
 webhookWorker.on("completed", (job) => {
   logger.info(
     {
@@ -239,6 +270,18 @@ publishScanWorker.on("completed", (job) => {
       jobId: job.id,
       scanJobId: job.data.scanJobId,
       shopId: job.data.shopId,
+    },
+    "worker.completed",
+  );
+});
+
+quotaGrantWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: QUOTA_GRANT_QUEUE_NAME,
+      jobId: job.id,
+      source: job.data.source,
+      targetMonth: job.data.targetMonth,
     },
     "worker.completed",
   );
@@ -308,6 +351,19 @@ publishScanWorker.on("failed", (job, error) => {
   );
 });
 
+quotaGrantWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: QUOTA_GRANT_QUEUE_NAME,
+      jobId: job?.id,
+      source: job?.data.source,
+      targetMonth: job?.data.targetMonth,
+      err: error,
+    },
+    "worker.failed",
+  );
+});
+
 webhookWorker.on("error", (error) => {
   logger.error({ queue: WEBHOOK_QUEUE_NAME, err: error }, "worker.error");
 });
@@ -328,6 +384,10 @@ publishScanWorker.on("error", (error) => {
   logger.error({ queue: PUBLISH_SCAN_QUEUE_NAME, err: error }, "worker.error");
 });
 
+quotaGrantWorker.on("error", (error) => {
+  logger.error({ queue: QUOTA_GRANT_QUEUE_NAME, err: error }, "worker.error");
+});
+
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "worker.shutdown");
   clearInterval(scanTimeoutSweepInterval);
@@ -337,6 +397,7 @@ async function shutdown(signal: string): Promise<void> {
     parseBulkWorker.close(),
     deriveScanWorker.close(),
     publishScanWorker.close(),
+    quotaGrantWorker.close(),
   ]);
   await Promise.all([
     webhookConnection.quit(),
@@ -344,6 +405,7 @@ async function shutdown(signal: string): Promise<void> {
     parseBulkConnection.quit(),
     deriveScanConnection.quit(),
     publishScanConnection.quit(),
+    quotaGrantConnection.quit(),
   ]);
   process.exit(0);
 }
@@ -357,6 +419,7 @@ void (async () => {
         PARSE_BULK_QUEUE_NAME,
         DERIVE_SCAN_QUEUE_NAME,
         PUBLISH_SCAN_QUEUE_NAME,
+        QUOTA_GRANT_QUEUE_NAME,
       ],
       redis: getRedisConnectionSummary(),
     },
