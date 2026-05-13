@@ -31,4 +31,6 @@ billing.types.ts、server/config/plans.ts、plan-config.ts
 ### Task 5.13：生成前额度预检 API
 `app/routes/api.generation.preflight.tsx` — POST /api/generation/preflight
 ### Task 5.14：GET /api/billing/summary
-`app/routes/api.billing.summary.tsx` — GET /api/billing/summary、`tests/api.billing.summary.test.ts`
+`app/routes/api.billing.summary.tsx` — GET /api/billing/summary
+### Task 5.15：Reservation Reaper Job
+`server/queues/reservation-reaper.queue.ts` — BullMQ 队列定义、`worker/processors/reservation-reaper.processor.ts` — 过期 reservation 清理 processor、`worker/schedulers/reservation-reaper.scheduler.ts` — 每 5 分钟 repeatable job 注册

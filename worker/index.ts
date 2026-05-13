@@ -1,6 +1,6 @@
 /**
  * File: worker/index.ts
- * Purpose: Boot BullMQ workers for persisted Shopify webhook events, scan-start, parse-bulk, and quota-grant jobs.
+ * Purpose: Boot BullMQ workers for persisted Shopify webhook events, scan-start, parse-bulk, quota-grant, and reservation-reaper jobs.
  */
 import { Worker } from "bullmq";
 import { processWebhookEvent } from "../app/lib/server/webhooks/webhook-process.service.js";
@@ -10,6 +10,7 @@ import {
   PARSE_BULK_QUEUE_NAME,
   PUBLISH_SCAN_QUEUE_NAME,
   QUOTA_GRANT_QUEUE_NAME,
+  RESERVATION_REAPER_QUEUE_NAME,
   SCAN_START_QUEUE_NAME,
   WEBHOOK_QUEUE_NAME,
 } from "../server/config/queue-names.js";
@@ -25,17 +26,20 @@ import type { DeriveScanJobData } from "../server/queues/derive-scan.queue.js";
 import type { PublishScanJobData } from "../server/queues/publish-scan.queue.js";
 import type { BillingSyncJobData } from "../server/queues/billing-sync.queue.js";
 import type { QuotaGrantJobData } from "../server/queues/quota-grant.queue.js";
+import type { ReservationReaperJobData } from "../server/queues/reservation-reaper.queue.js";
 import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.service.js";
 import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
 import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
 import { processPublishScanJob } from "./processors/publish-scan.processor.js";
 import { processBillingSyncJob } from "./processors/billing-sync.processor.js";
 import { processQuotaGrantJob } from "./processors/quota-grant.processor.js";
+import { processReservationReaperJob } from "./processors/reservation-reaper.processor.js";
 import {
   DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS,
   runScanTimeoutSweepOnce,
 } from "./schedulers/scan-timeout.scheduler.js";
 import { registerFreeMonthlyGrantScheduler } from "./schedulers/free-monthly-grant.scheduler.js";
+import { registerReservationReaperScheduler } from "./schedulers/reservation-reaper.scheduler.js";
 
 const logger = createLogger({ module: "worker-runtime" });
 const webhookConnection = createRedisConnection();
@@ -45,6 +49,7 @@ const deriveScanConnection = createRedisConnection();
 const publishScanConnection = createRedisConnection();
 const billingSyncConnection = createRedisConnection();
 const quotaGrantConnection = createRedisConnection();
+const reservationReaperConnection = createRedisConnection();
 let scanTimeoutSweepRunning = false;
 
 const scanTimeoutSweepInterval = setInterval(() => {
@@ -141,9 +146,25 @@ const quotaGrantWorker = new Worker<QuotaGrantJobData>(
   },
 );
 
+const reservationReaperWorker = new Worker<ReservationReaperJobData>(
+  RESERVATION_REAPER_QUEUE_NAME,
+  async (job) => {
+    await processReservationReaperJob(job.data);
+  },
+  {
+    connection: reservationReaperConnection,
+    concurrency: 1,
+  },
+);
+
 // ---- 注册 Free 月配额每日 repeatable job ----
 void registerFreeMonthlyGrantScheduler().catch((error: unknown) => {
   logger.error({ err: error }, "quota-grant-scheduler.register.failed");
+});
+
+// ---- 注册 reservation-reaper 每 5 分钟 repeatable job ----
+void registerReservationReaperScheduler().catch((error: unknown) => {
+  logger.error({ err: error }, "reservation-reaper-scheduler.register.failed");
 });
 
 webhookWorker.on("ready", () => {
@@ -216,6 +237,16 @@ quotaGrantWorker.on("ready", () => {
   );
 });
 
+reservationReaperWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: RESERVATION_REAPER_QUEUE_NAME,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
 webhookWorker.on("completed", (job) => {
   logger.info(
     {
@@ -282,6 +313,17 @@ quotaGrantWorker.on("completed", (job) => {
       jobId: job.id,
       source: job.data.source,
       targetMonth: job.data.targetMonth,
+    },
+    "worker.completed",
+  );
+});
+
+reservationReaperWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: RESERVATION_REAPER_QUEUE_NAME,
+      jobId: job.id,
+      source: job.data.source,
     },
     "worker.completed",
   );
@@ -364,6 +406,18 @@ quotaGrantWorker.on("failed", (job, error) => {
   );
 });
 
+reservationReaperWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: RESERVATION_REAPER_QUEUE_NAME,
+      jobId: job?.id,
+      source: job?.data.source,
+      err: error,
+    },
+    "worker.failed",
+  );
+});
+
 webhookWorker.on("error", (error) => {
   logger.error({ queue: WEBHOOK_QUEUE_NAME, err: error }, "worker.error");
 });
@@ -388,6 +442,10 @@ quotaGrantWorker.on("error", (error) => {
   logger.error({ queue: QUOTA_GRANT_QUEUE_NAME, err: error }, "worker.error");
 });
 
+reservationReaperWorker.on("error", (error) => {
+  logger.error({ queue: RESERVATION_REAPER_QUEUE_NAME, err: error }, "worker.error");
+});
+
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "worker.shutdown");
   clearInterval(scanTimeoutSweepInterval);
@@ -398,6 +456,7 @@ async function shutdown(signal: string): Promise<void> {
     deriveScanWorker.close(),
     publishScanWorker.close(),
     quotaGrantWorker.close(),
+    reservationReaperWorker.close(),
   ]);
   await Promise.all([
     webhookConnection.quit(),
@@ -406,6 +465,7 @@ async function shutdown(signal: string): Promise<void> {
     deriveScanConnection.quit(),
     publishScanConnection.quit(),
     quotaGrantConnection.quit(),
+    reservationReaperConnection.quit(),
   ]);
   process.exit(0);
 }
@@ -420,6 +480,7 @@ void (async () => {
         DERIVE_SCAN_QUEUE_NAME,
         PUBLISH_SCAN_QUEUE_NAME,
         QUOTA_GRANT_QUEUE_NAME,
+        RESERVATION_REAPER_QUEUE_NAME,
       ],
       redis: getRedisConnectionSummary(),
     },
