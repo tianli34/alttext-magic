@@ -1,1 +1,179 @@
-export {};
+/**
+ * File: app/routes/api.generation.preflight.tsx
+ * Purpose: POST /api/generation/preflight —— 生成前额度预检接口。
+ *          供 Phase 6 AI 生成管线使用，估算额度消耗并返回余额与预计消费顺序。
+ *
+ * 请求体: { candidateIds?: string[], count?: number }
+ * 响应体: { estimatedCredits, enough, includedRemaining, welcomeRemaining, overagePackRemaining, totalRemaining, allocation }
+ */
+import type { ActionFunctionArgs } from "react-router";
+import { z, ZodError } from "zod";
+import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
+import { createLogger } from "../../server/utils/logger";
+import {
+  getCreditBalance,
+  planCreditAllocation,
+} from "../../server/modules/billing/credit/credit-balance.server";
+import type { CreditBucketType } from "../../server/modules/billing/billing.types";
+import { isIncludedFamily } from "../../server/modules/billing/credit/consumption-order";
+
+const logger = createLogger({ module: "api.generation.preflight" });
+
+// ============================================================================
+// 请求体 Schema
+// ============================================================================
+
+/**
+ * preflight 请求体校验：
+ * - candidateIds: 候选 ID 数组（可选）
+ * - count: 直接指定数量（可选）
+ * 二者至少提供一个；若同时提供，取 candidateIds.length。
+ */
+const preflightBodySchema = z.object({
+  candidateIds: z.array(z.string().min(1)).optional(),
+  count: z.number().int().positive().optional(),
+}).refine(
+  (data) => data.candidateIds !== undefined || data.count !== undefined,
+  { message: "candidateIds 或 count 至少提供一个" },
+);
+
+// ============================================================================
+// Action
+// ============================================================================
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  // 1. 仅接受 POST
+  if (request.method !== "POST") {
+    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  }
+
+  // 2. 鉴权 —— 确保 Shopify 登录态
+  const { session } = await authenticate.admin(request);
+  const shopDomain = session.shop;
+
+  // 3. 查找 shop
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain },
+    select: { id: true, shopDomain: true },
+  });
+
+  if (!shop) {
+    logger.warn({ shopDomain }, "Shop not found for preflight");
+    return Response.json({ error: "Shop not found" }, { status: 404 });
+  }
+
+  // 4. 解析请求体
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  let parsed: z.infer<typeof preflightBodySchema>;
+  try {
+    parsed = preflightBodySchema.parse(body);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      const issues = err.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      }));
+      return Response.json(
+        { error: "Invalid request body", issues },
+        { status: 400 },
+      );
+    }
+    return Response.json({ error: "Invalid request body" }, { status: 400 });
+  }
+
+  // 5. 确定预估消耗数量（MVP: 1 image = 1 credit）
+  const estimatedCredits = parsed.candidateIds
+    ? parsed.candidateIds.length
+    : parsed.count!;
+
+  if (estimatedCredits <= 0) {
+    return Response.json(
+      { error: "estimatedCredits must be positive" },
+      { status: 400 },
+    );
+  }
+
+  // 6. 获取余额概览
+  const balance = await getCreditBalance(shop.id, prisma);
+
+  // 7. 规划额度分配（不创建 reservation）
+  const allocationPlan = await planCreditAllocation(shop.id, estimatedCredits, prisma);
+
+  // 8. 构造响应 —— allocation 按 bucketType 分组合并
+  const mergedAllocation = mergeAllocationByType(allocationPlan.allocation);
+
+  logger.info(
+    {
+      shopId: shop.id,
+      estimatedCredits,
+      enough: allocationPlan.enough,
+      totalRemaining: balance.totalRemaining,
+    },
+    "Preflight 检查完成",
+  );
+
+  return Response.json({
+    estimatedCredits,
+    enough: allocationPlan.enough,
+    includedRemaining: balance.includedRemaining,
+    welcomeRemaining: balance.welcomeRemaining,
+    overagePackRemaining: balance.overagePackRemaining,
+    totalRemaining: balance.totalRemaining,
+    allocation: mergedAllocation,
+  });
+};
+
+// ============================================================================
+// 辅助函数
+// ============================================================================
+
+/** allocation 条目（按 bucketType 分组合并后） */
+interface MergedAllocationEntry {
+  /** 桶类型 */
+  bucketType: string;
+  /** 从该类型分配的额度总数 */
+  amount: number;
+}
+
+/**
+ * 将 allocation 明细按 bucketType 分组合并。
+ * Included family 类型统一显示为 "MONTHLY_INCLUDED"（保留原始类型名更透明）。
+ */
+function mergeAllocationByType(
+  allocation: readonly { bucketId: string; bucketType: CreditBucketType; amount: number }[],
+): MergedAllocationEntry[] {
+  const map = new Map<string, number>();
+
+  for (const entry of allocation) {
+    // included family 统一映射为 MONTHLY_INCLUDED 展示名
+    const displayType = isIncludedFamily(entry.bucketType)
+      ? "MONTHLY_INCLUDED"
+      : entry.bucketType;
+
+    const current = map.get(displayType) ?? 0;
+    map.set(displayType, current + entry.amount);
+  }
+
+  // 按消费顺序排列结果
+  const order: Record<string, number> = {
+    MONTHLY_INCLUDED: 10,
+    WELCOME: 20,
+    OVERAGE_PACK: 30,
+  };
+
+  const result = Array.from(map.entries()).map(([bucketType, amount]) => ({
+    bucketType,
+    amount,
+  }));
+
+  result.sort((a, b) => (order[a.bucketType] ?? 99) - (order[b.bucketType] ?? 99));
+
+  return result;
+}

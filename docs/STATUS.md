@@ -27,4 +27,6 @@ billing.types.ts、server/config/plans.ts、plan-config.ts
 ### Task 5.11：额度余额与消费顺序计算服务
 `server/modules/billing/credit/consumption-order.ts` — 消费优先级常量与排序工具、`server/modules/billing/credit/credit-balance.server.ts` — getCreditBalance + getSpendableBuckets + planCreditAllocation
 ### Task 5.12：Credit Reservation 服务
-`app/services/credits/credit-reservation.server.ts` — batch 级预留、consume、release；`tests/credit-reservation.server.test.ts`
+`app/services/credits/credit-reservation.server.ts` — batch 级预留、consume、release
+### Task 5.13：生成前额度预检 API
+`app/routes/api.generation.preflight.tsx` — POST /api/generation/preflight
