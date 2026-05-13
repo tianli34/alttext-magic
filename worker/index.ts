@@ -40,6 +40,7 @@ import {
 } from "./schedulers/scan-timeout.scheduler.js";
 import { registerFreeMonthlyGrantScheduler } from "./schedulers/free-monthly-grant.scheduler.js";
 import { registerReservationReaperScheduler } from "./schedulers/reservation-reaper.scheduler.js";
+import { registerBillingSyncScheduler } from "./schedulers/billing-sync.scheduler.js";
 
 const logger = createLogger({ module: "worker-runtime" });
 const webhookConnection = createRedisConnection();
@@ -165,6 +166,11 @@ void registerFreeMonthlyGrantScheduler().catch((error: unknown) => {
 // ---- 注册 reservation-reaper 每 5 分钟 repeatable job ----
 void registerReservationReaperScheduler().catch((error: unknown) => {
   logger.error({ err: error }, "reservation-reaper-scheduler.register.failed");
+});
+
+// ---- 注册 billing-sync 每 6 小时 repeatable job ----
+void registerBillingSyncScheduler().catch((error: unknown) => {
+  logger.error({ err: error }, "billing-sync-scheduler.register.failed");
 });
 
 webhookWorker.on("ready", () => {
