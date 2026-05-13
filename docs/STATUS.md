@@ -30,3 +30,5 @@ billing.types.ts、server/config/plans.ts、plan-config.ts
 `app/services/credits/credit-reservation.server.ts` — batch 级预留、consume、release
 ### Task 5.13：生成前额度预检 API
 `app/routes/api.generation.preflight.tsx` — POST /api/generation/preflight
+### Task 5.14：GET /api/billing/summary
+`app/routes/api.billing.summary.tsx` — GET /api/billing/summary、`tests/api.billing.summary.test.ts`
