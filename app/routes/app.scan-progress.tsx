@@ -46,5 +46,7 @@ export default function ScanProgressRoute() {
     );
   }
 
-  return <ScanProgressPage scanJobId={scanJobId} />;
+  /* key={scanJobId} 确保重新扫描导航到新 scanJobId 时完全重新挂载组件，
+     避免 useSSE/useScanStatus 的旧状态（100% done）残留覆盖新扫描状态 */
+  return <ScanProgressPage key={scanJobId} scanJobId={scanJobId} />;
 }

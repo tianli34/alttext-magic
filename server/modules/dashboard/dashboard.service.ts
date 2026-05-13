@@ -162,10 +162,33 @@ export async function getDashboardData(
   );
   const allowedGroups = mapScopeFlagsToGroupTypes(effectiveReadScopeFlags);
 
+  // [DEBUG] 诊断日志：追踪 scope flag 决策链
+  logger.info(
+    {
+      shopId,
+      scanScopeFlags,
+      lastPublishedScopeFlags,
+      effectiveReadScopeFlags,
+      allowedGroups,
+      lastPublishedAt: shop.lastPublishedAt?.toISOString() ?? null,
+    },
+    "dashboard.scope-flags-debug",
+  );
+
   const [groupRows, activeScanJobId] = await Promise.all([
     dataAccess.getGroupStats(shopId, allowedGroups),
     dataAccess.getActiveScanJobId(shopId),
   ]);
+
+  // [DEBUG] 诊断日志：追踪分组统计结果
+  logger.info(
+    {
+      shopId,
+      groupTypes: groupRows.map((r) => ({ groupType: r.groupType, total: r.total })),
+      activeScanJobId,
+    },
+    "dashboard.group-stats-debug",
+  );
 
   return {
     groups: normalizeGroupStatsRows(groupRows),

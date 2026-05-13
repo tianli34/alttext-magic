@@ -177,27 +177,33 @@ export function useBatchProgress(
       return null;
     }
   }, [scanStatus]);
-
-  // 当 SSE 连接但 scanStatus 未加载时，使用 SSE 数据
-  // 当 SSE 未连接（刷新恢复场景）时，使用 scanStatus 数据
-  const effectiveProgress = progress ?? scanStatus?.progress ?? null;
-  const effectivePhase = effectiveProgress?.phase ?? fallbackTerminalPhase;
-  const effectiveIsTerminal =
-    isTerminalPhase(effectivePhase) || isTerminalJobStatus(jobStatus);
-  const effectivePercent =
-    effectiveProgress && effectiveProgress.totalTasks > 0
-      ? Math.round(
-          (effectiveProgress.completedTasks / effectiveProgress.totalTasks) * 100,
-        )
-      : isTerminalJobStatus(jobStatus)
-        ? 100
-      : 0;
-  const effectivePhaseLabel = PHASE_LABELS[effectivePhase] ?? effectivePhase;
-  const effectiveIsScanning = !!scanJobId && !effectiveIsTerminal;
-  const canStop = !!scanStatus &&
-    scanStatus.scanJob.status === "RUNNING" &&
-    scanStatus.tasks.length > 0 &&
-    scanStatus.tasks.every((task) => task.status === "PENDING");
+// 当 SSE 连接但 scanStatus 未加载时，使用 SSE 数据
+// 当 SSE 未连接（刷新恢复场景）时，使用 scanStatus 数据
+const effectiveProgress = progress ?? scanStatus?.progress ?? null;
+const effectivePhase = effectiveProgress?.phase ?? fallbackTerminalPhase;
+const effectiveIsTerminal =
+  isTerminalPhase(effectivePhase) || isTerminalJobStatus(jobStatus);
+const effectivePercent =
+  effectiveProgress && effectiveProgress.totalTasks > 0
+    ? Math.round(
+        (effectiveProgress.completedTasks / effectiveProgress.totalTasks) * 100,
+      )
+    : isTerminalJobStatus(jobStatus)
+      ? 100
+    : 0;
+const effectivePhaseLabel = PHASE_LABELS[effectivePhase] ?? effectivePhase;
+const effectiveIsScanning = !!scanJobId && !effectiveIsTerminal;
+const canStop = !!scanStatus &&
+  scanStatus.scanJob.status === "RUNNING" &&
+  scanStatus.tasks.length > 0 &&
+  scanStatus.tasks.every((task) => task.status === "PENDING");
+  // 终态时触发一次最终刷新，确保任务列表与进度一致
+  // 修复：SSE 终态比轮询更快到达时，轮询立即停止导致 scanStatus.tasks 为旧数据
+  useEffect(() => {
+    if (effectiveIsTerminal && scanJobId) {
+      refreshStatus();
+    }
+  }, [effectiveIsTerminal, scanJobId, refreshStatus]);
 
   useEffect(() => {
     if (!scanJobId || effectiveIsTerminal) {

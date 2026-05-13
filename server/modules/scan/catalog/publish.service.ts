@@ -203,6 +203,21 @@ export async function publishScanResult(
     }),
   ]);
 
+  // [DEBUG] 诊断日志：追踪 derive 结果中的 PRODUCT_MEDIA 数据量
+  logger.info(
+    {
+      shopId: scanJob.shopId,
+      scanJobId: scanJob.id,
+      successfulResourceTypes,
+      resultTargetCount: resultTargets.length,
+      resultTargetResourceTypes: [...new Set(resultTargets.map((t) => t.resourceType))],
+      resultUsageCount: resultUsages.length,
+      resultUsageResourceTypes: [...new Set(resultUsages.map((u) => u.resourceType))],
+      productMediaUsageCount: resultUsages.filter((u) => u.resourceType === "PRODUCT_MEDIA").length,
+    },
+    "publish.derive-input-debug",
+  );
+
   const resultTargetMap = new Map<string, ResultTargetRow>();
   for (const target of resultTargets) {
     resultTargetMap.set(buildTargetSliceKey(target.altPlane, target.writeTargetId, target.locale), target);
@@ -425,6 +440,22 @@ export async function publishScanResult(
         })
       : [];
 
+    // [DEBUG] 诊断日志：追踪 presentUsages 中 PRODUCT 类型数量
+    const productPresentUsages = presentUsages.filter((u) => u.usageType === "PRODUCT");
+    if (presentUsages.length > 0) {
+      logger.info(
+        {
+          shopId: scanJob.shopId,
+          scanJobId: scanJob.id,
+          impactedTargetCount: impactedTargetIds.size,
+          totalPresentUsages: presentUsages.length,
+          productPresentUsageCount: productPresentUsages.length,
+          filePresentUsageCount: presentUsages.filter((u) => u.usageType === "FILE").length,
+        },
+        "publish.present-usages-debug",
+      );
+    }
+
     const usagesByTargetId = groupPresentUsagesByTargetId(presentUsages);
     let projectionCount = 0;
 
@@ -443,12 +474,25 @@ export async function publishScanResult(
       });
     }
 
+    // [DEBUG] 诊断日志：追踪 lastPublishedScopeFlags 写入值
+    const scopeFlagsToWrite = normalizeJsonForPrisma(scanJob.scopeFlags);
+    logger.info(
+      {
+        shopId: scanJob.shopId,
+        scanJobId: scanJob.id,
+        scopeFlags: scanJob.scopeFlags,
+        successfulResourceTypes,
+        projectionCount,
+      },
+      "publish.last-published-scope-flags-debug",
+    );
+
     await tx.shop.update({
       where: { id: scanJob.shopId },
       data: {
         lastPublishedScanJobId: scanJob.id,
         lastPublishedAt: now,
-        lastPublishedScopeFlags: normalizeJsonForPrisma(scanJob.scopeFlags),
+        lastPublishedScopeFlags: scopeFlagsToWrite,
       },
     });
 
@@ -924,6 +968,21 @@ async function rebuildTargetProjections(
       });
       upsertCount += 1;
     } else {
+      // [DEBUG] 诊断日志：PRODUCT_MEDIA 投影被删除（无 PRODUCT usage）
+      logger.info(
+        {
+          shopId: input.shopId,
+          scanJobId: input.scanJobId,
+          altTargetId: input.target.id,
+          altCandidateId: input.altCandidateId,
+          writeTargetId: input.target.writeTargetId,
+          presentStatus: input.target.presentStatus,
+          totalUsageCount,
+          productUsageCount: productUsages.length,
+          fileUsageCount: fileUsages.length,
+        },
+        "publish.product-media-projection-deleted",
+      );
       await deleteGroupProjection(tx, input.shopId, input.altCandidateId, "PRODUCT_MEDIA");
     }
 
