@@ -1,0 +1,30 @@
+/**
+ * Billing 计划卡片网格响应式布局。
+ * 桌面端五列 / 平板三列 / 小屏两列 / 手机单列。
+ */
+.planGrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--p-space-4, 16px);
+}
+
+/* 小平板（<=1024px）：三列 */
+@media (max-width: 1024px) {
+  .planGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* 平板（<=768px）：两列 */
+@media (max-width: 768px) {
+  .planGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* 手机（<=480px）：单列 */
+@media (max-width: 480px) {
+  .planGrid {
+    grid-template-columns: 1fr;
+  }
+}
