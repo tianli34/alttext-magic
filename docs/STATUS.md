@@ -21,4 +21,7 @@ billing.types.ts、server/config/plans.ts、plan-config.ts
 ### Task 5.8：订阅升级 / 降级业务处理服务
 `server/modules/billing/apply-subscription-change.server.ts` — 订阅变更处理服务（included bucket 发放、首次付费欢迎额度、增量扫描开关、Free 降级补发）、`tests/apply-subscription-change.server.test.ts`
 ### Task 5.9：Free 月配额自动发放 Job
+### Task 5.9：Free 月配额自动发放 Job
 `server/modules/billing/credit/free-monthly-grant.service.ts` — 核心批量发放服务、`server/queues/quota-grant.queue.ts` — BullMQ 队列定义、`worker/processors/quota-grant.processor.ts` — Job processor、`worker/schedulers/free-monthly-grant.scheduler.ts` — 每日 UTC 00:05 repeatable job 注册、`tests/free-monthly-grant.service.test.ts`
+### Task 5.10：超额包购买 API 与成功发放逻辑
+`server/modules/billing/overage-pack.service.ts` — 超额包购买与发放服务（initiateOveragePackPurchase + fulfillOveragePackPurchase）、`app/routes/api.billing.purchase-pack.tsx` — POST /api/billing/purchase-pack、`app/routes/api.billing.purchase-callback.tsx` — GET /api/billing/purchase-callback、`tests/overage-pack.service.test.ts`（23 passed）
