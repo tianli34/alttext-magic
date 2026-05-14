@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 import dotenv from "dotenv";
 
 // 在最早期加载 .env
@@ -84,6 +84,22 @@ const envSchema = z.object({
   BILLING_ADAPTER: z
     .enum(["shopify", "fake"])
     .default("fake"),
+
+  // ── AI Provider ─────────────────────────────────────────
+  // fake: 本地/测试用 FakeAIProvider；real: 使用真实主/副模型
+  AI_PROVIDER: z.enum(["fake", "real"]).default("fake"),
+
+  // 主模型配置
+  AI_PRIMARY_PROVIDER: z.string().min(1).default("openai"),
+  AI_PRIMARY_MODEL: z.string().min(1).default("gpt-4o"),
+  AI_PRIMARY_API_KEY: z.string().default(""),
+  AI_PRIMARY_ENDPOINT: z.string().url().optional(),
+
+  // 副模型配置（fallback）
+  AI_FALLBACK_PROVIDER: z.string().min(1).default("openai"),
+  AI_FALLBACK_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  AI_FALLBACK_API_KEY: z.string().default(""),
+  AI_FALLBACK_ENDPOINT: z.string().url().optional(),
 });
 
 /**
