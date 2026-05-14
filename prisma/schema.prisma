@@ -160,6 +160,12 @@ enum BillingSubscriptionStatus {
   FAILED
 }
 
+enum GenerationBatchStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
 enum OveragePackPurchaseStatus {
   PENDING
   PURCHASED
@@ -299,6 +305,7 @@ model Shop {
   decorativeMarks           DecorativeMark[]
   altCandidates             AltCandidate[]
   candidateGroupProjections CandidateGroupProjection[]
+  generationBatches         GenerationBatch[]
   altDrafts                 AltDraft[]
   auditLogs                 AuditLog[]
   resourceImageFingerprints ResourceImageFingerprint[]
@@ -968,13 +975,38 @@ model CandidateGroupProjection {
 }
 
 // ============================================================
-// 24. AltDraft
+// 24. GenerationBatch
+// ============================================================
+
+model GenerationBatch {
+  id             String                @id @default(cuid())
+  shopId         String                @map("shop_id")
+  status         GenerationBatchStatus @default(IN_PROGRESS)
+  totalCount     Int                   @default(0) @map("total_count")
+  completedCount Int                   @default(0) @map("completed_count")
+  skippedCount   Int                   @default(0) @map("skipped_count")
+  failedCount    Int                   @default(0) @map("failed_count")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+
+  // ---------- Relations ----------
+  shop   Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  drafts AltDraft[]
+
+  // ---------- Indexes ----------
+  @@index([shopId])
+  @@map("generation_batch")
+}
+
+// ============================================================
+// 25. AltDraft
 // ============================================================
 
 model AltDraft {
   id              String              @id @default(cuid())
   shopId          String              @map("shop_id")
   altCandidateId  String              @unique @map("alt_candidate_id")
+  batchId         String?             @map("batch_id")
   modelUsed       String              @map("model_used")
   contextMode     AltDraftContextMode @map("context_mode")
   contextSnapshot Json                @map("context_snapshot")
@@ -986,19 +1018,21 @@ model AltDraft {
   expiresAt       DateTime            @map("expires_at")
 
   // ---------- Relations ----------
-  shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  altCandidate AltCandidate @relation(fields: [altCandidateId], references: [id], onDelete: Cascade)
+  shop         Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  altCandidate AltCandidate     @relation(fields: [altCandidateId], references: [id], onDelete: Cascade)
+  batch        GenerationBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
   auditLogs    AuditLog[]
 
   // ---------- Indexes ----------
   @@index([shopId])
+  @@index([batchId])
   @@index([expiresAt])
   @@index([shopId, expiresAt])
   @@map("alt_draft")
 }
 
 // ============================================================
-// 25. AuditLog
+// 26. AuditLog
 // ============================================================
 
 model AuditLog {
@@ -1041,7 +1075,7 @@ model AuditLog {
 }
 
 // ============================================================
-// 26. BillingSubscription
+// 27. BillingSubscription
 // ============================================================
 
 model BillingSubscription {
@@ -1077,7 +1111,7 @@ model BillingSubscription {
 }
 
 // ============================================================
-// 27. OveragePackPurchase
+// 28. OveragePackPurchase
 // ============================================================
 
 model OveragePackPurchase {
@@ -1113,7 +1147,7 @@ model OveragePackPurchase {
 }
 
 // ============================================================
-// 28. CreditBucket
+// 29. CreditBucket
 // ============================================================
 
 model CreditBucket {
@@ -1153,7 +1187,7 @@ model CreditBucket {
 }
 
 // ============================================================
-// 29. CreditReservation
+// 30. CreditReservation
 // ============================================================
 
 model CreditReservation {
@@ -1187,7 +1221,7 @@ model CreditReservation {
 }
 
 // ============================================================
-// 30. CreditReservationLine
+// 31. CreditReservationLine
 // ============================================================
 
 model CreditReservationLine {
@@ -1217,7 +1251,7 @@ model CreditReservationLine {
 }
 
 // ============================================================
-// 31. CreditLedger
+// 32. CreditLedger
 // ============================================================
 
 model CreditLedger {
@@ -1257,7 +1291,7 @@ model CreditLedger {
 }
 
 // ============================================================
-// 32. BillingLedger
+// 33. BillingLedger
 // ============================================================
 
 model BillingLedger {
