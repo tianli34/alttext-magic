@@ -1,4 +1,4 @@
-﻿/**
+/**
  * File: tests/ai-gateway.test.ts
  * 验收标准：
  *   1. FakeAIProvider 对相同 imageUrl 返回确定性结果
@@ -44,7 +44,7 @@ function assertTrue(value: boolean, label: string): void {
 /** 断言 fn 抛出特定类型的错误 */
 async function assertThrows<E extends Error>(
   fn: () => Promise<unknown>,
-  errorClass: new (...args: unknown[]) => E,
+  errorClass: new (...args: any[]) => E,
   label: string,
 ): Promise<void> {
   try {

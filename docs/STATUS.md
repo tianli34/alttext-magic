@@ -1,4 +1,4 @@
-﻿# Completed
+# Completed
 
 ## 1. 数据与候选基础
 - 数据库底层结构就绪。
@@ -23,4 +23,8 @@
 - `server/ai/ai-gateway.ts` — `AIGatewayService` 单例门面，`AI_PROVIDER=fake` 走 Fake，否则走真实主/副链
 - `server/config/env.ts` — 新增 `AI_PROVIDER`、`AI_PRIMARY_*`、`AI_FALLBACK_*` 环境变量 zod 校验
 - `.env.example` — 添加 AI 相关模板（无真实 Key）
-- `tests/ai-gateway.test.ts` — 16 项单元测试全部通过（确定性结果、超时 fallback、双失败抛错）
+
+### Task 6.3 — Prompt 模板系统 + AI 输出清洗器
+- `server/ai/prompt-engine.server.ts` — 实现 `buildPrompt`，支持 `RESOURCE_SPECIFIC`、`FILE_NEUTRAL`、`SHARED_NEUTRAL` 三种模式。
+- `server/ai/output-cleaner.server.ts` — 实现 `cleanAltText`，包含 trim、去引号、去冗余前缀（image of 等）、125 字符智能截断及空值校验逻辑。
+- `tests/output-cleaner.test.ts` — 14 项单元测试全部通过。
