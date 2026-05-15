@@ -103,11 +103,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const lockResult = await acquireLock(shop.id, "SCAN", lockOwner);
 
   if (!lockResult.acquired) {
-    logger.warn({ shopId: shop.id }, "Scan lock conflict");
-    return Response.json(
-      { error: "Another scan is already running. Please try again later." },
-      { status: 409 },
+    logger.warn(
+      { shopId: shop.id, conflictingLockType: lockResult.lock?.operationType },
+      "Scan lock conflict",
     );
+    const isGenerate = lockResult.lock?.operationType === "GENERATE";
+    const msg = isGenerate
+      ? "A generation is already running. Please try again later."
+      : "Another scan is already running. Please try again later.";
+    return Response.json({ error: msg }, { status: 409 });
   }
 
   try {

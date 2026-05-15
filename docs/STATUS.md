@@ -32,3 +32,8 @@
 ### Task 6.5 — 上下文构建服务：usage 统计 + `context_mode` 判定 + `context_snapshot` 生成
 - `server/modules/generation/context-builder.service.ts` — `ContextBuilderService.buildContext`；查询 `image_usage` 判定引用状态，根据 §4.3.10 返回 `RESOURCE_SPECIFIC`、`FILE_NEUTRAL` 或 `SHARED_NEUTRAL` 及其对应的 `context_snapshot`
 - `tests/context-builder.service.test.ts` — 完成覆盖单产品、纯文件、共享产品及集合图片的单元测试
+
+### Task 6.6 — GENERATE 锁管理服务
+- `server/modules/lock/generate-lock.service.ts` — 基于 `operation-lock.service.ts` 封装 GENERATE 操作锁的 acquire, heartbeat, release 逻辑。
+- `app/routes/api.scan.start.tsx` & `app/routes/api.generation.start.tsx` — 扫描/生成启动接口检查 SCAN / GENERATE 锁冲突并返回 409。
+- `tests/generate-lock.service.e2e.ts` — 验证不同类型锁的冲突与续期。
