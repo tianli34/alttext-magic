@@ -13,18 +13,19 @@
 
 ## Phase 6：AI 生成管线
 ### Task 6.1 — 数据库 Schema 扩展：`generation_batch` + `alt_draft`
-`prisma/schema.prisma` — 新增 `GenerationBatch` 模型及其 `GenerationBatchStatus` 枚举，更新 `AltDraft` 关联，执行迁移并生成类型。
-
+`prisma/schema.prisma` — 新增 `GenerationBatch` 模型及其 `GenerationBatchStatus` 枚举，更新 `AltDraft` 关联
 ### Task 6.2 — AI Gateway 服务：统一抽象层 + Fake Provider + 主/副模型切换
 - `server/ai/ai.types.ts` — `GenerateAltRequest`、`GenerateAltResult`、`AIGenerationError`、`AIProvider` 接口
-- `server/ai/providers/fake.provider.ts` — 确定性假文本，`trigger-fake-failure` / `trigger-fake-delay` 特殊 URL 支持
-- `server/ai/providers/openai.provider.ts` — OpenAI 兼容 Provider，30s 超时，5xx 视为可重试失败
-- `server/ai/providers/fallback.provider.ts` — 主失败自动切换副，双失败抛 `AIGenerationError`，记录 pino 结构化日志
+- `server/ai/providers/fake.provider.ts``trigger-fake-failure` / `trigger-fake-delay` 特殊 URL 支持
+- `server/ai/providers/openai.provider.ts`
+- `server/ai/providers/fallback.provider.ts`
 - `server/ai/ai-gateway.ts` — `AIGatewayService` 单例门面，`AI_PROVIDER=fake` 走 Fake，否则走真实主/副链
-- `server/config/env.ts` — 新增 `AI_PROVIDER`、`AI_PRIMARY_*`、`AI_FALLBACK_*` 环境变量 zod 校验
-- `.env.example` — 添加 AI 相关模板（无真实 Key）
-
+- `server/config/env.ts` — 新增 `AI_PROVIDER`、`AI_PRIMARY_*`、`AI_FALLBACK_*`
+- `.env.example`
 ### Task 6.3 — Prompt 模板系统 + AI 输出清洗器
-- `server/ai/prompt-engine.server.ts` — 实现 `buildPrompt`，支持 `RESOURCE_SPECIFIC`、`FILE_NEUTRAL`、`SHARED_NEUTRAL` 三种模式。
-- `server/ai/output-cleaner.server.ts` — 实现 `cleanAltText`，包含 trim、去引号、去冗余前缀（image of 等）、125 字符智能截断及空值校验逻辑。
-- `tests/output-cleaner.test.ts` — 14 项单元测试全部通过。
+- `server/ai/prompt-engine.server.ts` — 实现 `buildPrompt`，支持 `RESOURCE_SPECIFIC`、`FILE_NEUTRAL`、`SHARED_NEUTRAL`
+- `server/ai/output-cleaner.server.ts` — 实现 `cleanAltText`
+### Task 6.4 — 真值复核服务：按 `alt_plane` 读取 Shopify 线上当前 Alt
+- `server/shopify/shopify-rate-limiter.server.ts` — `TokenBucket` + `getShopifyRateLimiter`（进程内按 shopId 隔离单例，扫描与生成管线共用）
+- `server/modules/generation/truth-check.service.ts` — `TruthCheckService.checkCurrentAlt`；按 `alt_plane` 分类查询：`FILE_ALT`→MediaImage、`COLLECTION_IMAGE_ALT`→Collection、`ARTICLE_IMAGE_ALT`→Article；`TruthCheckRetryableError` 区分可重试错误
+- `tests/truth-check.service.test.ts` — 23 项测试全部通过（各 plane 空/非空/资源删除/5xx/网络错误/rate limiter）
