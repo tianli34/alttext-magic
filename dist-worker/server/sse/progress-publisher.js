@@ -1,1 +1,190 @@
-"use strict";
+/**
+ * File: server/sse/progress-publisher.ts
+ * Purpose: 扫描进度 Redis 发布器。
+ *          负责初始化 Redis 进度键、更新进度、读取进度。
+ *          供 SSE 端点和扫描 worker 共同使用。
+ */
+import { queueConnection } from "../queues/connection";
+import { SCAN_PROGRESS_KEY_PREFIX, SCAN_PROGRESS_TTL_SECONDS, SCAN_PHASE, } from "../modules/scan/scan.constants";
+import { createLogger } from "../utils/logger";
+import prisma from "../db/prisma.server";
+const logger = createLogger({ module: "progress-publisher" });
+const GENERATION_PROGRESS_KEY_PREFIX = "generation:progress";
+const GENERATION_PROGRESS_TTL_SECONDS = 24 * 60 * 60;
+/**
+ * 构造扫描进度的 Redis 键。
+ * @param scanJobId scan_job 的主键
+ */
+export function getScanProgressKey(scanJobId) {
+    return `${SCAN_PROGRESS_KEY_PREFIX}:${scanJobId}`;
+}
+/**
+ * 初始化扫描进度 Redis 键。
+ *
+ * 在 scan_job 创建后立即调用，设置初始进度（0/totalTasks）、RUNNING 状态和 started 阶段。
+ * 设置 24 小时 TTL 防止孤立键。
+ *
+ * @param scanJobId scan_job 的主键
+ * @param totalTasks scan_task 总数（已启用的资源类型数量）
+ */
+export async function initScanProgress(scanJobId, totalTasks) {
+    const key = getScanProgressKey(scanJobId);
+    const redis = queueConnection;
+    await redis.hset(key, {
+        completedTasks: 0,
+        totalTasks,
+        status: "RUNNING",
+        phase: SCAN_PHASE.STARTED,
+        message: "扫描已启动，正在准备提交批量查询…",
+        updatedAt: new Date().toISOString(),
+    });
+    await redis.expire(key, SCAN_PROGRESS_TTL_SECONDS);
+    logger.info({ scanJobId, totalTasks, key }, "Redis scan progress initialized");
+}
+/**
+ * 更新扫描进度阶段和消息。
+ *
+ * @param scanJobId scan_job 的主键
+ * @param phase 当前阶段
+ * @param message 阶段描述消息（可选）
+ */
+export async function updateScanProgressPhase(scanJobId, phase, message) {
+    const key = getScanProgressKey(scanJobId);
+    const redis = queueConnection;
+    const update = {
+        phase,
+        updatedAt: new Date().toISOString(),
+    };
+    if (message) {
+        update.message = message;
+    }
+    await redis.hset(key, update);
+    await redis.expire(key, SCAN_PROGRESS_TTL_SECONDS);
+    logger.info({ scanJobId, phase, message }, "Redis scan progress phase updated");
+}
+/**
+ * 更新扫描进度：递增已完成任务数。
+ *
+ * @param scanJobId scan_job 的主键
+ * @returns 更新后的 completedTasks 值
+ */
+export async function incrementScanProgress(scanJobId) {
+    const key = getScanProgressKey(scanJobId);
+    const redis = queueConnection;
+    const completedTasks = await redis.hincrby(key, "completedTasks", 1);
+    await redis.hset(key, { updatedAt: new Date().toISOString() });
+    await redis.expire(key, SCAN_PROGRESS_TTL_SECONDS);
+    logger.info({ scanJobId, completedTasks }, "Redis scan progress incremented");
+    return completedTasks;
+}
+/**
+ * 更新扫描进度：标记为最终状态（SUCCESS / PARTIAL_SUCCESS / FAILED）。
+ *
+ * @param scanJobId scan_job 的主键
+ * @param status 最终状态
+ * @param phase 最终阶段（默认根据 status 自动推导）
+ */
+export async function setScanProgressStatus(scanJobId, status, phase, messageOverride) {
+    const key = getScanProgressKey(scanJobId);
+    const redis = queueConnection;
+    const resolvedPhase = phase ??
+        (status === "FAILED" ? SCAN_PHASE.FAILED : SCAN_PHASE.DONE);
+    const message = messageOverride ??
+        (status === "FAILED"
+            ? "扫描失败，请检查或重试"
+            : status === "PARTIAL_SUCCESS"
+                ? "扫描部分完成，正在发布结果…"
+                : "扫描完成");
+    await redis.hset(key, {
+        status,
+        phase: resolvedPhase,
+        message,
+        updatedAt: new Date().toISOString(),
+    });
+    await redis.expire(key, SCAN_PROGRESS_TTL_SECONDS);
+    logger.info({ scanJobId, status, phase: resolvedPhase }, "Redis scan progress status updated");
+}
+/**
+ * 读取扫描进度。
+ *
+ * @param scanJobId scan_job 的主键
+ * @returns 进度数据，若键不存在返回 null
+ */
+export async function getScanProgress(scanJobId) {
+    const key = getScanProgressKey(scanJobId);
+    const redis = queueConnection;
+    const data = await redis.hgetall(key);
+    if (!data || Object.keys(data).length === 0) {
+        return null;
+    }
+    return {
+        completedTasks: Number(data.completedTasks) || 0,
+        totalTasks: Number(data.totalTasks) || 0,
+        status: data.status ?? "UNKNOWN",
+        phase: data.phase ?? "started",
+        message: data.message ?? "",
+    };
+}
+/**
+ * 删除扫描进度键。
+ *
+ * 用于后台兜底清理已终止但 Redis 仍残留的 RUNNING 进度。
+ *
+ * @param scanJobId scan_job 的主键
+ * @returns 删除的键数量
+ */
+export async function deleteScanProgress(scanJobId) {
+    const key = getScanProgressKey(scanJobId);
+    const deletedCount = await queueConnection.del(key);
+    logger.info({ scanJobId, key, deletedCount }, "Redis scan progress deleted");
+    return deletedCount;
+}
+export function getGenerationProgressKey(batchId) {
+    return `${GENERATION_PROGRESS_KEY_PREFIX}:${batchId}`;
+}
+export async function initGenerationProgress(batchId, totalItems) {
+    const key = getGenerationProgressKey(batchId);
+    await queueConnection.hset(key, {
+        completedTasks: 0,
+        totalTasks: totalItems,
+        status: "RUNNING",
+        phase: "generating",
+        message: "AI 生成已启动",
+        updatedAt: new Date().toISOString(),
+    });
+    await queueConnection.expire(key, GENERATION_PROGRESS_TTL_SECONDS);
+    logger.info({ batchId, totalItems, key }, "Redis generation progress initialized");
+}
+export async function publishGenerationProgress(batchId) {
+    const batch = await prisma.generationBatch.findUnique({
+        where: { id: batchId },
+        select: {
+            totalCount: true,
+            completedCount: true,
+            skippedCount: true,
+            failedCount: true,
+            status: true,
+        },
+    });
+    if (!batch) {
+        logger.warn({ batchId }, "generation progress skipped: batch not found");
+        return;
+    }
+    const phase = batch.status === "IN_PROGRESS" ? "generating" : "done";
+    const message = batch.status === "IN_PROGRESS"
+        ? "AI 生成进行中"
+        : batch.failedCount > 0
+            ? "AI 生成完成，存在失败项"
+            : "AI 生成完成";
+    await queueConnection.hset(getGenerationProgressKey(batchId), {
+        completedTasks: batch.completedCount,
+        totalTasks: batch.totalCount,
+        skippedTasks: batch.skippedCount,
+        failedTasks: batch.failedCount,
+        status: batch.status,
+        phase,
+        message,
+        updatedAt: new Date().toISOString(),
+    });
+    await queueConnection.expire(getGenerationProgressKey(batchId), GENERATION_PROGRESS_TTL_SECONDS);
+}

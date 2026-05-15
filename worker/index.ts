@@ -7,6 +7,7 @@ import { processWebhookEvent } from "../app/lib/server/webhooks/webhook-process.
 import {
   BILLING_SYNC_QUEUE_NAME,
   DERIVE_SCAN_QUEUE_NAME,
+  GENERATE_ALT_QUEUE_NAME,
   PARSE_BULK_QUEUE_NAME,
   PUBLISH_SCAN_QUEUE_NAME,
   QUOTA_GRANT_QUEUE_NAME,
@@ -27,6 +28,7 @@ import type { PublishScanJobData } from "../server/queues/publish-scan.queue.js"
 import type { BillingSyncJobData } from "../server/queues/billing-sync.queue.js";
 import type { QuotaGrantJobData } from "../server/queues/quota-grant.queue.js";
 import type { ReservationReaperJobData } from "../server/queues/reservation-reaper.queue.js";
+import type { GenerateAltJobData } from "../server/queues/generate-alt.queue.js";
 import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.service.js";
 import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
 import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
@@ -34,6 +36,10 @@ import { processPublishScanJob } from "./processors/publish-scan.processor.js";
 import { processBillingSyncJob } from "./processors/billing-sync.processor.js";
 import { processQuotaGrantJob } from "./processors/quota-grant.processor.js";
 import { processReservationReaperJob } from "./processors/reservation-reaper.processor.js";
+import {
+  generateAltConcurrency,
+  processGenerateAltJob,
+} from "./processors/generate-alt.processor.js";
 import {
   DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS,
   runScanTimeoutSweepOnce,
@@ -51,6 +57,7 @@ const publishScanConnection = createRedisConnection();
 const billingSyncConnection = createRedisConnection();
 const quotaGrantConnection = createRedisConnection();
 const reservationReaperConnection = createRedisConnection();
+const generateAltConnection = createRedisConnection();
 let scanTimeoutSweepRunning = false;
 
 const scanTimeoutSweepInterval = setInterval(() => {
@@ -158,6 +165,17 @@ const reservationReaperWorker = new Worker<ReservationReaperJobData>(
   },
 );
 
+const generateAltWorker = new Worker<GenerateAltJobData>(
+  GENERATE_ALT_QUEUE_NAME,
+  async (job) => {
+    await processGenerateAltJob(job.data);
+  },
+  {
+    connection: generateAltConnection,
+    concurrency: generateAltConcurrency,
+  },
+);
+
 // ---- 注册 Free 月配额每日 repeatable job ----
 void registerFreeMonthlyGrantScheduler().catch((error: unknown) => {
   logger.error({ err: error }, "quota-grant-scheduler.register.failed");
@@ -253,6 +271,17 @@ reservationReaperWorker.on("ready", () => {
   );
 });
 
+generateAltWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: GENERATE_ALT_QUEUE_NAME,
+      concurrency: generateAltConcurrency,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
 webhookWorker.on("completed", (job) => {
   logger.info(
     {
@@ -330,6 +359,19 @@ reservationReaperWorker.on("completed", (job) => {
       queue: RESERVATION_REAPER_QUEUE_NAME,
       jobId: job.id,
       source: job.data.source,
+    },
+    "worker.completed",
+  );
+});
+
+generateAltWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: GENERATE_ALT_QUEUE_NAME,
+      jobId: job.id,
+      batchId: job.data.batchId,
+      candidateId: job.data.candidateId,
+      shopId: job.data.shopId,
     },
     "worker.completed",
   );
@@ -424,6 +466,20 @@ reservationReaperWorker.on("failed", (job, error) => {
   );
 });
 
+generateAltWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: GENERATE_ALT_QUEUE_NAME,
+      jobId: job?.id,
+      batchId: job?.data.batchId,
+      candidateId: job?.data.candidateId,
+      shopId: job?.data.shopId,
+      err: error,
+    },
+    "worker.failed",
+  );
+});
+
 webhookWorker.on("error", (error) => {
   logger.error({ queue: WEBHOOK_QUEUE_NAME, err: error }, "worker.error");
 });
@@ -452,6 +508,10 @@ reservationReaperWorker.on("error", (error) => {
   logger.error({ queue: RESERVATION_REAPER_QUEUE_NAME, err: error }, "worker.error");
 });
 
+generateAltWorker.on("error", (error) => {
+  logger.error({ queue: GENERATE_ALT_QUEUE_NAME, err: error }, "worker.error");
+});
+
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "worker.shutdown");
   clearInterval(scanTimeoutSweepInterval);
@@ -463,6 +523,7 @@ async function shutdown(signal: string): Promise<void> {
     publishScanWorker.close(),
     quotaGrantWorker.close(),
     reservationReaperWorker.close(),
+    generateAltWorker.close(),
   ]);
   await Promise.all([
     webhookConnection.quit(),
@@ -472,6 +533,7 @@ async function shutdown(signal: string): Promise<void> {
     publishScanConnection.quit(),
     quotaGrantConnection.quit(),
     reservationReaperConnection.quit(),
+    generateAltConnection.quit(),
   ]);
   process.exit(0);
 }
@@ -487,6 +549,7 @@ void (async () => {
         PUBLISH_SCAN_QUEUE_NAME,
         QUOTA_GRANT_QUEUE_NAME,
         RESERVATION_REAPER_QUEUE_NAME,
+        GENERATE_ALT_QUEUE_NAME,
       ],
       redis: getRedisConnectionSummary(),
     },

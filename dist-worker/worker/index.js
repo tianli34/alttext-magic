@@ -1,55 +1,367 @@
 /**
  * File: worker/index.ts
- * Purpose: Boot the BullMQ worker that processes persisted Shopify webhook events.
+ * Purpose: Boot BullMQ workers for persisted Shopify webhook events, scan-start, parse-bulk, quota-grant, and reservation-reaper jobs.
  */
 import { Worker } from "bullmq";
 import { processWebhookEvent } from "../app/lib/server/webhooks/webhook-process.service.js";
-import { WEBHOOK_QUEUE_NAME } from "../server/config/queue-names.js";
+import { BILLING_SYNC_QUEUE_NAME, DERIVE_SCAN_QUEUE_NAME, GENERATE_ALT_QUEUE_NAME, PARSE_BULK_QUEUE_NAME, PUBLISH_SCAN_QUEUE_NAME, QUOTA_GRANT_QUEUE_NAME, RESERVATION_REAPER_QUEUE_NAME, SCAN_START_QUEUE_NAME, WEBHOOK_QUEUE_NAME, } from "../server/config/queue-names.js";
 import { createRedisConnection, getRedisConnectionSummary, } from "../server/queues/connection.js";
 import { createLogger } from "../server/utils/logger.js";
-const logger = createLogger({ module: "webhook-worker" });
-const connection = createRedisConnection();
-const worker = new Worker(WEBHOOK_QUEUE_NAME, async (job) => {
+import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.service.js";
+import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
+import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
+import { processPublishScanJob } from "./processors/publish-scan.processor.js";
+import { processBillingSyncJob } from "./processors/billing-sync.processor.js";
+import { processQuotaGrantJob } from "./processors/quota-grant.processor.js";
+import { processReservationReaperJob } from "./processors/reservation-reaper.processor.js";
+import { generateAltConcurrency, processGenerateAltJob, } from "./processors/generate-alt.processor.js";
+import { DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS, runScanTimeoutSweepOnce, } from "./schedulers/scan-timeout.scheduler.js";
+import { registerFreeMonthlyGrantScheduler } from "./schedulers/free-monthly-grant.scheduler.js";
+import { registerReservationReaperScheduler } from "./schedulers/reservation-reaper.scheduler.js";
+import { registerBillingSyncScheduler } from "./schedulers/billing-sync.scheduler.js";
+const logger = createLogger({ module: "worker-runtime" });
+const webhookConnection = createRedisConnection();
+const scanStartConnection = createRedisConnection();
+const parseBulkConnection = createRedisConnection();
+const deriveScanConnection = createRedisConnection();
+const publishScanConnection = createRedisConnection();
+const billingSyncConnection = createRedisConnection();
+const quotaGrantConnection = createRedisConnection();
+const reservationReaperConnection = createRedisConnection();
+const generateAltConnection = createRedisConnection();
+let scanTimeoutSweepRunning = false;
+const scanTimeoutSweepInterval = setInterval(() => {
+    if (scanTimeoutSweepRunning) {
+        return;
+    }
+    scanTimeoutSweepRunning = true;
+    void runScanTimeoutSweepOnce()
+        .catch((error) => {
+        logger.error({ err: error }, "scan-timeout-scheduler.failed");
+    })
+        .finally(() => {
+        scanTimeoutSweepRunning = false;
+    });
+}, DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS);
+scanTimeoutSweepInterval.unref();
+const webhookWorker = new Worker(WEBHOOK_QUEUE_NAME, async (job) => {
     await processWebhookEvent(job.data.webhookEventId);
 }, {
-    connection,
+    connection: webhookConnection,
     concurrency: 5,
 });
-worker.on("ready", () => {
+const scanStartWorker = new Worker(SCAN_START_QUEUE_NAME, async (job) => {
+    await processScanStartJob(job.data.scanJobId);
+}, {
+    connection: scanStartConnection,
+    concurrency: 2,
+});
+const parseBulkWorker = new Worker(PARSE_BULK_QUEUE_NAME, async (job) => {
+    await processParseBulkJob(job.data);
+}, {
+    connection: parseBulkConnection,
+    concurrency: 2,
+});
+const deriveScanWorker = new Worker(DERIVE_SCAN_QUEUE_NAME, async (job) => {
+    await processDeriveScanJob(job.data);
+}, {
+    connection: deriveScanConnection,
+    concurrency: 2,
+});
+const publishScanWorker = new Worker(PUBLISH_SCAN_QUEUE_NAME, async (job) => {
+    await processPublishScanJob(job.data);
+}, {
+    connection: publishScanConnection,
+    concurrency: 1,
+});
+const billingSyncWorker = new Worker(BILLING_SYNC_QUEUE_NAME, async (job) => {
+    await processBillingSyncJob(job.data);
+}, {
+    connection: billingSyncConnection,
+    concurrency: 2,
+});
+const quotaGrantWorker = new Worker(QUOTA_GRANT_QUEUE_NAME, async (job) => {
+    await processQuotaGrantJob(job.data);
+}, {
+    connection: quotaGrantConnection,
+    concurrency: 1,
+});
+const reservationReaperWorker = new Worker(RESERVATION_REAPER_QUEUE_NAME, async (job) => {
+    await processReservationReaperJob(job.data);
+}, {
+    connection: reservationReaperConnection,
+    concurrency: 1,
+});
+const generateAltWorker = new Worker(GENERATE_ALT_QUEUE_NAME, async (job) => {
+    await processGenerateAltJob(job.data);
+}, {
+    connection: generateAltConnection,
+    concurrency: generateAltConcurrency,
+});
+// ---- 注册 Free 月配额每日 repeatable job ----
+void registerFreeMonthlyGrantScheduler().catch((error) => {
+    logger.error({ err: error }, "quota-grant-scheduler.register.failed");
+});
+// ---- 注册 reservation-reaper 每 5 分钟 repeatable job ----
+void registerReservationReaperScheduler().catch((error) => {
+    logger.error({ err: error }, "reservation-reaper-scheduler.register.failed");
+});
+// ---- 注册 billing-sync 每 6 小时 repeatable job ----
+void registerBillingSyncScheduler().catch((error) => {
+    logger.error({ err: error }, "billing-sync-scheduler.register.failed");
+});
+webhookWorker.on("ready", () => {
     logger.info({
         queue: WEBHOOK_QUEUE_NAME,
         redis: getRedisConnectionSummary(),
-    }, "Webhook worker is ready");
+    }, "worker.ready");
 });
-worker.on("completed", (job) => {
+scanStartWorker.on("ready", () => {
+    logger.info({
+        queue: SCAN_START_QUEUE_NAME,
+        redis: getRedisConnectionSummary(),
+    }, "worker.ready");
+});
+parseBulkWorker.on("ready", () => {
+    logger.info({
+        queue: PARSE_BULK_QUEUE_NAME,
+        redis: getRedisConnectionSummary(),
+    }, "worker.ready");
+});
+deriveScanWorker.on("ready", () => {
+    logger.info({
+        queue: DERIVE_SCAN_QUEUE_NAME,
+        redis: getRedisConnectionSummary(),
+    }, "worker.ready");
+});
+publishScanWorker.on("ready", () => {
+    logger.info({
+        queue: PUBLISH_SCAN_QUEUE_NAME,
+        redis: getRedisConnectionSummary(),
+    }, "worker.ready");
+});
+billingSyncWorker.on("ready", () => {
+    logger.info({
+        queue: BILLING_SYNC_QUEUE_NAME,
+        redis: getRedisConnectionSummary(),
+    }, "worker.ready");
+});
+quotaGrantWorker.on("ready", () => {
+    logger.info({
+        queue: QUOTA_GRANT_QUEUE_NAME,
+        redis: getRedisConnectionSummary(),
+    }, "worker.ready");
+});
+reservationReaperWorker.on("ready", () => {
+    logger.info({
+        queue: RESERVATION_REAPER_QUEUE_NAME,
+        redis: getRedisConnectionSummary(),
+    }, "worker.ready");
+});
+generateAltWorker.on("ready", () => {
+    logger.info({
+        queue: GENERATE_ALT_QUEUE_NAME,
+        concurrency: generateAltConcurrency,
+        redis: getRedisConnectionSummary(),
+    }, "worker.ready");
+});
+webhookWorker.on("completed", (job) => {
     logger.info({
         queue: WEBHOOK_QUEUE_NAME,
         jobId: job.id,
         webhookEventId: job.data.webhookEventId,
-    }, "Webhook worker completed job");
+    }, "worker.completed");
 });
-worker.on("failed", (job, error) => {
+scanStartWorker.on("completed", (job) => {
+    logger.info({
+        queue: SCAN_START_QUEUE_NAME,
+        jobId: job.id,
+        scanJobId: job.data.scanJobId,
+        shopId: job.data.shopId,
+    }, "worker.completed");
+});
+parseBulkWorker.on("completed", (job) => {
+    logger.info({
+        queue: PARSE_BULK_QUEUE_NAME,
+        jobId: job.id,
+        scanTaskAttemptId: job.data.scanTaskAttemptId,
+        shopId: job.data.shopId,
+    }, "worker.completed");
+});
+deriveScanWorker.on("completed", (job) => {
+    logger.info({
+        queue: DERIVE_SCAN_QUEUE_NAME,
+        jobId: job.id,
+        scanTaskAttemptId: job.data.scanTaskAttemptId,
+        shopId: job.data.shopId,
+    }, "worker.completed");
+});
+publishScanWorker.on("completed", (job) => {
+    logger.info({
+        queue: PUBLISH_SCAN_QUEUE_NAME,
+        jobId: job.id,
+        scanJobId: job.data.scanJobId,
+        shopId: job.data.shopId,
+    }, "worker.completed");
+});
+quotaGrantWorker.on("completed", (job) => {
+    logger.info({
+        queue: QUOTA_GRANT_QUEUE_NAME,
+        jobId: job.id,
+        source: job.data.source,
+        targetMonth: job.data.targetMonth,
+    }, "worker.completed");
+});
+reservationReaperWorker.on("completed", (job) => {
+    logger.info({
+        queue: RESERVATION_REAPER_QUEUE_NAME,
+        jobId: job.id,
+        source: job.data.source,
+    }, "worker.completed");
+});
+generateAltWorker.on("completed", (job) => {
+    logger.info({
+        queue: GENERATE_ALT_QUEUE_NAME,
+        jobId: job.id,
+        batchId: job.data.batchId,
+        candidateId: job.data.candidateId,
+        shopId: job.data.shopId,
+    }, "worker.completed");
+});
+webhookWorker.on("failed", (job, error) => {
     logger.error({
         queue: WEBHOOK_QUEUE_NAME,
         jobId: job?.id,
         webhookEventId: job?.data.webhookEventId,
         err: error,
-    }, "Webhook worker failed job");
+    }, "worker.failed");
 });
-worker.on("error", (error) => {
-    logger.error({ queue: WEBHOOK_QUEUE_NAME, err: error }, "Webhook worker error");
+scanStartWorker.on("failed", (job, error) => {
+    logger.error({
+        queue: SCAN_START_QUEUE_NAME,
+        jobId: job?.id,
+        scanJobId: job?.data.scanJobId,
+        shopId: job?.data.shopId,
+        err: error,
+    }, "worker.failed");
+});
+parseBulkWorker.on("failed", (job, error) => {
+    logger.error({
+        queue: PARSE_BULK_QUEUE_NAME,
+        jobId: job?.id,
+        scanTaskAttemptId: job?.data.scanTaskAttemptId,
+        shopId: job?.data.shopId,
+        err: error,
+    }, "worker.failed");
+});
+deriveScanWorker.on("failed", (job, error) => {
+    logger.error({
+        queue: DERIVE_SCAN_QUEUE_NAME,
+        jobId: job?.id,
+        scanTaskAttemptId: job?.data.scanTaskAttemptId,
+        shopId: job?.data.shopId,
+        err: error,
+    }, "worker.failed");
+});
+publishScanWorker.on("failed", (job, error) => {
+    logger.error({
+        queue: PUBLISH_SCAN_QUEUE_NAME,
+        jobId: job?.id,
+        scanJobId: job?.data.scanJobId,
+        shopId: job?.data.shopId,
+        err: error,
+    }, "worker.failed");
+});
+quotaGrantWorker.on("failed", (job, error) => {
+    logger.error({
+        queue: QUOTA_GRANT_QUEUE_NAME,
+        jobId: job?.id,
+        source: job?.data.source,
+        targetMonth: job?.data.targetMonth,
+        err: error,
+    }, "worker.failed");
+});
+reservationReaperWorker.on("failed", (job, error) => {
+    logger.error({
+        queue: RESERVATION_REAPER_QUEUE_NAME,
+        jobId: job?.id,
+        source: job?.data.source,
+        err: error,
+    }, "worker.failed");
+});
+generateAltWorker.on("failed", (job, error) => {
+    logger.error({
+        queue: GENERATE_ALT_QUEUE_NAME,
+        jobId: job?.id,
+        batchId: job?.data.batchId,
+        candidateId: job?.data.candidateId,
+        shopId: job?.data.shopId,
+        err: error,
+    }, "worker.failed");
+});
+webhookWorker.on("error", (error) => {
+    logger.error({ queue: WEBHOOK_QUEUE_NAME, err: error }, "worker.error");
+});
+scanStartWorker.on("error", (error) => {
+    logger.error({ queue: SCAN_START_QUEUE_NAME, err: error }, "worker.error");
+});
+parseBulkWorker.on("error", (error) => {
+    logger.error({ queue: PARSE_BULK_QUEUE_NAME, err: error }, "worker.error");
+});
+deriveScanWorker.on("error", (error) => {
+    logger.error({ queue: DERIVE_SCAN_QUEUE_NAME, err: error }, "worker.error");
+});
+publishScanWorker.on("error", (error) => {
+    logger.error({ queue: PUBLISH_SCAN_QUEUE_NAME, err: error }, "worker.error");
+});
+quotaGrantWorker.on("error", (error) => {
+    logger.error({ queue: QUOTA_GRANT_QUEUE_NAME, err: error }, "worker.error");
+});
+reservationReaperWorker.on("error", (error) => {
+    logger.error({ queue: RESERVATION_REAPER_QUEUE_NAME, err: error }, "worker.error");
+});
+generateAltWorker.on("error", (error) => {
+    logger.error({ queue: GENERATE_ALT_QUEUE_NAME, err: error }, "worker.error");
 });
 async function shutdown(signal) {
-    logger.info({ signal }, "Shutting down webhook worker");
-    await worker.close();
-    await connection.quit();
+    logger.info({ signal }, "worker.shutdown");
+    clearInterval(scanTimeoutSweepInterval);
+    await Promise.all([
+        webhookWorker.close(),
+        scanStartWorker.close(),
+        parseBulkWorker.close(),
+        deriveScanWorker.close(),
+        publishScanWorker.close(),
+        quotaGrantWorker.close(),
+        reservationReaperWorker.close(),
+        generateAltWorker.close(),
+    ]);
+    await Promise.all([
+        webhookConnection.quit(),
+        scanStartConnection.quit(),
+        parseBulkConnection.quit(),
+        deriveScanConnection.quit(),
+        publishScanConnection.quit(),
+        quotaGrantConnection.quit(),
+        reservationReaperConnection.quit(),
+        generateAltConnection.quit(),
+    ]);
     process.exit(0);
 }
 void (async () => {
     logger.info({
-        queue: WEBHOOK_QUEUE_NAME,
+        queues: [
+            WEBHOOK_QUEUE_NAME,
+            SCAN_START_QUEUE_NAME,
+            PARSE_BULK_QUEUE_NAME,
+            DERIVE_SCAN_QUEUE_NAME,
+            PUBLISH_SCAN_QUEUE_NAME,
+            QUOTA_GRANT_QUEUE_NAME,
+            RESERVATION_REAPER_QUEUE_NAME,
+            GENERATE_ALT_QUEUE_NAME,
+        ],
         redis: getRedisConnectionSummary(),
-    }, "Starting webhook worker");
+    }, "worker.starting");
 })();
 for (const signal of ["SIGINT", "SIGTERM"]) {
     process.once(signal, () => {

@@ -60,6 +60,30 @@ const envSchema = z.object({
         .regex(/^[a-f0-9]+$/i, "TOKEN_ENCRYPTION_KEY must be a hex-encoded string"),
     // ── Logging ──────────────────────────────────────────────
     LOG_LEVEL: LogLevel.default("info"),
+    // ── Billing Adapter ─────────────────────────────────────
+    BILLING_ADAPTER: z
+        .enum(["shopify", "fake"])
+        .default("fake"),
+    // ── AI Provider ─────────────────────────────────────────
+    // fake: 本地/测试用 FakeAIProvider；real: 使用真实主/副模型
+    AI_PROVIDER: z.enum(["fake", "real"]).default("fake"),
+    // 主模型配置
+    AI_PRIMARY_PROVIDER: z.string().min(1).default("openai"),
+    AI_PRIMARY_MODEL: z.string().min(1).default("gpt-4o"),
+    AI_PRIMARY_API_KEY: z.string().default(""),
+    AI_PRIMARY_ENDPOINT: z.string().url().optional(),
+    // 副模型配置（fallback）
+    AI_FALLBACK_PROVIDER: z.string().min(1).default("openai"),
+    AI_FALLBACK_MODEL: z.string().min(1).default("gpt-4o-mini"),
+    AI_FALLBACK_API_KEY: z.string().default(""),
+    AI_FALLBACK_ENDPOINT: z.string().url().optional(),
+    // ── Generation Worker ───────────────────────────────────
+    GENERATE_ALT_CONCURRENCY: z.coerce
+        .number()
+        .int()
+        .positive()
+        .max(50)
+        .default(5),
 });
 /**
  * 解析 & 校验

@@ -1,100 +1,46 @@
+import prisma from "../../../../server/db/prisma.server";
+import { createLogger } from "../../../../server/utils/logger";
+const logger = createLogger({ module: "webhook-repository" });
 /**
- * File: app/lib/server/webhooks/webhook.repository.ts
- * Purpose: Encapsulate Prisma access for webhook event persistence and lifecycle updates.
+ * 幂等写入：若 shopifyWebhookId 已存在则直接返回已有记录。
+ *
+ * 利用 Prisma unique constraint 冲突实现原子去重，
+ * 保证并发重放也仅产生一行。
  */
-import { Prisma } from "@prisma/client";
-import prisma from "../../../../server/db/prisma.server.js";
-import { WEBHOOK_EVENT_STATUS, } from "./webhook.types.js";
 export async function createWebhookEventIfAbsent(envelope) {
+    const { shop, topic, webhookId, apiVersion, payload } = envelope;
+    const idempotencyKey = `${shop}:${webhookId}`;
     try {
         const event = await prisma.webhookEvent.create({
             data: {
-                shopDomain: envelope.shop,
-                topic: envelope.topic,
-                shopifyWebhookId: envelope.webhookId,
-                apiVersion: envelope.apiVersion,
-                payload: envelope.payload,
-                status: WEBHOOK_EVENT_STATUS.pending,
+                shopDomain: shop,
+                topic,
+                shopifyWebhookId: webhookId,
+                idempotencyKey,
+                apiVersion: apiVersion ?? null,
+                payload: payload,
+                status: "PENDING",
             },
-            select: {
-                id: true,
-            },
+            select: { id: true },
         });
-        return {
-            eventId: event.id,
-            isNew: true,
-        };
+        logger.info({ shop, topic, webhookId, eventId: event.id }, "webhook.repository.created");
+        return { isNew: true, eventId: event.id };
     }
     catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError &&
+        // Prisma unique constraint violation (P2002) → 幂等返回
+        if (typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
             error.code === "P2002") {
-            const existing = await prisma.webhookEvent.findUniqueOrThrow({
-                where: {
-                    shopifyWebhookId: envelope.webhookId,
-                },
-                select: {
-                    id: true,
-                },
+            const existing = await prisma.webhookEvent.findUnique({
+                where: { shopifyWebhookId: webhookId },
+                select: { id: true },
             });
-            return {
-                eventId: existing.id,
-                isNew: false,
-            };
+            if (existing) {
+                logger.info({ shop, topic, webhookId, eventId: existing.id }, "webhook.repository.duplicate");
+                return { isNew: false, eventId: existing.id };
+            }
         }
         throw error;
     }
-}
-export async function markWebhookEventProcessing(webhookEventId) {
-    await prisma.webhookEvent.update({
-        where: {
-            id: webhookEventId,
-        },
-        data: {
-            status: WEBHOOK_EVENT_STATUS.processing,
-            attempts: {
-                increment: 1,
-            },
-            errorMessage: null,
-        },
-    });
-}
-export async function markWebhookEventProcessed(webhookEventId) {
-    await prisma.webhookEvent.update({
-        where: {
-            id: webhookEventId,
-        },
-        data: {
-            status: WEBHOOK_EVENT_STATUS.processed,
-            processedAt: new Date(),
-            errorMessage: null,
-        },
-    });
-}
-export async function markWebhookEventFailed(webhookEventId, errorMessage) {
-    await prisma.webhookEvent.update({
-        where: {
-            id: webhookEventId,
-        },
-        data: {
-            status: WEBHOOK_EVENT_STATUS.failed,
-            errorMessage,
-        },
-    });
-}
-export async function getWebhookEventById(webhookEventId) {
-    return prisma.webhookEvent.findUniqueOrThrow({
-        where: {
-            id: webhookEventId,
-        },
-    });
-}
-export async function markShopUninstalled(shopDomain) {
-    await prisma.shop.updateMany({
-        where: {
-            shopDomain,
-        },
-        data: {
-            uninstalledAt: new Date(),
-        },
-    });
 }

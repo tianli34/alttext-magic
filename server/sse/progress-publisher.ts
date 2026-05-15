@@ -12,8 +12,11 @@ import {
   type ScanPhase,
 } from "../modules/scan/scan.constants";
 import { createLogger } from "../utils/logger";
+import prisma from "../db/prisma.server";
 
 const logger = createLogger({ module: "progress-publisher" });
+const GENERATION_PROGRESS_KEY_PREFIX = "generation:progress";
+const GENERATION_PROGRESS_TTL_SECONDS = 24 * 60 * 60;
 
 /**
  * 构造扫描进度的 Redis 键。
@@ -194,4 +197,65 @@ export async function deleteScanProgress(scanJobId: string): Promise<number> {
   logger.info({ scanJobId, key, deletedCount }, "Redis scan progress deleted");
 
   return deletedCount;
+}
+
+export function getGenerationProgressKey(batchId: string): string {
+  return `${GENERATION_PROGRESS_KEY_PREFIX}:${batchId}`;
+}
+
+export async function initGenerationProgress(
+  batchId: string,
+  totalItems: number,
+): Promise<void> {
+  const key = getGenerationProgressKey(batchId);
+
+  await queueConnection.hset(key, {
+    completedTasks: 0,
+    totalTasks: totalItems,
+    status: "RUNNING",
+    phase: "generating",
+    message: "AI 生成已启动",
+    updatedAt: new Date().toISOString(),
+  });
+  await queueConnection.expire(key, GENERATION_PROGRESS_TTL_SECONDS);
+
+  logger.info({ batchId, totalItems, key }, "Redis generation progress initialized");
+}
+
+export async function publishGenerationProgress(batchId: string): Promise<void> {
+  const batch = await prisma.generationBatch.findUnique({
+    where: { id: batchId },
+    select: {
+      totalCount: true,
+      completedCount: true,
+      skippedCount: true,
+      failedCount: true,
+      status: true,
+    },
+  });
+
+  if (!batch) {
+    logger.warn({ batchId }, "generation progress skipped: batch not found");
+    return;
+  }
+
+  const phase = batch.status === "IN_PROGRESS" ? "generating" : "done";
+  const message =
+    batch.status === "IN_PROGRESS"
+      ? "AI 生成进行中"
+      : batch.failedCount > 0
+        ? "AI 生成完成，存在失败项"
+        : "AI 生成完成";
+
+  await queueConnection.hset(getGenerationProgressKey(batchId), {
+    completedTasks: batch.completedCount,
+    totalTasks: batch.totalCount,
+    skippedTasks: batch.skippedCount,
+    failedTasks: batch.failedCount,
+    status: batch.status,
+    phase,
+    message,
+    updatedAt: new Date().toISOString(),
+  });
+  await queueConnection.expire(getGenerationProgressKey(batchId), GENERATION_PROGRESS_TTL_SECONDS);
 }

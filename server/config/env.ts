@@ -100,6 +100,14 @@ const envSchema = z.object({
   AI_FALLBACK_MODEL: z.string().min(1).default("gpt-4o-mini"),
   AI_FALLBACK_API_KEY: z.string().default(""),
   AI_FALLBACK_ENDPOINT: z.string().url().optional(),
+
+  // ── Generation Worker ───────────────────────────────────
+  GENERATE_ALT_CONCURRENCY: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(50)
+    .default(5),
 });
 
 /**
