@@ -28,4 +28,7 @@
 ### Task 6.4 — 真值复核服务：按 `alt_plane` 读取 Shopify 线上当前 Alt
 - `server/shopify/shopify-rate-limiter.server.ts` — `TokenBucket` + `getShopifyRateLimiter`（进程内按 shopId 隔离单例，扫描与生成管线共用）
 - `server/modules/generation/truth-check.service.ts` — `TruthCheckService.checkCurrentAlt`；按 `alt_plane` 分类查询：`FILE_ALT`→MediaImage、`COLLECTION_IMAGE_ALT`→Collection、`ARTICLE_IMAGE_ALT`→Article；`TruthCheckRetryableError` 区分可重试错误
-- `tests/truth-check.service.test.ts` — 23 项测试全部通过（各 plane 空/非空/资源删除/5xx/网络错误/rate limiter）
+
+### Task 6.5 — 上下文构建服务：usage 统计 + `context_mode` 判定 + `context_snapshot` 生成
+- `server/modules/generation/context-builder.service.ts` — `ContextBuilderService.buildContext`；查询 `image_usage` 判定引用状态，根据 §4.3.10 返回 `RESOURCE_SPECIFIC`、`FILE_NEUTRAL` 或 `SHARED_NEUTRAL` 及其对应的 `context_snapshot`
+- `tests/context-builder.service.test.ts` — 完成覆盖单产品、纯文件、共享产品及集合图片的单元测试
