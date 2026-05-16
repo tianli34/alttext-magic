@@ -9,6 +9,7 @@ import type { AIProvider, GenerateAltRequest, GenerateAltResult } from "../serve
 import { AIGenerationError } from "../server/ai/ai.types.js";
 import { aiGatewayService } from "../server/ai/ai-gateway.js";
 import { FallbackProvider } from "../server/ai/providers/fallback.provider.js";
+import { GenerationBatchService } from "../server/modules/generation/generation-batch.service.js";
 import { ContextBuilderService } from "../server/modules/generation/context-builder.service.js";
 import { GenerationCreditService } from "../server/modules/generation/generation-credit.service.js";
 import { TruthCheckService } from "../server/modules/generation/truth-check.service.js";
@@ -178,6 +179,7 @@ function installMocks(state: MockState): () => void {
     context: ContextBuilderService.buildContext,
     consume: GenerationCreditService.consume,
     release: GenerationCreditService.releaseReservation,
+    markJobFinished: GenerationBatchService.markJobFinished,
   };
 
   mutablePrisma.altCandidate.findFirst = async (args) => {
@@ -250,6 +252,43 @@ function installMocks(state: MockState): () => void {
     state.releasedKeys.add(`gen:${batchId}:${candidateId}:release`);
     return { changed: true, reservationId: "reservation-1" };
   };
+  GenerationBatchService.markJobFinished = async ({ batchId, result }) => {
+    const batch = state.batches.get(batchId);
+    if (!batch) throw new Error("batch not found");
+    if (batch.status !== "IN_PROGRESS") {
+      return {
+        finalized: false,
+        batch: {
+          shopId: "shop-1",
+          batchId: batch.id,
+          status: batch.status,
+          totalCount: batch.totalCount,
+          completedCount: batch.completedCount,
+          skippedCount: batch.skippedCount,
+          failedCount: batch.failedCount,
+        },
+      };
+    }
+    batch.completedCount += 1;
+    if (result === "skipped") batch.skippedCount += 1;
+    if (result === "failed") batch.failedCount += 1;
+    const finalized = batch.completedCount >= batch.totalCount;
+    if (finalized) {
+      batch.status = batch.failedCount > 0 ? "FAILED" : "COMPLETED";
+    }
+    return {
+      finalized,
+      batch: {
+        shopId: "shop-1",
+        batchId: batch.id,
+        status: batch.status,
+        totalCount: batch.totalCount,
+        completedCount: batch.completedCount,
+        skippedCount: batch.skippedCount,
+        failedCount: batch.failedCount,
+      },
+    };
+  };
 
   return () => {
     mutablePrisma.altCandidate.findFirst = original.findFirst;
@@ -264,6 +303,7 @@ function installMocks(state: MockState): () => void {
     ContextBuilderService.buildContext = original.context;
     GenerationCreditService.consume = original.consume;
     GenerationCreditService.releaseReservation = original.release;
+    GenerationBatchService.markJobFinished = original.markJobFinished;
   };
 }
 
@@ -282,6 +322,16 @@ class FailingProvider implements AIProvider {
   }
 }
 
+class ConditionalFailProvider implements AIProvider {
+  async generateAlt(req: GenerateAltRequest): Promise<GenerateAltResult> {
+    if (req.imageUrl.endsWith("image-2.jpg")) {
+      throw new AIGenerationError("conditional failure");
+    }
+    const filename = req.imageUrl.split("/").pop() ?? "unknown";
+    return { altText: `Photo of ${filename}`, modelUsed: "fake-model" };
+  }
+}
+
 async function testFiveCandidatesSuccess(): Promise<void> {
   const state = makeState(5);
   const restore = installMocks(state);
@@ -295,6 +345,7 @@ async function testFiveCandidatesSuccess(): Promise<void> {
     assertEqual(state.drafts.size, 5, "5 条 candidate 生成 5 条 draft");
     assertEqual(state.consumedKeys.size, 5, "5 条 candidate 写 5 条 CONSUME 幂等键");
     assertEqual(state.batches.get("batch-1")?.completedCount, 5, "batch completed_count = 5");
+    assertEqual(state.batches.get("batch-1")?.status, "COMPLETED", "5 条全部完成后 batch = COMPLETED");
   } finally {
     restore();
   }
@@ -319,6 +370,32 @@ async function testTruthFilledSkipsOne(): Promise<void> {
     assertEqual(state.drafts.size, 4, "真值非空时仅 4 条 draft");
     assertEqual(state.consumedKeys.size, 4, "真值非空时仅 4 条扣费");
     assertEqual(state.releasedKeys.size, 1, "真值非空释放 1 条预留");
+    assertEqual(state.batches.get("batch-1")?.status, "COMPLETED", "仅 skipped 无 failed 时 batch = COMPLETED");
+  } finally {
+    restore();
+  }
+}
+
+async function testMixedSkippedAndFailed(): Promise<void> {
+  const state = makeState(5);
+  const restore = installMocks(state);
+  aiGatewayService._setProvider(new ConditionalFailProvider());
+
+  try {
+    TruthCheckService.checkCurrentAlt = async (candidate) =>
+      candidate.candidateId === "cand-1"
+        ? { isEmpty: false, currentAlt: "Already filled" }
+        : { isEmpty: true, currentAlt: null };
+
+    for (let index = 1; index <= 5; index++) {
+      await processGenerateAltJob(job(`cand-${index}`, index));
+    }
+
+    assertEqual(state.consumedKeys.size, 3, "1 skipped + 1 failed 时仅消费 3 条");
+    assertEqual(state.releasedKeys.size, 2, "1 skipped + 1 failed 时释放 2 条预留");
+    assertEqual(state.batches.get("batch-1")?.skippedCount, 1, "混合结果 skipped_count = 1");
+    assertEqual(state.batches.get("batch-1")?.failedCount, 1, "混合结果 failed_count = 1");
+    assertEqual(state.batches.get("batch-1")?.status, "FAILED", "存在 failed 时 batch = FAILED");
   } finally {
     restore();
   }
@@ -354,6 +431,7 @@ async function testAllProvidersFail(): Promise<void> {
     assertEqual(state.candidates.get("cand-1")?.status, AltCandidateStatus.GENERATION_FAILED_RETRYABLE, "全部失败标记 GENERATION_FAILED_RETRYABLE");
     assertEqual(state.releasedKeys.size, 1, "全部失败释放 1 条预留");
     assertEqual(state.batches.get("batch-1")?.failedCount, 1, "全部失败 failed_count +1");
+    assertEqual(state.batches.get("batch-1")?.status, "FAILED", "全部失败时 batch = FAILED");
   } finally {
     restore();
   }
@@ -381,6 +459,7 @@ async function run(): Promise<void> {
 
   await testFiveCandidatesSuccess();
   await testTruthFilledSkipsOne();
+  await testMixedSkippedAndFailed();
   await testFallbackSuccess();
   await testAllProvidersFail();
   await testDuplicateJobIdempotent();

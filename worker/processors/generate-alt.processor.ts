@@ -4,7 +4,6 @@
  */
 import {
   AltCandidateStatus,
-  GenerationBatchStatus,
   Prisma,
   type AltCandidate,
   type AltTarget,
@@ -14,6 +13,7 @@ import { cleanAltText } from "../../server/ai/output-cleaner.server";
 import { aiGatewayService } from "../../server/ai/ai-gateway";
 import { AIGenerationError } from "../../server/ai/ai.types";
 import { env } from "../../server/config/env";
+import { GenerationBatchService } from "../../server/modules/generation/generation-batch.service";
 import { ContextBuilderService } from "../../server/modules/generation/context-builder.service";
 import { GenerationCreditService } from "../../server/modules/generation/generation-credit.service";
 import { TruthCheckService } from "../../server/modules/generation/truth-check.service";
@@ -57,40 +57,6 @@ async function loadCandidate(data: GenerateAltJobData): Promise<CandidateWithTar
   return candidate;
 }
 
-async function markBatchProgress(
-  batchId: string,
-  counter: "completed" | "skipped" | "failed",
-): Promise<void> {
-  const increment =
-    counter === "skipped"
-      ? { completedCount: { increment: 1 }, skippedCount: { increment: 1 } }
-      : counter === "failed"
-        ? { completedCount: { increment: 1 }, failedCount: { increment: 1 } }
-        : { completedCount: { increment: 1 } };
-
-  const batch = await prisma.generationBatch.update({
-    where: { id: batchId },
-    data: increment,
-    select: {
-      totalCount: true,
-      completedCount: true,
-      failedCount: true,
-    },
-  });
-
-  if (batch.completedCount >= batch.totalCount) {
-    await prisma.generationBatch.update({
-      where: { id: batchId },
-      data: {
-        status:
-          batch.failedCount > 0
-            ? GenerationBatchStatus.FAILED
-            : GenerationBatchStatus.COMPLETED,
-      },
-    });
-  }
-}
-
 async function markSkippedAlreadyFilled(
   data: GenerateAltJobData,
   candidate: CandidateWithTarget,
@@ -130,7 +96,11 @@ async function markSkippedAlreadyFilled(
     batchId: data.batchId,
     candidateId: data.candidateId,
   });
-  await markBatchProgress(data.batchId, "skipped");
+  await GenerationBatchService.markJobFinished({
+    shopId: data.shopId,
+    batchId: data.batchId,
+    result: "skipped",
+  });
 }
 
 function toInputJsonObject(snapshot: ContextSnapshot): Prisma.InputJsonObject {
@@ -195,7 +165,11 @@ async function markGenerated(
     batchId: data.batchId,
     candidateId: data.candidateId,
   });
-  await markBatchProgress(data.batchId, "completed");
+  await GenerationBatchService.markJobFinished({
+    shopId: data.shopId,
+    batchId: data.batchId,
+    result: "completed",
+  });
 }
 
 async function markGenerationFailed(
@@ -229,7 +203,11 @@ async function markGenerationFailed(
     batchId: data.batchId,
     candidateId: data.candidateId,
   });
-  await markBatchProgress(data.batchId, "failed");
+  await GenerationBatchService.markJobFinished({
+    shopId: data.shopId,
+    batchId: data.batchId,
+    result: "failed",
+  });
 }
 
 export async function processGenerateAltJob(data: GenerateAltJobData): Promise<void> {
