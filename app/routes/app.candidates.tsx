@@ -3,10 +3,14 @@
  * Purpose: 候选列表页面。
  *          展示 scope 内候选图片，支持 group/status 过滤、usage 展开和游标分页。
  *          支持 装饰性标记 / 取消标记 交互，含确认弹窗、loading 态和错误 Toast。
+ *          支持候选选择 → 预检确认 → 生成进度 → 完成汇总的完整交互流程。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import styles from "../components/candidates/CandidateListPage.module.css";
+import genStyles from "../components/generation/GenerationFlow.module.css";
+import { useGenerationFlow } from "../hooks/useGenerationFlow";
+import { GenerationFlow } from "../components/generation/GenerationFlow";
 
 type GroupType = "PRODUCT_MEDIA" | "FILES" | "COLLECTION" | "ARTICLE";
 type CandidateStatus =
@@ -112,6 +116,12 @@ const STATUS_LABELS: Record<CandidateStatus, string> = {
   SKIPPED_ALREADY_FILLED: "Already filled",
 };
 
+/** 可选中的候选状态（用于生成 Alt Text） */
+const SELECTABLE_STATUSES: ReadonlySet<CandidateStatus> = new Set([
+  "MISSING",
+  "GENERATION_FAILED_RETRYABLE",
+]);
+
 function normalizeStatusFilter(value: string | null): StatusFilter {
   if (
     value === "MISSING" ||
@@ -208,6 +218,54 @@ export default function AppCandidatesPage() {
     visible: false,
   });
 
+  /* ---- 生成流程状态机 ---- */
+  const flow = useGenerationFlow();
+
+  /* ---- 候选选择状态 ---- */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // 当筛选条件变化时清空选择
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  // 可选中的候选 ID 列表（当前已加载的 items 中）
+  const selectableItems = useMemo(
+    () => items.filter((item) => SELECTABLE_STATUSES.has(item.status)),
+    [items],
+  );
+
+  // 是否正在生成中（禁用选择交互）
+  const isGenerating = flow.phase === "STARTING" || flow.phase === "GENERATING";
+
+  const toggleSelect = useCallback(
+    (id: string) => {
+      if (isGenerating) return;
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      });
+    },
+    [isGenerating],
+  );
+
+  const selectAll = useCallback(() => {
+    if (isGenerating) return;
+    setSelectedIds(new Set(selectableItems.map((item) => item.id)));
+  }, [isGenerating, selectableItems]);
+
+  const deselectAll = useCallback(() => {
+    if (isGenerating) return;
+    setSelectedIds(new Set());
+  }, [isGenerating]);
+
+  const selectedCount = selectedIds.size;
+
   const selectedGroupValue = selectedGroup || "";
 
   const updateFilter = useCallback(
@@ -225,8 +283,9 @@ export default function AppCandidatesPage() {
       setSearchParams(params);
       setExpandedId(null);
       setUsageByCandidateId({});
+      clearSelection();
     },
-    [searchParams, selectedGroup, selectedStatus, setSearchParams],
+    [searchParams, selectedGroup, selectedStatus, setSearchParams, clearSelection],
   );
 
   const fetchCandidates = useCallback(
@@ -404,6 +463,40 @@ export default function AppCandidatesPage() {
     [showToast],
   );
 
+  /* ---- 生成流程触发 ---- */
+  const handleGenerateClick = useCallback(() => {
+    if (selectedCount === 0) return;
+    const candidateIds = Array.from(selectedIds);
+    void flow.startPreflight(candidateIds);
+  }, [selectedCount, selectedIds, flow]);
+
+  /* ---- 生成完成后刷新列表 ---- */
+  const handleCloseSummary = useCallback(() => {
+    flow.closeSummary();
+    clearSelection();
+    // 重新加载候选列表以反映最新状态
+    const controller = new AbortController();
+
+    async function reload() {
+      try {
+        const query = buildCandidateQuery(selectedGroup, selectedStatus);
+        const response = await fetch(`/api/candidates?${query}`, { signal: controller.signal });
+        if (!response.ok) return;
+        const data = await response.json() as CandidateListResponse;
+        setItems(data.items);
+        setNextCursor(data.nextCursor);
+      } catch {
+        // 刷新失败不影响用户体验
+      }
+    }
+
+    void reload();
+  }, [flow, clearSelection, selectedGroup, selectedStatus]);
+
+  // 判断是否所有可选项都已选中
+  const allSelectableSelected = selectableItems.length > 0 &&
+    selectableItems.every((item) => selectedIds.has(item.id));
+
   return (
     <>
     <s-page heading="候选列表">
@@ -469,10 +562,45 @@ export default function AppCandidatesPage() {
           </s-box>
         ) : (
           <s-stack direction="block" gap="base">
+            {/* ---- 批量选择工具栏 ---- */}
+            {selectableItems.length > 0 && (
+              <div className={genStyles.selectionToolbar}>
+                <div className={genStyles.toolbarLeft}>
+                  <button
+                    type="button"
+                    className={genStyles.toolbarBtn}
+                    onClick={allSelectableSelected ? deselectAll : selectAll}
+                    disabled={isGenerating}
+                  >
+                    {allSelectableSelected ? "取消全选" : "全选"}
+                  </button>
+                  <span className={genStyles.toolbarText}>
+                    已选 {selectedCount} 张
+                  </span>
+                </div>
+                <div className={genStyles.toolbarRight}>
+                  <div
+                    onClick={selectedCount > 0 && !isGenerating ? handleGenerateClick : undefined}
+                    style={{ display: "inline-block", cursor: selectedCount > 0 && !isGenerating ? "pointer" : "default" }}
+                  >
+                    <s-button
+                      variant="primary"
+                      accessibilityLabel="Generate Alt Text"
+                      {...(selectedCount === 0 || isGenerating ? { disabled: true } : {})}
+                    >
+                      Generate Alt Text{selectedCount > 0 ? ` (${selectedCount})` : ""}
+                    </s-button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className={styles.list}>
               {items.map((item) => {
                 const usageState = usageByCandidateId[item.altCandidateId];
                 const isExpanded = expandedId === item.id;
+                const isSelectable = SELECTABLE_STATUSES.has(item.status);
+                const isSelected = selectedIds.has(item.id);
 
                 return (
                   <s-box
@@ -482,6 +610,18 @@ export default function AppCandidatesPage() {
                     borderWidth="base"
                   >
                     <div className={styles.row}>
+                      {/* ---- 复选框 ---- */}
+                      <div className={genStyles.checkboxCell}>
+                        <input
+                          type="checkbox"
+                          className={genStyles.checkboxInput}
+                          checked={isSelected}
+                          disabled={!isSelectable || isGenerating}
+                          onChange={() => toggleSelect(item.id)}
+                          aria-label={`选择 ${item.primaryUsage.title ?? "未命名资源"}`}
+                        />
+                      </div>
+
                       {item.thumbnailUrl ? (
                         <img
                           className={styles.thumbnail}
@@ -647,6 +787,21 @@ export default function AppCandidatesPage() {
         )}
       </s-section>
     </s-page>
+
+    {/* 生成流程 Modal / Progress / Summary */}
+    <GenerationFlow
+      phase={flow.phase}
+      preflightResult={flow.preflightResult}
+      totalCount={flow.totalCount}
+      progress={flow.progress}
+      summary={flow.summary}
+      error={flow.error}
+      connected={flow.connected}
+      percent={flow.percent}
+      onConfirmAndStart={flow.confirmAndStart}
+      onCancel={flow.cancel}
+      onCloseSummary={handleCloseSummary}
+    />
 
     {/* 错误 Toast */}
     {toast.visible && (

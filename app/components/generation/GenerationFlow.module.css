@@ -1,0 +1,296 @@
+/* ============================================================================
+ * GenerationFlow.module.css
+ * Purpose: 生成触发交互流程组件样式
+ *          包含预检确认 Modal / 进度展示 / 完成汇总
+ * ============================================================================ */
+
+/* ---- Modal 遮罩层 ---- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* ---- Modal 容器 ---- */
+.modal {
+  position: relative;
+  width: min(32rem, 92vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 1.5rem;
+  border: 1px solid var(--p-color-border, #8a8a8a);
+  border-radius: 0.75rem;
+  background: var(--p-color-bg-surface, #ffffff);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+
+/* ---- 余额明细行 ---- */
+.balanceRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.375rem 0;
+}
+
+.balanceLabel {
+  color: var(--p-color-text-secondary, #6d7175);
+}
+
+.balanceValue {
+  font-weight: 600;
+}
+
+.balanceValueWarning {
+  font-weight: 600;
+  color: var(--p-color-text-warning, #ff9800);
+}
+
+.balanceValueCritical {
+  font-weight: 600;
+  color: var(--p-color-text-critical, #d72c0d);
+}
+
+.balanceValueSuccess {
+  font-weight: 600;
+  color: var(--p-color-bg-fill-success, #2ecc71);
+}
+
+/* ---- 余额分隔线 ---- */
+.balanceDivider {
+  border-top: 1px solid var(--p-color-border-secondary, #c9cccf);
+  margin: 0.5rem 0;
+}
+
+/* ---- 操作按钮区域 ---- */
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+/* ---- 进度条容器 ---- */
+.progressContainer {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.progressBarTrack {
+  width: 100%;
+  height: 10px;
+  background: var(--p-color-bg-surface-secondary, #e4e5e7);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.progressBarFill {
+  height: 100%;
+  background: var(--p-color-bg-fill-primary, #008060);
+  border-radius: 5px;
+  transition: width 0.5s ease-in-out;
+}
+
+.progressBarFillComplete {
+  background: var(--p-color-bg-fill-success, #2ecc71);
+}
+
+/* ---- 进度计数文本 ---- */
+.progressCount {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* ---- 汇总统计 ---- */
+.summaryStats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.statCard {
+  display: grid;
+  place-items: center;
+  gap: 0.25rem;
+  padding: 0.875rem;
+  border: 1px solid var(--p-color-border-secondary, #c9cccf);
+  border-radius: 0.5rem;
+  background: var(--p-color-bg-surface-secondary, #f6f6f7);
+}
+
+.statCardSuccess {
+  border-color: var(--p-color-border-success, #2ecc71);
+  background: var(--p-color-bg-fill-success-secondary, #f1f8f5);
+}
+
+.statCardCaution {
+  border-color: var(--p-color-text-caution, #916a00);
+  background: var(--p-color-bg-fill-caution-secondary, #fff8db);
+}
+
+.statCardCritical {
+  border-color: var(--p-color-border-critical, #eb9082);
+  background: var(--p-color-bg-fill-critical-secondary, #fff4f4);
+}
+
+.statNumber {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.statNumberSuccess {
+  color: var(--p-color-text-success, #108043);
+}
+
+.statNumberCaution {
+  color: var(--p-color-text-caution, #916a00);
+}
+
+.statNumberCritical {
+  color: var(--p-color-text-critical, #8e1f0b);
+}
+
+.statLabel {
+  font-size: 0.8125rem;
+  color: var(--p-color-text-secondary, #6d7175);
+}
+
+/* ---- Banner 样式 ---- */
+.banner {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--p-color-border-secondary, #c9cccf);
+  background: var(--p-color-bg-surface-secondary, #f6f6f7);
+}
+
+.bannerSuccess {
+  border-color: var(--p-color-border-success, #2ecc71);
+  background: var(--p-color-bg-fill-success-secondary, #f1f8f5);
+}
+
+.bannerCritical {
+  border-color: var(--p-color-border-critical, #eb9082);
+  background: var(--p-color-bg-fill-critical-secondary, #fff4f4);
+}
+
+/* ---- 选择工具栏 ---- */
+.selectionToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--p-color-border-brand, #008060);
+  border-radius: 0.5rem;
+  background: var(--p-color-bg-surface, #ffffff);
+}
+
+.toolbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toolbarRight {
+  margin-left: auto;
+}
+
+.toolbarText {
+  font-size: 0.875rem;
+  color: var(--p-color-text-secondary, #6d7175);
+}
+
+.toolbarBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--p-color-border, #8a8a8a);
+  border-radius: 0.375rem;
+  background: var(--p-color-bg-surface, #ffffff);
+  color: var(--p-color-text, #202223);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.toolbarBtn:hover {
+  background: var(--p-color-bg-surface-secondary, #f6f6f7);
+}
+
+.toolbarBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- Checkbox ---- */
+.checkboxCell {
+  display: grid;
+  place-items: center;
+  padding-top: 0.25rem;
+}
+
+.checkboxInput {
+  width: 1.125rem;
+  height: 1.125rem;
+  cursor: pointer;
+  accent-color: var(--p-color-bg-fill-primary, #008060);
+}
+
+.checkboxInput:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ---- 额度不足警告 ---- */
+.insufficientWarning {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--p-color-border-critical, #eb9082);
+  border-radius: 0.5rem;
+  background: var(--p-color-bg-fill-critical-secondary, #fff4f4);
+}
+
+/* ---- 分配明细 ---- */
+.allocationList {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.allocationRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 700px) {
+  .modal {
+    width: 96vw;
+    padding: 1rem;
+  }
+
+  .summaryStats {
+    grid-template-columns: 1fr;
+  }
+
+  .selectionToolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbarRight {
+    margin-left: 0;
+  }
+}
