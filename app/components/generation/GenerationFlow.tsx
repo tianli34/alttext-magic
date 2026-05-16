@@ -231,8 +231,8 @@ function ConfirmModal({
           {preflightResult && !enough && (
             <s-box padding="base" borderRadius="base" background="strong">
               <s-stack direction="block" gap="base">
-                <s-stack direction="inline" gap="small" align="center">
-                  <s-heading tone="critical">余额不足</s-heading>
+                <s-stack direction="inline" gap="small">
+                  <s-heading>余额不足</s-heading>
                 </s-stack>
                 <s-text tone="critical">
                   当前余额 <strong>{preflightResult.totalRemaining}</strong>，
