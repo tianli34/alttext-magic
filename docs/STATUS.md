@@ -39,3 +39,6 @@
 ### Task 6.8 — Batch 生命周期管理
 - `server/modules/generation/generation-batch.service.ts` — 创建 generation_batch、按 Job 完成递增进度、完成后释放未使用预留并释放 GENERATE 锁；提供超时失败兜底。
 - `app/routes/api.generation.start.tsx` — 生成启动串联 batch、GENERATE 锁、额度预留、进度初始化与 generate_alt 入列。
+### Task 6.9 — `POST /api/generation/start` API 端点
+- `app/routes/api.generation.start.tsx` — 补齐锁检查、候选/装饰性/effective scope 校验、额度 preflight、预留、batch、Job 投递、`GENERATING` 状态与失败回滚。
+- `prisma/schema.prisma` — 新增 `AltCandidateStatus.GENERATING`。

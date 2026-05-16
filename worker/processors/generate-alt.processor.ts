@@ -38,8 +38,14 @@ const TERMINAL_STATUSES = new Set<AltCandidateStatus>([
   AltCandidateStatus.NOT_FOUND,
   AltCandidateStatus.DECORATIVE_SKIPPED,
   AltCandidateStatus.SKIPPED_ALREADY_FILLED,
-  AltCandidateStatus.GENERATION_FAILED_RETRYABLE,
 ]);
+
+const PROCESSABLE_STATUSES = [
+  AltCandidateStatus.MISSING,
+  AltCandidateStatus.GENERATING,
+  AltCandidateStatus.GENERATION_FAILED_RETRYABLE,
+];
+const PROCESSABLE_STATUS_SET = new Set<AltCandidateStatus>(PROCESSABLE_STATUSES);
 
 async function loadCandidate(data: GenerateAltJobData): Promise<CandidateWithTarget> {
   const candidate = await prisma.altCandidate.findFirst({
@@ -66,7 +72,7 @@ async function markSkippedAlreadyFilled(
     where: {
       id: candidate.id,
       shopId: data.shopId,
-      status: AltCandidateStatus.MISSING,
+      status: { in: PROCESSABLE_STATUSES },
     },
     data: {
       status: AltCandidateStatus.SKIPPED_ALREADY_FILLED,
@@ -119,7 +125,7 @@ async function markGenerated(
     where: {
       id: candidate.id,
       shopId: data.shopId,
-      status: AltCandidateStatus.MISSING,
+      status: { in: PROCESSABLE_STATUSES },
     },
     data: {
       status: AltCandidateStatus.GENERATED,
@@ -181,7 +187,7 @@ async function markGenerationFailed(
     where: {
       id: candidate.id,
       shopId: data.shopId,
-      status: AltCandidateStatus.MISSING,
+      status: { in: PROCESSABLE_STATUSES },
     },
     data: {
       status: AltCandidateStatus.GENERATION_FAILED_RETRYABLE,
@@ -222,7 +228,7 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
     return;
   }
 
-  if (candidate.status !== AltCandidateStatus.MISSING) {
+  if (!PROCESSABLE_STATUS_SET.has(candidate.status)) {
     logger.info(
       { candidateId: data.candidateId, batchId: data.batchId, status: candidate.status },
       "generate-alt.non-processable-skip",

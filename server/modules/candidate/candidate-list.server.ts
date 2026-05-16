@@ -23,6 +23,7 @@ const MAX_LIMIT = 50;
 
 export const candidateListStatusValues = [
   "MISSING",
+  "GENERATING",
   "HAS_ALT",
   "DECORATIVE_SKIPPED",
   "GENERATION_FAILED_RETRYABLE",

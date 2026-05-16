@@ -65,7 +65,7 @@ interface MutablePrisma {
   altCandidate: {
     findFirst: (args: { where: { id: string; shopId: string }; include: { altTarget: true } }) => Promise<unknown>;
     updateMany: (args: {
-      where: { id: string; shopId: string; status: AltCandidateStatus };
+      where: { id: string; shopId: string; status: AltCandidateStatus | { in: AltCandidateStatus[] } };
       data: Partial<MockCandidate>;
     }) => Promise<{ count: number }>;
   };
@@ -154,6 +154,7 @@ function makeState(totalCount: number): MockState {
 function job(candidateId: string, index: number): GenerateAltJobData {
   return {
     batchId: "batch-1",
+    reservationId: "reservation-1",
     candidateId,
     shopId: "shop-1",
     shopifyImageId: `gid://shopify/MediaImage/${index}`,
@@ -191,7 +192,11 @@ function installMocks(state: MockState): () => void {
 
   mutablePrisma.altCandidate.updateMany = async (args) => {
     const candidate = state.candidates.get(args.where.id);
-    if (!candidate || candidate.shopId !== args.where.shopId || candidate.status !== args.where.status) {
+    const expectedStatus = args.where.status;
+    const statusMatches = typeof expectedStatus === "string"
+      ? candidate?.status === expectedStatus
+      : expectedStatus.in.includes(candidate?.status as AltCandidateStatus);
+    if (!candidate || candidate.shopId !== args.where.shopId || !statusMatches) {
       return { count: 0 };
     }
     Object.assign(candidate, args.data);

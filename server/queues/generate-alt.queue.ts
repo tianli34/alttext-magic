@@ -12,6 +12,7 @@ const logger = createLogger({ module: "generate-alt-queue" });
 
 export interface GenerateAltJobData {
   batchId: string;
+  reservationId: string;
   candidateId: string;
   shopId: string;
   shopifyImageId: string;

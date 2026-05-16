@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "AltCandidateStatus" ADD VALUE 'GENERATING' AFTER 'MISSING';
