@@ -35,10 +35,8 @@
 ### Task 6.7 — `generate_alt` BullMQ Job 实现
 - `server/queues/generate-alt.queue.ts`、`worker/processors/generate-alt.processor.ts`、`worker/index.ts` — 注册并处理单条候选生成 Job，串联真值复核、上下文、AI、draft、单条额度结算与进度事件。
 - `server/modules/generation/generation-credit.service.ts` — 支持 candidate 粒度 consume/release 幂等结算。
-- `tests/generate-alt.processor.test.ts` — 覆盖 5 条成功、真值跳过、fallback、全部失败、重复 Job 幂等。
 ### Task 6.8 — Batch 生命周期管理
 - `server/modules/generation/generation-batch.service.ts` — 创建 generation_batch、按 Job 完成递增进度、完成后释放未使用预留并释放 GENERATE 锁；提供超时失败兜底。
 - `app/routes/api.generation.start.tsx` — 生成启动串联 batch、GENERATE 锁、额度预留、进度初始化与 generate_alt 入列。
 ### Task 6.9 — `POST /api/generation/start` API 端点
 - `app/routes/api.generation.start.tsx` — 补齐锁检查、候选/装饰性/effective scope 校验、额度 preflight、预留、batch、Job 投递、`GENERATING` 状态与失败回滚。
-- `prisma/schema.prisma` — 新增 `AltCandidateStatus.GENERATING`。

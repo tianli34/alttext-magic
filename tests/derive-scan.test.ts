@@ -101,6 +101,7 @@ async function run(): Promise<void> {
         "FILES 应复用已存在 target 的 canonical resourceType，避免双 target",
       );
       assert.equal(fileResult.usages.length, 1, "FILES 仍应保留自己的 FILE usage");
+      assert.equal(fileResult.usages[0]?.resourceType, "FILES");
       assert.equal(fileResult.usages[0]?.usageType, "FILE");
       assert.equal(fileResult.warnings.length, 2, "alt/url 同时冲突时应记录两条告警");
 
@@ -118,6 +119,51 @@ async function run(): Promise<void> {
         2,
         "usage 应同时保留 PRODUCT + FILE 两条",
       );
+    }
+
+    {
+      const productResult = deriveProductMediaResults({
+        shopId: "shop-1",
+        scanJobId: "scan-job-2",
+        products: [
+          {
+            productId: "gid://shopify/Product/2",
+            title: "Product B",
+            handle: "product-b",
+          },
+        ],
+        mediaRows: [
+          {
+            mediaImageId: "gid://shopify/MediaImage/2",
+            parentProductId: "gid://shopify/Product/2",
+            alt: "product alt",
+            url: "https://cdn.example.com/product-2.jpg",
+            positionIndex: 0,
+          },
+        ],
+        existingTargets: [
+          {
+            resourceType: "FILES",
+            writeTargetId: "gid://shopify/MediaImage/2",
+            currentAltText: "file alt",
+            previewUrl: "https://cdn.example.com/file-2.jpg",
+            displayTitle: null,
+            displayHandle: null,
+          },
+        ],
+      });
+
+      assert.equal(
+        productResult.targets[0]?.resourceType,
+        "FILES",
+        "target 仍应复用先到的 FILE_ALT canonical resourceType",
+      );
+      assert.equal(
+        productResult.usages[0]?.resourceType,
+        "PRODUCT_MEDIA",
+        "PRODUCT usage 必须保留真实任务类型，避免发布 sweep 误删产品分组",
+      );
+      assert.equal(productResult.usages[0]?.usageType, "PRODUCT");
     }
 
     {

@@ -488,7 +488,7 @@ export function deriveProductMediaResults(input: {
       usages.push({
         shopId: input.shopId,
         scanJobId: input.scanJobId,
-        resourceType: canonicalResourceType,
+        resourceType: "PRODUCT_MEDIA",
         altPlane: "FILE_ALT",
         writeTargetId: mediaImageId,
         locale: DEFAULT_LOCALE,
@@ -555,7 +555,7 @@ export function deriveFileResults(input: {
     usages.push({
       shopId: input.shopId,
       scanJobId: input.scanJobId,
-      resourceType: canonicalResourceType,
+      resourceType: "FILES",
       altPlane: "FILE_ALT",
       writeTargetId: row.mediaImageId,
       locale: DEFAULT_LOCALE,
