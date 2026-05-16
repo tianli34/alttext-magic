@@ -1,8 +1,9 @@
 /**
  * File: server/sse/progress-publisher.ts
- * Purpose: 扫描进度 Redis 发布器。
+ * Purpose: 扫描进度 + 生成进度 Redis 发布器。
  *          负责初始化 Redis 进度键、更新进度、读取进度。
- *          供 SSE 端点和扫描 worker 共同使用。
+ *          生成进度额外通过 Redis Pub/Sub 推送实时事件。
+ *          供 SSE 端点、扫描 worker 和生成 worker 共同使用。
  */
 import { queueConnection } from "../queues/connection";
 import {
@@ -16,7 +17,29 @@ import prisma from "../db/prisma.server";
 
 const logger = createLogger({ module: "progress-publisher" });
 const GENERATION_PROGRESS_KEY_PREFIX = "generation:progress";
+const GENERATION_PROGRESS_CHANNEL_PREFIX = "generation:progress:events";
 const GENERATION_PROGRESS_TTL_SECONDS = 24 * 60 * 60;
+
+/**
+ * 生成进度 SSE 事件格式。
+ * 对应任务 6.10 的 event payload 规范。
+ */
+export interface GenerationProgressEvent {
+  /** 事件类型 */
+  type: "generation_progress" | "generation_completed";
+  /** 批次 ID */
+  batchId: string;
+  /** 已处理条目数（含成功、跳过、失败） */
+  current: number;
+  /** 总条目数 */
+  total: number;
+  /** 跳过数 */
+  skipped: number;
+  /** 失败数 */
+  failed: number;
+  /** 批次状态 */
+  status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
+}
 
 /**
  * 构造扫描进度的 Redis 键。
@@ -203,6 +226,14 @@ export function getGenerationProgressKey(batchId: string): string {
   return `${GENERATION_PROGRESS_KEY_PREFIX}:${batchId}`;
 }
 
+/**
+ * 构造生成进度 Redis Pub/Sub 频道名。
+ * @param batchId 批次 ID
+ */
+export function getGenerationProgressChannel(batchId: string): string {
+  return `${GENERATION_PROGRESS_CHANNEL_PREFIX}:${batchId}`;
+}
+
 export async function initGenerationProgress(
   batchId: string,
   totalItems: number,
@@ -222,6 +253,44 @@ export async function initGenerationProgress(
   logger.info({ batchId, totalItems, key }, "Redis generation progress initialized");
 }
 
+/**
+ * 从 Redis hash 读取当前生成进度快照。
+ * 用于 SSE 连接初始化时恢复已丢失的事件。
+ */
+export async function readGenerationProgress(batchId: string): Promise<{
+  completedTasks: number;
+  totalTasks: number;
+  skippedTasks: number;
+  failedTasks: number;
+  status: string;
+  phase: string;
+  message: string;
+} | null> {
+  const key = getGenerationProgressKey(batchId);
+  const data = await queueConnection.hgetall(key);
+
+  if (!data || Object.keys(data).length === 0) {
+    return null;
+  }
+
+  return {
+    completedTasks: Number(data.completedTasks) || 0,
+    totalTasks: Number(data.totalTasks) || 0,
+    skippedTasks: Number(data.skippedTasks) || 0,
+    failedTasks: Number(data.failedTasks) || 0,
+    status: data.status ?? "UNKNOWN",
+    phase: data.phase ?? "generating",
+    message: data.message ?? "",
+  };
+}
+
+/**
+ * 发布生成进度到 Redis hash + Pub/Sub 频道。
+ *
+ * 在 generate-alt worker 的 finally 中调用。
+ * 每条 job 完成后写 Redis hash 并通过 Pub/Sub 推送实时事件；
+ * 当 batch 进入终态时额外发送 generation_completed 汇总事件。
+ */
 export async function publishGenerationProgress(batchId: string): Promise<void> {
   const batch = await prisma.generationBatch.findUnique({
     where: { id: batchId },
@@ -239,14 +308,15 @@ export async function publishGenerationProgress(batchId: string): Promise<void> 
     return;
   }
 
-  const phase = batch.status === "IN_PROGRESS" ? "generating" : "done";
-  const message =
-    batch.status === "IN_PROGRESS"
-      ? "AI 生成进行中"
-      : batch.failedCount > 0
-        ? "AI 生成完成，存在失败项"
-        : "AI 生成完成";
+  const isTerminal = batch.status !== "IN_PROGRESS";
+  const phase = isTerminal ? "done" : "generating";
+  const message = isTerminal
+    ? batch.failedCount > 0
+      ? "AI 生成完成，存在失败项"
+      : "AI 生成完成"
+    : "AI 生成进行中";
 
+  // 1. 写 Redis hash（保持与扫描进度一致的模式）
   await queueConnection.hset(getGenerationProgressKey(batchId), {
     completedTasks: batch.completedCount,
     totalTasks: batch.totalCount,
@@ -257,5 +327,47 @@ export async function publishGenerationProgress(batchId: string): Promise<void> 
     message,
     updatedAt: new Date().toISOString(),
   });
-  await queueConnection.expire(getGenerationProgressKey(batchId), GENERATION_PROGRESS_TTL_SECONDS);
+  await queueConnection.expire(
+    getGenerationProgressKey(batchId),
+    GENERATION_PROGRESS_TTL_SECONDS,
+  );
+
+  // 2. 通过 Pub/Sub 推送实时进度事件
+  const channel = getGenerationProgressChannel(batchId);
+
+  const progressEvent: GenerationProgressEvent = {
+    type: "generation_progress",
+    batchId,
+    current: batch.completedCount,
+    total: batch.totalCount,
+    skipped: batch.skippedCount,
+    failed: batch.failedCount,
+    status: batch.status as GenerationProgressEvent["status"],
+  };
+  await queueConnection.publish(channel, JSON.stringify(progressEvent));
+
+  // 3. 终态时额外发送汇总事件
+  if (isTerminal) {
+    const completedEvent: GenerationProgressEvent = {
+      type: "generation_completed",
+      batchId,
+      current: batch.completedCount,
+      total: batch.totalCount,
+      skipped: batch.skippedCount,
+      failed: batch.failedCount,
+      status: batch.status as GenerationProgressEvent["status"],
+    };
+    await queueConnection.publish(channel, JSON.stringify(completedEvent));
+  }
+
+  logger.info(
+    {
+      batchId,
+      completedCount: batch.completedCount,
+      totalCount: batch.totalCount,
+      status: batch.status,
+      isTerminal,
+    },
+    "Generation progress published via Pub/Sub",
+  );
 }
