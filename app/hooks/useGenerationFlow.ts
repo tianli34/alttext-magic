@@ -30,6 +30,7 @@ export interface PreflightResult {
   welcomeRemaining: number;
   overagePackRemaining: number;
   totalRemaining: number;
+  currentPlan: string;
   allocation: Array<{ bucketType: string; amount: number }>;
 }
 

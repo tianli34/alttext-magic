@@ -45,3 +45,10 @@
 - `server/sse/generation-sse.service.ts` — 生成阶段 Redis Pub/Sub 订阅式 SSE 服务：连接建立时发送 Redis hash 快照恢复，再订阅频道实时转发；收到 `generation_completed` 后自动关闭流；客户端断开时清理订阅连接（`unsubscribe` + `quit`）。
 - `app/routes/api.generation.progress.$batchId.tsx` — `GET /api/generation/progress/:batchId` SSE 端点：Bearer 鉴权 → 校验 batch 归属 shop → 建立 SSE 流。
 - `app/hooks/useGenerationSSE.ts` — 前端 Hook：连接生成 SSE 端点，实时接收 `generation_progress` / `generation_completed` 事件，提供 `progress`、`percent`、`isTerminal` 等计算属性。
+### Task 6.11 — 前端：生成触发交互流程
+实现生成流程状态机 Hook 和相关组件，支持生成过程的预检、确认、进度展示及汇总
+`useGenerationFlow.ts` — 生成流程状态机 Hook `GenerationFlow.tsx` — 生成流程 UI 组件 `app.candidates.tsx` — 候选列表页面
+### Task 6.12 — 前端：额度不足阻断与引导
+- `app/routes/api.generation.preflight.tsx` — 预检接口增加 `currentPlan` 返回。
+- `app/hooks/useGenerationFlow.ts` — 类型定义同步。
+- `app/components/generation/GenerationFlow.tsx` — 实现余额不足 Modal 切换、引导 Banner 及 "Upgrade Plan" / "Buy Extra Pack" 跳转逻辑；MAX 计划用户自动隐藏升级按钮。

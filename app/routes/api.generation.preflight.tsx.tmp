@@ -4,7 +4,7 @@
  *          供 Phase 6 AI 生成管线使用，估算额度消耗并返回余额与预计消费顺序。
  *
  * 请求体: { candidateIds?: string[], count?: number }
- * 响应体: { estimatedCredits, enough, includedRemaining, welcomeRemaining, overagePackRemaining, totalRemaining, allocation }
+ * 响应体: { estimatedCredits, enough, includedRemaining, welcomeRemaining, overagePackRemaining, totalRemaining, currentPlan, allocation }
  */
 import type { ActionFunctionArgs } from "react-router";
 import { z, ZodError } from "zod";
