@@ -154,8 +154,9 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
       });
 
       if (!response.ok) {
-        const body = (await response.json()) as { error?: string; message?: string };
-        throw new Error(body.error ?? body.message ?? `启动生成失败 (${response.status})`);
+        const body = (await response.json()) as { error?: string; message?: string; code?: string };
+        const detail = body.message ? `${body.error}${body.code ? ` (${body.code})` : ""}: ${body.message}` : (body.error ?? `启动生成失败 (${response.status})`);
+        throw new Error(detail);
       }
 
       const data = (await response.json()) as StartResult;

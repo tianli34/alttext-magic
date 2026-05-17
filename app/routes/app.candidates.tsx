@@ -256,7 +256,7 @@ export default function AppCandidatesPage() {
 
   const selectAll = useCallback(() => {
     if (isGenerating) return;
-    setSelectedIds(new Set(selectableItems.map((item) => item.id)));
+    setSelectedIds(new Set(selectableItems.map((item) => item.altCandidateId)));
   }, [isGenerating, selectableItems]);
 
   const deselectAll = useCallback(() => {
@@ -414,6 +414,13 @@ export default function AppCandidatesPage() {
     setToast({ message, visible: true });
     window.setTimeout(() => setToast({ message: "", visible: false }), 4000);
   }, []);
+
+  // 生成流程错误 → Toast 显示（IDLE 阶段才有反馈）
+  useEffect(() => {
+    if (flow.phase === "IDLE" && flow.error) {
+      showToast(flow.error);
+    }
+  }, [flow.phase, flow.error, showToast]);
 
   /* ---- 装饰性标记 / 取消标记 ---- */
   const handleDecorativeConfirm = useCallback(
@@ -600,7 +607,7 @@ export default function AppCandidatesPage() {
                 const usageState = usageByCandidateId[item.altCandidateId];
                 const isExpanded = expandedId === item.id;
                 const isSelectable = SELECTABLE_STATUSES.has(item.status);
-                const isSelected = selectedIds.has(item.id);
+                const isSelected = selectedIds.has(item.altCandidateId);
 
                 return (
                   <s-box
@@ -617,7 +624,7 @@ export default function AppCandidatesPage() {
                           className={genStyles.checkboxInput}
                           checked={isSelected}
                           disabled={!isSelectable || isGenerating}
-                          onChange={() => toggleSelect(item.id)}
+                          onChange={() => toggleSelect(item.altCandidateId)}
                           aria-label={`选择 ${item.primaryUsage.title ?? "未命名资源"}`}
                         />
                       </div>
@@ -659,6 +666,12 @@ export default function AppCandidatesPage() {
                             总使用数 {item.usageCountPresent.toLocaleString("zh-CN")}
                           </s-text>
                         </s-stack>
+
+                        {item.draftAlt && (
+                          <s-text tone="neutral">
+                            {item.draftAlt}
+                          </s-text>
+                        )}
 
                         <button
                           type="button"

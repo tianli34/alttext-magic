@@ -8,7 +8,6 @@ import {
   type AltCandidate,
   type AltTarget,
 } from "@prisma/client";
-import { buildPrompt } from "../../server/ai/prompt-engine.server";
 import { cleanAltText } from "../../server/ai/output-cleaner.server";
 import { aiGatewayService } from "../../server/ai/ai-gateway";
 import { AIGenerationError } from "../../server/ai/ai.types";
@@ -25,6 +24,8 @@ import type { ContextSnapshot } from "../../server/ai/ai.types";
 
 const logger = createLogger({ module: "generate-alt-processor" });
 const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+
+const CHINESE_SHOP_ID = "cmnidr9hh0000bsttv2rx99xq";
 
 export const generateAltConcurrency = env.GENERATE_ALT_CONCURRENCY;
 
@@ -250,19 +251,22 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
       return;
     }
 
+    const locale: "en" | "zh-CN" =
+      data.shopId === CHINESE_SHOP_ID ? "zh-CN" : "en";
+
     const { contextMode, contextSnapshot } =
       await ContextBuilderService.buildContext(candidate);
-    buildPrompt(data.imageUrl, contextSnapshot, contextMode);
 
     const raw = await aiGatewayService.generateAlt({
       imageUrl: data.imageUrl,
       contextSnapshot,
       contextMode,
+      locale,
     });
 
     let generatedText: string;
     try {
-      generatedText = cleanAltText(raw.altText);
+      generatedText = cleanAltText(raw.altText, locale);
     } catch (error) {
       throw new AIGenerationError(
         error instanceof Error ? error.message : "AI 输出清洗失败",

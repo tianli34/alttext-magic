@@ -23,7 +23,13 @@
 - `server/config/env.ts` — 新增 `AI_PROVIDER`、`AI_PRIMARY_*`、`AI_FALLBACK_*`
 ### Task 6.3 — Prompt 模板系统 + AI 输出清洗器
 - `server/ai/prompt-engine.server.ts` — 实现 `buildPrompt`，支持 `RESOURCE_SPECIFIC`、`FILE_NEUTRAL`、`SHARED_NEUTRAL`
-- `server/ai/output-cleaner.server.ts` — 实现 `cleanAltText`
+- `server/ai/output-cleaner.server.ts` — 实现 `cleanAltText`，新增 `locale` 参数支持中/英文不同清洗规则
+### Task 6.3a — 按店铺 locale 切换中英文 Alt Text 生成
+- `server/ai/ai.types.ts` — `GenerateAltRequest` 新增可选 `locale: "en" | "zh-CN"`
+- `worker/processors/generate-alt.processor.ts` — 按 `shopId` 判断店铺，`cmnidr9hh0000bsttv2rx99xq` 走中文，其余走英文
+- `server/ai/prompt-engine.server.ts` — `buildPrompt` 新增 `locale` 参数，中英文提示词条件切换
+- `server/ai/providers/openai.provider.ts` — `buildSystemPrompt` 按 `locale` 输出中/英文 system prompt；用户消息同理
+- `server/ai/output-cleaner.server.ts` — `cleanAltText` 新增 `locale` 参数：中文跳英文特定规则，截断至 75 字符
 ### Task 6.4 — 真值复核服务：按 `alt_plane` 读取 Shopify 线上当前 Alt
 - `server/shopify/shopify-rate-limiter.server.ts` — `TokenBucket` + `getShopifyRateLimiter`（进程内按 shopId 隔离单例，扫描与生成管线共用）
 - `server/modules/generation/truth-check.service.ts` — `TruthCheckService.checkCurrentAlt`；按 `alt_plane` 分类查询：`FILE_ALT`→MediaImage、`COLLECTION_IMAGE_ALT`→Collection、`ARTICLE_IMAGE_ALT`→Article；`TruthCheckRetryableError` 区分可重试错误
@@ -48,6 +54,9 @@
 ### Task 6.11 — 前端：生成触发交互流程
 实现生成流程状态机 Hook 和相关组件，支持生成过程的预检、确认、进度展示及汇总
 `useGenerationFlow.ts` — 生成流程状态机 Hook `GenerationFlow.tsx` — 生成流程 UI 组件 `app.candidates.tsx` — 候选列表页面
+### 候选列表修复 — 选择工具栏粘性定位
+- `app/components/generation/GenerationFlow.module.css` — `.selectionToolbar` 增加 `position: sticky`，使其跟随页面滚动。
+
 ### Task 6.12 — 前端：额度不足阻断与引导
 - `app/routes/api.generation.preflight.tsx` — 预检接口增加 `currentPlan` 返回。
 - `app/hooks/useGenerationFlow.ts` — 类型定义同步。

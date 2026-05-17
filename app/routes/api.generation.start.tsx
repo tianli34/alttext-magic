@@ -63,11 +63,14 @@ interface CreditPreflightResult {
   allocation: Array<{ bucketType: string; amount: number }>;
 }
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
-  }
+export const loader = () => {
+  return Response.json(
+    { error: "Method not allowed. Use POST." },
+    { status: 405 },
+  );
+};
 
+export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shopDomain = session.shop;
 

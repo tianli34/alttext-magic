@@ -48,7 +48,7 @@ export async function enqueueQuotaGrant(data: QuotaGrantJobData): Promise<void> 
   const queue = getQueue();
 
   await queue.add("quota-grant", data, {
-    jobId: `quota-grant:${data.targetMonth ?? "current"}`,
+    jobId: `quota-grant-${data.targetMonth ?? "current"}`,
     attempts: 3,
     backoff: { type: "exponential", delay: 10_000 },
     removeOnComplete: { count: 100 },

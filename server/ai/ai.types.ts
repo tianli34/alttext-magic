@@ -14,6 +14,7 @@ export interface GenerateAltRequest {
   imageUrl: string;
   contextSnapshot: ContextSnapshot;
   contextMode: AltDraftContextMode;
+  locale?: "en" | "zh-CN";
 }
 
 export interface GenerateAltResult {

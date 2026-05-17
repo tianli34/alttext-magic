@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
+    "@openrouter/sdk": "^0.12.35",
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "@react-router/fs-routes": "^7.12.0",

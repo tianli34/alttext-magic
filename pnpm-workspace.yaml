@@ -1,4 +1,8 @@
+
+packages:
+  - "extensions/*"
 allowBuilds:
+  '@openrouter/sdk': true
   '@parcel/watcher': true
   '@prisma/client': true
   '@prisma/engines': true
@@ -6,8 +10,3 @@ allowBuilds:
   msgpackr-extract: true
   prisma: true
   unrs-resolver: true
-
-
-
-packages:
-  - "extensions/*"
