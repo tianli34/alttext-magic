@@ -41,8 +41,10 @@
 ### Task 6.7 — `generate_alt` BullMQ Job 实现
 - `server/queues/generate-alt.queue.ts`、`worker/processors/generate-alt.processor.ts`、`worker/index.ts` — 注册并处理单条候选生成 Job，串联真值复核、上下文、AI、draft、单条额度结算与进度事件。
 - `server/modules/generation/generation-credit.service.ts` — 支持 candidate 粒度 consume/release 幂等结算。
+- `worker/processors/generate-alt.processor.ts` — catch 兜底：非 `AIGenerationError` 异常也走 `markGenerationFailed`，避免候选人卡在 `GENERATING`（第一道防线）
 ### Task 6.8 — Batch 生命周期管理
 - `server/modules/generation/generation-batch.service.ts` — 创建 generation_batch、按 Job 完成递增进度、完成后释放未使用预留并释放 GENERATE 锁；提供超时失败兜底。
+- `server/modules/generation/generation-batch.service.ts` — `finalizeTimedOutBatches` 超时回滚时一并回滚该 shop 下所有 `GENERATING` 候选人到 `GENERATION_FAILED_RETRYABLE`（第二道防线，覆盖进程崩溃等极端场景）
 - `app/routes/api.generation.start.tsx` — 生成启动串联 batch、GENERATE 锁、额度预留、进度初始化与 generate_alt 入列。
 ### Task 6.9 — `POST /api/generation/start` API 端点
 - `app/routes/api.generation.start.tsx` — 补齐锁检查、候选/装饰性/effective scope 校验、额度 preflight、预留、batch、Job 投递、`GENERATING` 状态与失败回滚。
@@ -61,3 +63,21 @@
 - `app/routes/api.generation.preflight.tsx` — 预检接口增加 `currentPlan` 返回。
 - `app/hooks/useGenerationFlow.ts` — 类型定义同步。
 - `app/components/generation/GenerationFlow.tsx` — 实现余额不足 Modal 切换、引导 Banner 及 "Upgrade Plan" / "Buy Extra Pack" 跳转逻辑；MAX 计划用户自动隐藏升级按钮。
+
+### Task 6.13 — AI 模型调用耗时记录
+- `prisma/schema.prisma` — 新增 `AiModelCall` 模型（`ai_model_call` 表）。
+- `server/ai/ai.types.ts` — 新增 `ModelCallRecord` 类型；`GenerateAltResult` 新增 `modelCalls` 字段；`AIGenerationError` 新增可选 `modelCalls` 参数。
+- `server/ai/providers/openai.provider.ts` — 计时逻辑：`classifyNetworkError`/`classifyHttpError` 区分 `SERVER`/`NON_SERVER`；成功/失败均通过 `modelCalls` 传递耗时记录。
+- `server/ai/providers/fake.provider.ts` — 同步添加计时与 `modelCalls`。
+- `server/ai/providers/fallback.provider.ts` — 聚合主/副 provider 的 `modelCalls`，不自行计时。
+- `worker/processors/generate-alt.processor.ts` — 新增 `persistModelCalls()` 在成功/失败路径统一写入 `ai_model_call` 表。
+
+## 候选列表瀑布流加载
+- `app/hooks/useInfiniteScroll.ts` — 新增基于 IntersectionObserver 的无限滚动 Hook
+- `app/routes/app.candidates.tsx` — 加载更多按钮替换为哨兵 div，滚动触底自动触发游标分页
+
+## Bug 修复
+
+### AI 模型超时幽灵日志（`openai.provider.ts`）
+- **根因**: `Promise.race` 超时胜出后，IIFE（Async IIFE）因 `AbortController` 未能取消已抵近完成的 HTTP 请求，仍在后台继续执行并打出 `"AI 模型调用成功"`，造成日志与真实流程矛盾。
+- **修复**: 引入 `raceSettled` 标志，超时分支先设标记再 reject；IIFE 所有关键节点（fetch catch、HTTP 错误、JSON 解析、空内容、成功返回前）检查该标记，若 race 已定则静默返回，避免幽灵日志与未处理的 Promise rejection。

@@ -1325,3 +1325,24 @@ model BillingLedger {
   @@index([shopId, entryType, occurredAt])
   @@map("billing_ledger")
 }
+
+// ============================================================
+// 34. AiModelCall
+// ============================================================
+
+model AiModelCall {
+  id            String   @id @default(cuid())
+  shopId        String   @map("shop_id")
+  candidateId   String?  @map("candidate_id")
+  batchId       String?  @map("batch_id")
+  modelName     String   @map("model_name")
+  durationMs    Int      @map("duration_ms")
+  status        String   @map("status")           // "SUCCESS" | "FAILED"
+  failureOrigin String?  @map("failure_origin")   // "SERVER" | "NON_SERVER"
+  errorMessage  String?  @map("error_message")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([modelName])
+  @@index([shopId])
+  @@map("ai_model_call")
+}

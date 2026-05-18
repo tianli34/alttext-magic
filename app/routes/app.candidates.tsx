@@ -10,6 +10,7 @@ import { useSearchParams } from "react-router";
 import styles from "../components/candidates/CandidateListPage.module.css";
 import genStyles from "../components/generation/GenerationFlow.module.css";
 import { useGenerationFlow } from "../hooks/useGenerationFlow";
+import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 import { GenerationFlow } from "../components/generation/GenerationFlow";
 
 type GroupType = "PRODUCT_MEDIA" | "FILES" | "COLLECTION" | "ARTICLE";
@@ -470,6 +471,13 @@ export default function AppCandidatesPage() {
     [showToast],
   );
 
+  /* ---- 无限滚动（瀑布流） ---- */
+  const sentinelRef = useInfiniteScroll({
+    hasMore: nextCursor !== null,
+    loading: loadingMore,
+    onLoadMore: handleLoadMore,
+  });
+
   /* ---- 生成流程触发 ---- */
   const handleGenerateClick = useCallback(() => {
     if (selectedCount === 0) return;
@@ -783,17 +791,10 @@ export default function AppCandidatesPage() {
               })}
             </div>
 
+            {/* 瀑布流哨兵 —— 进入视口即自动加载更多 */}
             {nextCursor && (
-              <div className={styles.loadMore}>
-                <div onClick={() => void handleLoadMore()}>
-                  <s-button
-                    variant="secondary"
-                    accessibilityLabel="加载更多候选图片"
-                    {...(loadingMore ? { disabled: true } : {})}
-                  >
-                    {loadingMore ? "正在加载…" : "加载更多"}
-                  </s-button>
-                </div>
+              <div ref={sentinelRef} className={styles.loadMore}>
+                {loadingMore && <s-text tone="neutral">正在加载更多…</s-text>}
               </div>
             )}
           </s-stack>

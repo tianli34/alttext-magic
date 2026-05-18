@@ -17,9 +17,18 @@ export interface GenerateAltRequest {
   locale?: "en" | "zh-CN";
 }
 
+export interface ModelCallRecord {
+  modelName: string;
+  durationMs: number;
+  status: "SUCCESS" | "FAILED";
+  failureOrigin?: "SERVER" | "NON_SERVER";
+  errorMessage?: string;
+}
+
 export interface GenerateAltResult {
   altText: string;
   modelUsed: string;
+  modelCalls: ModelCallRecord[];
 }
 
 // ----------------------------------------------------------------
@@ -30,6 +39,7 @@ export class AIGenerationError extends Error {
   constructor(
     message: string,
     public readonly cause?: unknown,
+    public readonly modelCalls?: ModelCallRecord[],
   ) {
     super(message);
     this.name = "AIGenerationError";

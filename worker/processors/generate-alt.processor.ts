@@ -11,6 +11,7 @@ import {
 import { cleanAltText } from "../../server/ai/output-cleaner.server";
 import { aiGatewayService } from "../../server/ai/ai-gateway";
 import { AIGenerationError } from "../../server/ai/ai.types";
+import type { ModelCallRecord } from "../../server/ai/ai.types";
 import { env } from "../../server/config/env";
 import { GenerationBatchService } from "../../server/modules/generation/generation-batch.service";
 import { ContextBuilderService } from "../../server/modules/generation/context-builder.service";
@@ -217,6 +218,26 @@ async function markGenerationFailed(
   });
 }
 
+async function persistModelCalls(
+  data: { shopId: string; candidateId?: string; batchId?: string },
+  calls: ModelCallRecord[],
+): Promise<void> {
+  if (calls.length === 0) return;
+
+  await prisma.aiModelCall.createMany({
+    data: calls.map((c) => ({
+      shopId: data.shopId,
+      candidateId: data.candidateId,
+      batchId: data.batchId,
+      modelName: c.modelName,
+      durationMs: c.durationMs,
+      status: c.status,
+      failureOrigin: c.failureOrigin ?? null,
+      errorMessage: c.errorMessage ?? null,
+    })),
+  });
+}
+
 export async function processGenerateAltJob(data: GenerateAltJobData): Promise<void> {
   const candidate = await loadCandidate(data);
 
@@ -264,6 +285,8 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
       locale,
     });
 
+    await persistModelCalls(data, raw.modelCalls);
+
     let generatedText: string;
     try {
       generatedText = cleanAltText(raw.altText, locale);
@@ -284,11 +307,23 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
     );
   } catch (error) {
     if (error instanceof AIGenerationError) {
+      if (error.modelCalls) {
+        await persistModelCalls(data, error.modelCalls);
+      }
       await markGenerationFailed(data, candidate, error);
       return;
     }
 
-    throw error;
+    // 非 AIGenerationError 兜底：标记失败而非抛出，避免候选人卡在 GENERATING
+    await markGenerationFailed(
+      data,
+      candidate,
+      new AIGenerationError(
+        error instanceof Error ? error.message : "生成过程未知错误",
+        error,
+      ),
+    );
+    return;
   } finally {
     await publishGenerationProgress(data.batchId);
   }

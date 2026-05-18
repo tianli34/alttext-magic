@@ -83,6 +83,9 @@ interface MutablePrisma {
     update: (args: { where: { id: string }; data: Record<string, unknown>; select?: Record<string, boolean> }) => Promise<unknown>;
     findUnique: (args: { where: { id: string }; select: Record<string, boolean> }) => Promise<unknown>;
   };
+  aiModelCall: {
+    createMany: (args: { data: Array<Record<string, unknown>> }) => Promise<{ count: number }>;
+  };
 }
 
 interface MutableQueueConnection {
@@ -174,6 +177,7 @@ function installMocks(state: MockState): () => void {
     draftUpsert: mutablePrisma.altDraft.upsert,
     batchUpdate: mutablePrisma.generationBatch.update,
     batchFindUnique: mutablePrisma.generationBatch.findUnique,
+    modelCallCreateMany: mutablePrisma.aiModelCall.createMany,
     hset: mutableQueue.hset,
     expire: mutableQueue.expire,
     truth: TruthCheckService.checkCurrentAlt,
@@ -241,6 +245,8 @@ function installMocks(state: MockState): () => void {
     return state.batches.get(args.where.id) ?? null;
   };
 
+  mutablePrisma.aiModelCall.createMany = async () => ({ count: 0 });
+
   mutableQueue.hset = async () => 1;
   mutableQueue.expire = async () => 1;
 
@@ -302,6 +308,7 @@ function installMocks(state: MockState): () => void {
     mutablePrisma.altDraft.upsert = original.draftUpsert;
     mutablePrisma.generationBatch.update = original.batchUpdate;
     mutablePrisma.generationBatch.findUnique = original.batchFindUnique;
+    mutablePrisma.aiModelCall.createMany = original.modelCallCreateMany;
     mutableQueue.hset = original.hset;
     mutableQueue.expire = original.expire;
     TruthCheckService.checkCurrentAlt = original.truth;
@@ -316,7 +323,11 @@ class SuccessProvider implements AIProvider {
   constructor(private readonly modelUsed = "fake-model") {}
   async generateAlt(req: GenerateAltRequest): Promise<GenerateAltResult> {
     const filename = req.imageUrl.split("/").pop() ?? "unknown";
-    return { altText: `Photo of ${filename}`, modelUsed: this.modelUsed };
+    return {
+      altText: `Photo of ${filename}`,
+      modelUsed: this.modelUsed,
+      modelCalls: [{ modelName: this.modelUsed, durationMs: 100, status: "SUCCESS" }],
+    };
   }
 }
 
@@ -333,7 +344,11 @@ class ConditionalFailProvider implements AIProvider {
       throw new AIGenerationError("conditional failure");
     }
     const filename = req.imageUrl.split("/").pop() ?? "unknown";
-    return { altText: `Photo of ${filename}`, modelUsed: "fake-model" };
+    return {
+      altText: `Photo of ${filename}`,
+      modelUsed: "fake-model",
+      modelCalls: [{ modelName: "fake-model", durationMs: 100, status: "SUCCESS" }],
+    };
   }
 }
 

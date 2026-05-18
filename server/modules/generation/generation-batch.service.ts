@@ -2,7 +2,7 @@
  * File: server/modules/generation/generation-batch.service.ts
  * Purpose: 管理 AI 生成 batch 的创建、进度结算、完成收尾与超时兜底。
  */
-import { GenerationBatchStatus, Prisma, type GenerationBatch, type PrismaClient } from "@prisma/client";
+import { AltCandidateStatus, GenerationBatchStatus, Prisma, type GenerationBatch, type PrismaClient } from "@prisma/client";
 import prisma from "../../db/prisma.server";
 import { releaseGenerateLock } from "../lock/generate-lock.service";
 import { createLogger } from "../../utils/logger";
@@ -276,6 +276,34 @@ export async function finalizeTimedOutBatches(
     });
 
     if (updated.count !== 1) continue;
+
+    // 回滚该 shop 下所有卡在 GENERATING 的候选人
+    // 锁尚未释放（runCompletionSideEffects 中才释放 lock），不会与新的 batch 冲突
+    try {
+      const rollbackResult = await client.altCandidate.updateMany({
+        where: {
+          shopId: batch.shopId,
+          status: AltCandidateStatus.GENERATING,
+        },
+        data: {
+          status: AltCandidateStatus.GENERATION_FAILED_RETRYABLE,
+          errorCode: "BATCH_TIMEOUT",
+          errorMessage: "Batch 超时自动回滚",
+        },
+      });
+
+      if (rollbackResult.count > 0) {
+        logger.info(
+          { shopId: batch.shopId, batchId: batch.id, rolledBackCount: rollbackResult.count },
+          "generation-batch.candidates-rolled-back",
+        );
+      }
+    } catch (error) {
+      logger.error(
+        { shopId: batch.shopId, batchId: batch.id, err: error },
+        "generation-batch.candidates-rollback-failed",
+      );
+    }
 
     await runCompletionSideEffects({
       shopId: batch.shopId,

@@ -1,7 +1,7 @@
 ﻿// server/ai/providers/fallback.provider.ts
 // FallbackProvider — 串联两个 Provider，主失败后自动切换副模型
 
-import type { AIProvider, GenerateAltRequest, GenerateAltResult } from "../ai.types.js";
+import type { AIProvider, GenerateAltRequest, GenerateAltResult, ModelCallRecord } from "../ai.types.js";
 import { AIGenerationError } from "../ai.types.js";
 import { createLogger } from "../../utils/logger.js";
 
@@ -16,53 +16,58 @@ export class FallbackProvider implements AIProvider {
   ) {}
 
   async generateAlt(req: GenerateAltRequest): Promise<GenerateAltResult> {
-    // ── 尝试主模型 ──────────────────────────────────────────────
-    const primaryStart = Date.now();
+    const allCalls: ModelCallRecord[] = [];
+
     try {
       const result = await this.primary.generateAlt(req);
+      allCalls.push(...result.modelCalls);
       log.info(
         {
           event: "ai.primary.success",
           provider: this.primaryName,
           modelUsed: result.modelUsed,
-          durationMs: Date.now() - primaryStart,
+          callCount: result.modelCalls.length,
         },
         "主模型调用成功",
       );
-      return result;
+      return { ...result, modelCalls: allCalls };
     } catch (primaryErr) {
+      if (primaryErr instanceof AIGenerationError && primaryErr.modelCalls) {
+        allCalls.push(...primaryErr.modelCalls);
+      }
       log.warn(
         {
           event: "ai.primary.failed",
           provider: this.primaryName,
-          durationMs: Date.now() - primaryStart,
+          callCount: allCalls.length,
           err: primaryErr instanceof Error ? primaryErr.message : String(primaryErr),
         },
         "主模型失败，切换副模型",
       );
     }
 
-    // ── 尝试副模型 ──────────────────────────────────────────────
-    const secondaryStart = Date.now();
     try {
       const result = await this.secondary.generateAlt(req);
+      allCalls.push(...result.modelCalls);
       log.info(
         {
           event: "ai.fallback.success",
           provider: this.secondaryName,
           modelUsed: result.modelUsed,
-          durationMs: Date.now() - secondaryStart,
+          callCount: result.modelCalls.length,
         },
         "副模型调用成功",
       );
-      return result;
+      return { ...result, modelCalls: allCalls };
     } catch (secondaryErr) {
-      const durationMs = Date.now() - secondaryStart;
+      if (secondaryErr instanceof AIGenerationError && secondaryErr.modelCalls) {
+        allCalls.push(...secondaryErr.modelCalls);
+      }
       log.error(
         {
           event: "ai.fallback.failed",
           provider: this.secondaryName,
-          durationMs,
+          callCount: allCalls.length,
           err: secondaryErr instanceof Error ? secondaryErr.message : String(secondaryErr),
         },
         "主模型与副模型均失败",
@@ -70,6 +75,7 @@ export class FallbackProvider implements AIProvider {
       throw new AIGenerationError(
         "主模型与副模型均调用失败，无法生成 Alt Text",
         secondaryErr,
+        allCalls,
       );
     }
   }

@@ -90,19 +90,22 @@ class SucceedingProvider implements AIProvider {
   readonly name: string;
   constructor(name: string) { this.name = name; }
   async generateAlt(_req: GenerateAltRequest): Promise<GenerateAltResult> {
-    return { altText: `Result from ${this.name}`, modelUsed: this.name };
+    return {
+      altText: `Result from ${this.name}`,
+      modelUsed: this.name,
+      modelCalls: [{ modelName: this.name, durationMs: 100, status: "SUCCESS" }],
+    };
   }
 }
 
-/** 模拟超时（延迟超过 30s）的 Provider —— 通过 FakeAIProvider 的特殊 URL 机制 */
+/** 模拟超时的 Provider */
 class TimeoutProvider implements AIProvider {
   constructor(private readonly delayMs: number) {}
   async generateAlt(_req: GenerateAltRequest): Promise<GenerateAltResult> {
     await new Promise<void>((_, reject) => {
       setTimeout(() => reject(new AIGenerationError("模拟超时")), this.delayMs);
     });
-    // 永远不会到达
-    return { altText: "", modelUsed: "" };
+    return { altText: "", modelUsed: "", modelCalls: [] };
   }
 }
 
@@ -230,7 +233,7 @@ async function testFallbackNotCalledWhenPrimarySucceeds(): Promise<void> {
   const secondary: AIProvider = {
     async generateAlt(_req: GenerateAltRequest): Promise<GenerateAltResult> {
       secondaryCalled = true;
-      return { altText: "secondary", modelUsed: "secondary" };
+      return { altText: "secondary", modelUsed: "secondary", modelCalls: [{ modelName: "secondary", durationMs: 100, status: "SUCCESS" }] };
     },
   };
 

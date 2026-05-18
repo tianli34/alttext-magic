@@ -13,7 +13,7 @@ import { OpenAICompatibleProvider } from "./providers/openai.provider.js";
 const log = createLogger({ module: "ai-gateway" });
 
 // 调用超时（毫秒）
-const TIMEOUT_MS = 15_000;
+const TIMEOUT_MS = 30_000;
 
 // ----------------------------------------------------------------
 // Provider 工厂
