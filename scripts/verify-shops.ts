@@ -15,6 +15,7 @@
  */
 import dotenv from "dotenv";
 dotenv.config();
+process.env.TZ ||= "Asia/Shanghai";
 
 import { createDecipheriv } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";

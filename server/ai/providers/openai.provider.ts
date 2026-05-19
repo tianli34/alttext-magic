@@ -25,6 +25,7 @@ export interface OpenAIProviderConfig {
   apiKey: string;
   endpoint?: string;
   timeoutMs: number;
+  label: string;
 }
 
 interface OpenAIChatResponse {
@@ -60,6 +61,11 @@ export class OpenAICompatibleProvider implements AIProvider {
     return `${this.config.providerName}/${this.config.model}`;
   }
 
+  /** 模型层级标签，如 PRIMARY / 2nd / 3rd / 4th */
+  private get tierLabel(): string {
+    return this.config.label === "primary" ? "PRIMARY" : this.config.label;
+  }
+
   async generateAlt(req: GenerateAltRequest): Promise<GenerateAltResult> {
     const { model, apiKey, endpoint, timeoutMs, providerName } = this.config;
 
@@ -93,7 +99,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     const start = Date.now();
     const startStr = localTimestamp(new Date(start));
     const modelName = `${providerName}/${model}`;
-    log.info({ event: "provider.call.start", modelName, startTime: startStr }, "AI 模型调用开始");
+    log.info({ event: "provider.call.start", modelName, startTime: startStr }, `[${this.tierLabel}] AI 模型调用开始`);
 
     let raceSettled = false;
 
@@ -126,7 +132,7 @@ export class OpenAICompatibleProvider implements AIProvider {
             const now = Date.now();
             const durationMs = now - start;
             const endStr = localTimestamp(new Date(now));
-            log.warn({ event: "provider.call.failed", modelName, startTime: startStr, endTime: endStr, durationMs, err: String(err) }, "AI 模型调用失败（网络层）");
+            log.warn({ event: "provider.call.failed", modelName, startTime: startStr, endTime: endStr, durationMs, err: String(err) }, `[${this.tierLabel}] AI 模型调用失败（网络层）`);
             const failureOrigin = classifyNetworkError(err);
             const record: ModelCallRecord = {
               modelName,
@@ -147,7 +153,7 @@ export class OpenAICompatibleProvider implements AIProvider {
             const now = Date.now();
             const durationMs = now - start;
             const endStr = localTimestamp(new Date(now));
-            log.warn({ event: "provider.call.failed", modelName, startTime: startStr, endTime: endStr, durationMs, statusCode: response.status }, "AI 模型调用失败（HTTP 错误）");
+            log.warn({ event: "provider.call.failed", modelName, startTime: startStr, endTime: endStr, durationMs, statusCode: response.status }, `[${this.tierLabel}] AI 模型调用失败（HTTP 错误）`);
             const failureOrigin = classifyHttpError(response.status);
             let errorText = "";
             try {
@@ -175,7 +181,7 @@ export class OpenAICompatibleProvider implements AIProvider {
             const now = Date.now();
             const durationMs = now - start;
             const endStr = localTimestamp(new Date(now));
-            log.warn({ event: "provider.call.failed", modelName, startTime: startStr, endTime: endStr, durationMs, reason: "json_parse_error" }, "AI 模型调用失败（JSON 解析失败）");
+            log.warn({ event: "provider.call.failed", modelName, startTime: startStr, endTime: endStr, durationMs, reason: "json_parse_error" }, `[${this.tierLabel}] AI 模型调用失败（JSON 解析失败）`);
             const record: ModelCallRecord = {
               modelName,
               durationMs,
@@ -196,7 +202,7 @@ export class OpenAICompatibleProvider implements AIProvider {
             const now = Date.now();
             const durationMs = now - start;
             const endStr = localTimestamp(new Date(now));
-            log.warn({ event: "provider.call.failed", modelName, startTime: startStr, endTime: endStr, durationMs, reason: "empty_content" }, "AI 模型调用失败（content 为空）");
+            log.warn({ event: "provider.call.failed", modelName, startTime: startStr, endTime: endStr, durationMs, reason: "empty_content" }, `[${this.tierLabel}] AI 模型调用失败（content 为空）`);
             const record: ModelCallRecord = {
               modelName,
               durationMs,
@@ -216,7 +222,7 @@ export class OpenAICompatibleProvider implements AIProvider {
           const now = Date.now();
           const durationMs = now - start;
           const endStr = localTimestamp(new Date(now));
-          log.info({ event: "provider.call.success", modelName, startTime: startStr, endTime: endStr, durationMs }, "AI 模型调用成功");
+          log.info({ event: "provider.call.success", modelName, startTime: startStr, endTime: endStr, durationMs }, `[${this.tierLabel}] AI 模型调用成功`);
 
           return {
             altText: content.trim(),

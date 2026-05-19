@@ -14,13 +14,13 @@
 ## Phase 6：AI 生成管线
 ### Task 6.1 — 数据库 Schema 扩展：`generation_batch` + `alt_draft`
 `prisma/schema.prisma` — 新增 `GenerationBatch` 模型及其 `GenerationBatchStatus` 枚举，更新 `AltDraft` 关联
-### Task 6.2 — AI Gateway 服务：统一抽象层 + Fake Provider + 主/副模型切换
+### Task 6.2 — AI Gateway 服务：统一抽象层 + Fake Provider + 多级模型降级
 - `server/ai/ai.types.ts` — `GenerateAltRequest`、`GenerateAltResult`、`AIGenerationError`、`AIProvider` 接口
 - `server/ai/providers/fake.provider.ts``trigger-fake-failure` / `trigger-fake-delay` 特殊 URL 支持
 - `server/ai/providers/openai.provider.ts`
-- `server/ai/providers/fallback.provider.ts`
-- `server/ai/ai-gateway.ts` — `AIGatewayService` 单例门面，`AI_PROVIDER=fake` 走 Fake，否则走真实主/副链
-- `server/config/env.ts` — 新增 `AI_PROVIDER`、`AI_PRIMARY_*`、`AI_FALLBACK_*`
+- `server/ai/providers/fallback.provider.ts` — 接受 `ProviderEntry[]` 数组，`generateAlt` 用 `for` 循环遍历全部；可用 `AI_2nd_*` / `AI_3rd_*` / `AI_4th_*` 任意多级降级
+- `server/ai/ai-gateway.ts` — `AIGatewayService` 单例门面，`AI_PROVIDER=fake` 走 Fake；否则通过 `MODEL_CONFIGS` 映射表 + `buildModelProviders()` DRY 辅助函数动态收集所有已配置模型
+- `server/config/env.ts` — 新增 `AI_PROVIDER`、`AI_PRIMARY_*`、`AI_2nd_*`、`AI_3rd_*`、`AI_4th_*`
 ### Task 6.3 — Prompt 模板系统 + AI 输出清洗器
 - `server/ai/prompt-engine.server.ts` — 实现 `buildPrompt`，支持 `RESOURCE_SPECIFIC`、`FILE_NEUTRAL`、`SHARED_NEUTRAL`
 - `server/ai/output-cleaner.server.ts` — 实现 `cleanAltText`，新增 `locale` 参数支持中/英文不同清洗规则
@@ -59,25 +59,27 @@
 ### 候选列表修复 — 选择工具栏粘性定位
 - `app/components/generation/GenerationFlow.module.css` — `.selectionToolbar` 增加 `position: sticky`，使其跟随页面滚动。
 
-### Task 6.12 — 前端：额度不足阻断与引导
+## Phase 7：AI 调用统计页面
+
+### Task 7.1 — 后端 API：`GET /api/ai-stats`
+- `app/routes/api.ai-stats.tsx` — 鉴权后查询 `AiModelCall` 表，聚合返回总体统计（总数/成功/失败/成功率/耗时极值均值）及按模型分组明细。
+
+### Task 7.2 — 前端统计页面
+- `app/routes/app.ai-stats.tsx` — `/app/ai-stats` 页面，卡片展示总体概览 + 表格展示按模型明细
+- `app/routes/app.tsx` — 导航栏添加 "AI 调用统计" 链接
+
+### Task 6.2a — 模型调用日志增加层级标签
+- `server/ai/providers/openai.provider.ts` — `OpenAIProviderConfig` 新增 `label` 字段；`OpenAICompatibleProvider` 新增 `tierLabel` getter（`primary`→`PRIMARY`，其余原样）；所有 `provider.call.*` 日志首行补充 `[{tierLabel}]` 前缀
+- `server/ai/ai-gateway.ts` — `buildModelProviders()` 传递 `cfg.label` 给 `OpenAICompatibleProvider`
+
+## 项目级时区配置
+
+- `server/config/env.ts` — 添加 TZ 环境变量校验（默认 `Asia/Shanghai`），加载 dotenv 后立即设置 `process.env.TZ`
+- `server/db/prisma.server.ts` — PG 连接池 `connect` 事件设置会话时区 `Asia/Shanghai`，确保 `now()` 返回北京时间
+- `.env` / `.env.example` — 添加 `TZ=Asia/Shanghai`
+- `prisma/seed.ts` / `scripts/verify-shops.ts` — 同步设置 `process.env.TZ`
+
+### Task 7.12 — 前端：额度不足阻断与引导
 - `app/routes/api.generation.preflight.tsx` — 预检接口增加 `currentPlan` 返回。
 - `app/hooks/useGenerationFlow.ts` — 类型定义同步。
 - `app/components/generation/GenerationFlow.tsx` — 实现余额不足 Modal 切换、引导 Banner 及 "Upgrade Plan" / "Buy Extra Pack" 跳转逻辑；MAX 计划用户自动隐藏升级按钮。
-
-### Task 6.13 — AI 模型调用耗时记录
-- `prisma/schema.prisma` — 新增 `AiModelCall` 模型（`ai_model_call` 表）。
-- `server/ai/ai.types.ts` — 新增 `ModelCallRecord` 类型；`GenerateAltResult` 新增 `modelCalls` 字段；`AIGenerationError` 新增可选 `modelCalls` 参数。
-- `server/ai/providers/openai.provider.ts` — 计时逻辑：`classifyNetworkError`/`classifyHttpError` 区分 `SERVER`/`NON_SERVER`；成功/失败均通过 `modelCalls` 传递耗时记录。
-- `server/ai/providers/fake.provider.ts` — 同步添加计时与 `modelCalls`。
-- `server/ai/providers/fallback.provider.ts` — 聚合主/副 provider 的 `modelCalls`，不自行计时。
-- `worker/processors/generate-alt.processor.ts` — 新增 `persistModelCalls()` 在成功/失败路径统一写入 `ai_model_call` 表。
-
-## 候选列表瀑布流加载
-- `app/hooks/useInfiniteScroll.ts` — 新增基于 IntersectionObserver 的无限滚动 Hook
-- `app/routes/app.candidates.tsx` — 加载更多按钮替换为哨兵 div，滚动触底自动触发游标分页
-
-## Bug 修复
-
-### AI 模型超时幽灵日志（`openai.provider.ts`）
-- **根因**: `Promise.race` 超时胜出后，IIFE（Async IIFE）因 `AbortController` 未能取消已抵近完成的 HTTP 请求，仍在后台继续执行并打出 `"AI 模型调用成功"`，造成日志与真实流程矛盾。
-- **修复**: 引入 `raceSettled` 标志，超时分支先设标记再 reject；IIFE 所有关键节点（fetch catch、HTTP 错误、JSON 解析、空内容、成功返回前）检查该标记，若 race 已定则静默返回，避免幽灵日志与未处理的 Promise rejection。

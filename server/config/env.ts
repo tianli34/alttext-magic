@@ -4,6 +4,11 @@ import dotenv from "dotenv";
 // 在最早期加载 .env
 dotenv.config();
 
+// 读取 TZ 并立即设置 Node.js 运行时时区
+// 必须在任何 Date 操作之前生效
+const rawTz = process.env.TZ || "Asia/Shanghai";
+process.env.TZ = rawTz;
+
 /**
  * 日志级别枚举 —— 与 pino 保持一致
  */
@@ -96,10 +101,26 @@ const envSchema = z.object({
   AI_PRIMARY_ENDPOINT: z.string().url().optional(),
 
   // 副模型配置（fallback）
-  AI_FALLBACK_PROVIDER: z.string().min(1).default("openai"),
-  AI_FALLBACK_MODEL: z.string().min(1).default("gpt-4o-mini"),
-  AI_FALLBACK_API_KEY: z.string().default(""),
-  AI_FALLBACK_ENDPOINT: z.string().url().optional(),
+  AI_2nd_PROVIDER: z.string().min(1).default("openai"),
+  AI_2nd_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  AI_2nd_API_KEY: z.string().default(""),
+  AI_2nd_ENDPOINT: z.string().url().optional(),
+
+  // 第 3 候补模型
+  AI_3rd_PROVIDER: z.string().min(1).default("openai"),
+  AI_3rd_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  AI_3rd_API_KEY: z.string().default(""),
+  AI_3rd_ENDPOINT: z.string().url().optional(),
+
+  // 第 4 候补模型
+  AI_4th_PROVIDER: z.string().min(1).default("openai"),
+  AI_4th_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  AI_4th_API_KEY: z.string().default(""),
+  AI_4th_ENDPOINT: z.string().url().optional(),
+
+  // ── Timezone ───────────────────────────────────────────
+  // 项目级时区（默认北京时间），影响 Node.js Date 序列化与 pino 日志时间戳
+  TZ: z.string().default("Asia/Shanghai"),
 
   // ── Generation Worker ───────────────────────────────────
   GENERATE_ALT_CONCURRENCY: z.coerce

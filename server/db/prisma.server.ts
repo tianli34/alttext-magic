@@ -23,6 +23,11 @@ const pool =
     connectionTimeoutMillis: 5_000,          // 获取连接超时 5s（而不是无限等待）
   });
 
+// 新建连接时自动设置会话时区，确保 now() 返回北京时间
+pool.on("connect", (client) => {
+  client.query(`SET timezone TO 'Asia/Shanghai'`);
+});
+
 const adapter = new PrismaPg(pool);
 
 const prisma =

@@ -78,3 +78,22 @@ export function formatDate(dateStr: string): string {
 export function formatNumber(value: number): string {
   return value.toLocaleString("zh-CN");
 }
+
+/** 模型完整名称到简短显示名称的映射规则 */
+const MODEL_DISPLAY_RULES: Array<[pattern: RegExp, replacement: string]> = [
+  [/nvidia\/nemotron-3-nano-omni-30b-a3b-reasoning:free$/, "nemotron-nano-30b"],
+  [/google\/gemma-4-31b-it:free$/, "gemma-4-31b"],
+  [/nvidia\/nemotron-nano-12b-v2-vl:free$/, "nemotron-nano-12b"],
+  [/google\/gemma-4-26b-a4b-it:free$/, "gemma-4-26b"],
+];
+
+/**
+ * 将原始模型名称转为简短显示名称。
+ * 无匹配规则时返回原名称。
+ */
+export function displayModelName(raw: string): string {
+  for (const [pattern, replacement] of MODEL_DISPLAY_RULES) {
+    if (pattern.test(raw)) return replacement;
+  }
+  return raw;
+}

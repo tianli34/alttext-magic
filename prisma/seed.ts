@@ -7,6 +7,7 @@
  */
 import dotenv from "dotenv";
 dotenv.config();
+process.env.TZ ||= "Asia/Shanghai";
 
 import { createCipheriv, randomBytes, randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";

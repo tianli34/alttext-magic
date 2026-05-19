@@ -425,12 +425,10 @@ async function testFallbackSuccess(): Promise<void> {
   const state = makeState(1);
   const restore = installMocks(state);
   aiGatewayService._setProvider(
-    new FallbackProvider(
-      new FailingProvider("primary timeout"),
-      new SuccessProvider("fallback-model"),
-      "primary",
-      "fallback",
-    ),
+    new FallbackProvider([
+      { provider: new FailingProvider("primary timeout"), name: "primary" },
+      { provider: new SuccessProvider("fallback-model"), name: "fallback" },
+    ]),
   );
 
   try {

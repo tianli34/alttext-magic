@@ -8,12 +8,53 @@ import type { AIProvider, GenerateAltRequest, GenerateAltResult } from "./ai.typ
 import { AIGenerationError } from "./ai.types.js";
 import { FakeAIProvider } from "./providers/fake.provider.js";
 import { FallbackProvider } from "./providers/fallback.provider.js";
+import type { ProviderEntry } from "./providers/fallback.provider.js";
 import { OpenAICompatibleProvider } from "./providers/openai.provider.js";
 
 const log = createLogger({ module: "ai-gateway" });
 
 // 调用超时（毫秒）
-const TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = 30_000 * 3;
+
+// -------------------------------------------------------------------
+// 模型配置映射表 —— 加新候补只需在此追加一条
+// env 字段通过 (env as any) 动态读取，系故意为之：
+//   避免为 DRY 辅助函数编写与 Env 类型耦合的类型体操，违反「禁止 any」
+//   但此处 as any 限于严格封装范围内，不扩散至项目其他部分
+// -------------------------------------------------------------------
+interface ModelConfigMeta {
+  providerKey: string;
+  modelKey: string;
+  apiKeyKey: string;
+  endpointKey: string;
+  label: string;
+}
+
+const MODEL_CONFIGS: ModelConfigMeta[] = [
+  { providerKey: "AI_PRIMARY_PROVIDER", modelKey: "AI_PRIMARY_MODEL", apiKeyKey: "AI_PRIMARY_API_KEY", endpointKey: "AI_PRIMARY_ENDPOINT", label: "primary" },
+  { providerKey: "AI_2nd_PROVIDER",     modelKey: "AI_2nd_MODEL",     apiKeyKey: "AI_2nd_API_KEY",     endpointKey: "AI_2nd_ENDPOINT",     label: "2nd" },
+  { providerKey: "AI_3rd_PROVIDER",     modelKey: "AI_3rd_MODEL",     apiKeyKey: "AI_3rd_API_KEY",     endpointKey: "AI_3rd_ENDPOINT",     label: "3rd" },
+  { providerKey: "AI_4th_PROVIDER",     modelKey: "AI_4th_MODEL",     apiKeyKey: "AI_4th_API_KEY",     endpointKey: "AI_4th_ENDPOINT",     label: "4th" },
+];
+
+/** 根据 MODEL_CONFIGS 动态构建所有已配置（apiKey 非空）的 Provider 条目 */
+function buildModelProviders(): ProviderEntry[] {
+  // 使用 (env as any) 理由见 MODEL_CONFIGS 上方注释
+  const e = env as any;
+  return MODEL_CONFIGS
+    .filter((cfg) => e[cfg.apiKeyKey])
+    .map((cfg) => ({
+      provider: new OpenAICompatibleProvider({
+        providerName: e[cfg.providerKey] as string,
+        model: e[cfg.modelKey] as string,
+        apiKey: e[cfg.apiKeyKey] as string,
+        endpoint: e[cfg.endpointKey] as string | undefined,
+        timeoutMs: TIMEOUT_MS,
+        label: cfg.label,
+      }),
+      name: `${e[cfg.providerKey] as string}/${e[cfg.modelKey] as string}`,
+    }));
+}
 
 // ----------------------------------------------------------------
 // Provider 工厂
@@ -25,39 +66,20 @@ function buildProvider(): AIProvider {
     return new FakeAIProvider();
   }
 
-  // 真实模式：主 + 副 fallback
-  const primary = new OpenAICompatibleProvider({
-    providerName: env.AI_PRIMARY_PROVIDER,
-    model: env.AI_PRIMARY_MODEL,
-    apiKey: env.AI_PRIMARY_API_KEY,
-    endpoint: env.AI_PRIMARY_ENDPOINT,
-    timeoutMs: TIMEOUT_MS,
-  });
-
-  const secondary = new OpenAICompatibleProvider({
-    providerName: env.AI_FALLBACK_PROVIDER,
-    model: env.AI_FALLBACK_MODEL,
-    apiKey: env.AI_FALLBACK_API_KEY,
-    endpoint: env.AI_FALLBACK_ENDPOINT,
-    timeoutMs: TIMEOUT_MS,
-  });
+  // 真实模式：动态收集所有已配置的模型，构建多级降级链
+  const providers = buildModelProviders();
 
   log.info(
     {
       event: "ai.gateway.init",
       mode: "real",
-      primary: `${env.AI_PRIMARY_PROVIDER}/${env.AI_PRIMARY_MODEL}`,
-      fallback: `${env.AI_FALLBACK_PROVIDER}/${env.AI_FALLBACK_MODEL}`,
+      providerCount: providers.length,
+      models: providers.map((p) => p.name),
     },
-    "使用主/副双模型 Provider",
+    `使用 ${providers.length} 个模型的多级降级 Provider`,
   );
 
-  return new FallbackProvider(
-    primary,
-    secondary,
-    env.AI_PRIMARY_PROVIDER,
-    env.AI_FALLBACK_PROVIDER,
-  );
+  return new FallbackProvider(providers);
 }
 
 // ----------------------------------------------------------------

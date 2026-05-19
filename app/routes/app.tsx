@@ -22,6 +22,7 @@ export default function App() {
         <s-link href="/app/candidates">Candidates</s-link>
         <s-link href="/app/review">Review</s-link>
         <s-link href="/app/history">History</s-link>
+        <s-link href="/app/ai-stats">AI 调用统计</s-link>
         <s-link href="/app/billing">Billing</s-link>
         <s-link href="/app/settings">Settings</s-link>
         <s-link href="/app/help">Help</s-link>

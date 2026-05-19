@@ -157,7 +157,10 @@ async function testFallbackOnPrimaryTimeout(): Promise<void> {
   // 副模型：立即成功
   const secondary = new SucceedingProvider("gpt-4o-mini/fallback");
 
-  const fallback = new FallbackProvider(primary, secondary, "primary", "fallback");
+  const fallback = new FallbackProvider([
+    { provider: primary, name: "primary" },
+    { provider: secondary, name: "fallback" },
+  ]);
   const result = await fallback.generateAlt(BASE_REQUEST);
 
   assertEqual(result.modelUsed, "gpt-4o-mini/fallback", "modelUsed 为副模型");
@@ -175,7 +178,10 @@ async function testFallbackOnPrimaryError(): Promise<void> {
   const primary = new FailingProvider("openai-primary");
   const secondary = new SucceedingProvider("gemini/fallback");
 
-  const fallback = new FallbackProvider(primary, secondary, "primary", "fallback");
+  const fallback = new FallbackProvider([
+    { provider: primary, name: "primary" },
+    { provider: secondary, name: "fallback" },
+  ]);
   const result = await fallback.generateAlt(BASE_REQUEST);
 
   assertEqual(result.modelUsed, "gemini/fallback", "modelUsed 为副模型 gemini/fallback");
@@ -192,7 +198,10 @@ async function testBothProvidersFail(): Promise<void> {
   const primary = new FailingProvider("primary");
   const secondary = new FailingProvider("secondary");
 
-  const fallback = new FallbackProvider(primary, secondary, "primary", "secondary");
+  const fallback = new FallbackProvider([
+    { provider: primary, name: "primary" },
+    { provider: secondary, name: "secondary" },
+  ]);
 
   await assertThrows(
     () => fallback.generateAlt(BASE_REQUEST),
@@ -237,7 +246,10 @@ async function testFallbackNotCalledWhenPrimarySucceeds(): Promise<void> {
     },
   };
 
-  const fallback = new FallbackProvider(primary, secondary, "primary", "secondary");
+  const fallback = new FallbackProvider([
+    { provider: primary, name: "primary" },
+    { provider: secondary, name: "secondary" },
+  ]);
   const result = await fallback.generateAlt(BASE_REQUEST);
 
   assertEqual(result.modelUsed, "gpt-4o", "modelUsed 为主模型");
