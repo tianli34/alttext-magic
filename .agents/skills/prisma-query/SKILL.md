@@ -29,3 +29,5 @@ pq field --attr '@unique'
 pq field --attr '@relation'
 pq search userId
 pq models
+
+注意：pq 前不能加任何前置命令！如 npx、yarn 等，直接在命令行输入 pq 即可!
