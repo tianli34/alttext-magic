@@ -8,6 +8,7 @@
 import {
   AltCandidateStatus,
   AltPlane,
+  JobItemStatus,
   type CandidateGroupPrimaryUsageType,
   type Prisma,
 } from "@prisma/client";
@@ -51,6 +52,8 @@ export interface ReviewCandidateField {
   status: AltCandidateStatus;
   altPlane: AltPlane;
   isDecorative: boolean;
+  errorMessage: string | null;
+  retryCount: number;
 }
 
 export interface ReviewTargetField {
@@ -100,6 +103,8 @@ export interface ReviewListResponse {
 export interface ReviewRawRow {
   id: string;
   status: AltCandidateStatus;
+  errorMessage: string | null;
+  retryCount: number;
   altPlane: AltPlane;
   isDecorative: boolean;
   shopifyGid: string;
@@ -184,6 +189,8 @@ export function mapRowToItem(row: ReviewRawRow): ReviewListItem {
       status: row.status,
       altPlane: row.altPlane,
       isDecorative: row.isDecorative,
+      errorMessage: row.errorMessage,
+      retryCount: row.retryCount,
     },
     target: {
       shopifyGid: row.shopifyGid,
@@ -226,6 +233,14 @@ const prismaDataAccess: ReviewListDataAccess = {
       select: {
         id: true,
         status: true,
+        errorMessage: true,
+        _count: {
+          select: {
+            jobItems: {
+              where: { status: JobItemStatus.FAILED },
+            },
+          },
+        },
         altTarget: {
           select: {
             altPlane: true,
@@ -267,6 +282,8 @@ const prismaDataAccess: ReviewListDataAccess = {
       return {
         id: c.id,
         status: c.status,
+        errorMessage: c.errorMessage,
+        retryCount: c._count.jobItems,
         altPlane: target.altPlane,
         isDecorative: target.decorativeMark !== null,
         shopifyGid: target.writeTargetId,

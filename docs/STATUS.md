@@ -60,4 +60,17 @@
 ### Task 7.9 — Writeback Job 完整流水线
 - Worker 已注册 `writeback` queue：`worker/index.ts`，并发默认 3，`WRITEBACK_CONCURRENCY` 最大 5。
 - Processor：`worker/processors/writeback.processor.ts`，已实现二次读校验、路由写回、成功/跳过/失败落库、审计、batch 收尾与 WRITEBACK 锁释放。
-- 测试：`tests/writeback.processor.test.ts` 覆盖 WRITTEN、RESOLVED、WRITEBACK_FAILED_RETRYABLE、batch PARTIAL_SUCCESS 与锁释放。
+
+### Task 7.10 — SSE 写回进度推送
+- 路由：`app/routes/api.writeback.progress.tsx` — `GET /api/writeback/progress?batchId=...`，校验 shop 归属后以 DB 轮询推送 progress/complete SSE。
+- 前端：`app/hooks/useWritebackSSE.ts` + `app/routes/app.review.tsx`，写回启动后展示实时进度，刷新可通过 `batchId` 恢复。
+
+### Task 7.11 — 失败项展示与重试
+- 审阅接口返回 `errorMessage` 与失败重试次数；审阅页展示失败项、错误原因、单条/全部重试入口，复用 `/api/writeback/start`。
+
+### Task 7.12 — 写回完成汇总页面
+- 路由：`app/routes/api.writeback.batch.$batchId.tsx` 返回批次详情、分类统计与耗时；审阅页在 complete 后展示成功/跳过/失败汇总与 History 入口。
+
+### Task 7.13 — 审计历史 API 与页面
+- 路由：`app/routes/api.history.tsx` — `GET /api/history` 支持 page/pageSize/altPlane/from/to，默认最近 90 天。
+- 页面：`app/routes/app.history.tsx` 展示写回记录、类型筛选、分页与空状态。

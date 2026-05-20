@@ -319,6 +319,114 @@
   border-color: var(--p-color-border-success, #95c9b4);
 }
 
+.progressPanel,
+.summaryPanel,
+.failurePanel {
+  padding: 1rem;
+  border: 1px solid var(--p-color-border-secondary, #c9cccf);
+  border-radius: 0.5rem;
+  background: var(--p-color-bg-surface, #ffffff);
+}
+
+.progressHeader,
+.failureHeader,
+.summaryActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.progressStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  color: var(--p-color-text-subdued, #6d7175);
+}
+
+.summaryPanelSuccess {
+  border-color: var(--p-color-border-success, #95c9b4);
+  background: var(--p-color-bg-fill-success-secondary, #f1f8f5);
+}
+
+.summaryPanelCaution {
+  border-color: var(--p-color-border-caution, #e1b878);
+  background: var(--p-color-bg-fill-caution-secondary, #fff8db);
+}
+
+.summaryStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.summaryStats div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--p-color-border-secondary, #c9cccf);
+  border-radius: 0.5rem;
+  background: var(--p-color-bg-surface, #ffffff);
+}
+
+.summaryStats strong {
+  font-size: 1.5rem;
+}
+
+.summaryStats span,
+.typeStats {
+  color: var(--p-color-text-subdued, #6d7175);
+}
+
+.typeStats {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.failureList {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.failureItem {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: start;
+  padding: 0.75rem;
+  border: 1px solid var(--p-color-border-critical, #eb9082);
+  border-radius: 0.5rem;
+  background: var(--p-color-bg-fill-critical-secondary, #fff4f4);
+}
+
+.failureThumb,
+.failureThumbFallback {
+  width: 4.5rem;
+  aspect-ratio: 1;
+  border: 1px solid var(--p-color-border-secondary, #c9cccf);
+  border-radius: 0.5rem;
+  background: var(--p-color-bg-surface-secondary, #f6f6f7);
+}
+
+.failureThumb {
+  object-fit: cover;
+}
+
+.failureThumbFallback {
+  display: grid;
+  place-items: center;
+  color: var(--p-color-text-subdued, #6d7175);
+  font-size: 0.75rem;
+}
+
+.failureContent {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
 @media (max-width: 800px) {
   .toolbar,
   .textGrid {
@@ -337,5 +445,10 @@
   .sideActions {
     grid-column: 3 / -1;
     justify-items: start;
+  }
+
+  .summaryStats,
+  .failureItem {
+    grid-template-columns: 1fr;
   }
 }

@@ -29,6 +29,8 @@ function createRow(
   return {
     id: "cand-001",
     status: AltCandidateStatus.GENERATED,
+    errorMessage: null,
+    retryCount: 0,
     altPlane: AltPlane.FILE_ALT,
     isDecorative: false,
     shopifyGid: "gid://shopify/MediaImage/123",

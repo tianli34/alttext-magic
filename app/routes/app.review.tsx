@@ -10,6 +10,12 @@ import {
   WritebackConfirmModal,
   type WritebackConfirmItem,
 } from "../components/review/WritebackConfirmModal";
+import { ProgressBar } from "../components/common/ProgressBar";
+import {
+  useWritebackSSE,
+  type WritebackProgressData,
+  type WritebackBatchStatus,
+} from "../hooks/useWritebackSSE";
 
 type AltPlane = "FILE_ALT" | "COLLECTION_IMAGE_ALT" | "ARTICLE_IMAGE_ALT";
 type ReviewStatus = "GENERATED" | "WRITEBACK_FAILED_RETRYABLE";
@@ -30,6 +36,8 @@ interface ReviewListItem {
     status: ReviewStatus;
     altPlane: AltPlane;
     isDecorative: boolean;
+    errorMessage: string | null;
+    retryCount: number;
   };
   target: {
     shopifyGid: string;
@@ -74,6 +82,22 @@ interface ApiErrorResponse {
   code?: string;
 }
 
+interface WritebackTypeStat {
+  altPlane: AltPlane;
+  total: number;
+  success: number;
+  fail: number;
+  skip: number;
+}
+
+interface WritebackBatchDetail extends WritebackProgressData {
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  typeStats: WritebackTypeStat[];
+  isTerminal: boolean;
+}
+
 const ALT_PLANE_OPTIONS: Array<{ value: AltPlaneFilter; label: string }> = [
   { value: "", label: "全部类型" },
   { value: "FILE_ALT", label: "文件" },
@@ -95,7 +119,15 @@ const ALT_PLANE_LABELS: Record<AltPlane, string> = {
 
 const STATUS_LABELS: Record<ReviewStatus, string> = {
   GENERATED: "GENERATED",
-  WRITEBACK_FAILED_RETRYABLE: "WRITEBACK_FAILED_RETRYABLE",
+  WRITEBACK_FAILED_RETRYABLE: "写回失败",
+};
+
+const BATCH_STATUS_LABELS: Record<WritebackBatchStatus, string> = {
+  PENDING: "等待中",
+  RUNNING: "写回中",
+  SUCCESS: "写回完成",
+  PARTIAL_SUCCESS: "部分失败",
+  FAILED: "写回失败",
 };
 
 function normalizeAltPlane(value: string | null): AltPlaneFilter {
@@ -146,6 +178,23 @@ function getPrimaryUsageMeta(primaryUsage: PrimaryUsage | null): string {
   return parts.join(" · ");
 }
 
+function isTerminalBatch(status: WritebackBatchStatus): boolean {
+  return status === "SUCCESS" || status === "PARTIAL_SUCCESS" || status === "FAILED";
+}
+
+function formatDuration(durationMs: number | null): string {
+  if (durationMs === null) return "处理中";
+  const seconds = Math.max(Math.round(durationMs / 1000), 0);
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} 分 ${seconds % 60} 秒`;
+}
+
+function truncateText(value: string | null, maxLength = 140): string {
+  if (!value) return "未知错误";
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
 async function readErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const body = (await response.json()) as ApiErrorResponse;
@@ -160,6 +209,7 @@ export default function AppReviewPage() {
   const selectedAltPlane = normalizeAltPlane(searchParams.get("altPlane"));
   const selectedStatus = normalizeStatus(searchParams.get("status"));
   const selectedPage = normalizePage(searchParams.get("page"));
+  const selectedBatchId = searchParams.get("batchId");
   const pageSize = 20;
 
   const [items, setItems] = useState<ReviewListItem[]>([]);
@@ -176,6 +226,11 @@ export default function AppReviewPage() {
   const [loading, setLoading] = useState(true);
   const [writingBack, setWritingBack] = useState(false);
   const [showWritebackModal, setShowWritebackModal] = useState(false);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(
+    selectedBatchId,
+  );
+  const [batchDetail, setBatchDetail] = useState<WritebackBatchDetail | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: "critical" | "success" } | null>(null);
 
@@ -204,6 +259,16 @@ export default function AppReviewPage() {
       setSearchParams(params);
     },
     [searchParams, selectedAltPlane, selectedStatus, setSearchParams],
+  );
+
+  const setBatchParam = useCallback(
+    (batchId: string | null) => {
+      const params = new URLSearchParams(searchParams);
+      if (batchId) params.set("batchId", batchId);
+      else params.delete("batchId");
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams],
   );
 
   const fetchReviewItems = useCallback(
@@ -259,6 +324,77 @@ export default function AppReviewPage() {
 
     return () => controller.abort();
   }, [fetchReviewItems]);
+
+  const loadBatchDetail = useCallback(
+    async (batchId: string, signal?: AbortSignal) => {
+      setBatchLoading(true);
+      try {
+        const response = await fetch(
+          `/api/writeback/batch/${encodeURIComponent(batchId)}`,
+          { signal },
+        );
+
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response, `写回批次加载失败 (${response.status})`));
+        }
+
+        const detail = (await response.json()) as WritebackBatchDetail;
+        setBatchDetail(detail);
+        if (!detail.isTerminal) {
+          setActiveBatchId(batchId);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        showToast(err instanceof Error ? err.message : "写回批次加载失败");
+      } finally {
+        setBatchLoading(false);
+      }
+    },
+    [showToast],
+  );
+
+  const handleWritebackComplete = useCallback(
+    (data: WritebackProgressData) => {
+      setBatchDetail((current) =>
+        current
+          ? { ...current, ...data, isTerminal: true }
+          : {
+              ...data,
+              startedAt: new Date().toISOString(),
+              finishedAt: new Date().toISOString(),
+              durationMs: null,
+              typeStats: [],
+              isTerminal: true,
+            },
+      );
+      void loadBatchDetail(data.batchId);
+    },
+    [loadBatchDetail],
+  );
+
+  const writebackSSE = useWritebackSSE(
+    activeBatchId && (!batchDetail || !batchDetail.isTerminal) ? activeBatchId : null,
+    handleWritebackComplete,
+  );
+
+  const effectiveProgress = writebackSSE.progress ?? batchDetail;
+  const writebackPercent = effectiveProgress && effectiveProgress.total > 0
+    ? Math.round(
+        ((effectiveProgress.success + effectiveProgress.fail + effectiveProgress.skip) /
+          effectiveProgress.total) *
+          100,
+      )
+    : 0;
+
+  useEffect(() => {
+    if (!selectedBatchId) return;
+
+    const controller = new AbortController();
+    setActiveBatchId(selectedBatchId);
+    void loadBatchDetail(selectedBatchId, controller.signal);
+
+    return () => controller.abort();
+  }, [loadBatchDetail, selectedBatchId]);
 
   const allSelected = items.length > 0 && items.every((item) => selectedIds.has(item.candidate.id));
 
@@ -464,12 +600,29 @@ export default function AppReviewPage() {
 
       setSelectedIds(new Set());
       setShowWritebackModal(false);
+      setActiveBatchId(result.batchId);
+      setBatchParam(result.batchId);
+      void loadBatchDetail(result.batchId);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "写回启动失败，请重试");
     } finally {
       setWritingBack(false);
     }
   }, [selectedIds, showToast, writingBack]);
+
+  const retryCandidates = useCallback(
+    (candidateIds: string[]) => {
+      if (candidateIds.length === 0) return;
+      setSelectedIds(new Set(candidateIds));
+      setShowWritebackModal(true);
+    },
+    [],
+  );
+
+  const failedItems = useMemo(
+    () => items.filter((item) => item.candidate.status === "WRITEBACK_FAILED_RETRYABLE"),
+    [items],
+  );
 
   const selectedCount = selectedIds.size;
   const pageInfo = useMemo(
@@ -688,6 +841,167 @@ export default function AppReviewPage() {
             </s-stack>
           )}
         </s-section>
+
+        {effectiveProgress && (
+          <s-section heading="写回进度">
+            <div className={styles.progressPanel}>
+              <s-stack direction="block" gap="base">
+                <div className={styles.progressHeader}>
+                  <s-heading>
+                    {BATCH_STATUS_LABELS[effectiveProgress.status] ?? effectiveProgress.status}
+                  </s-heading>
+                  <s-text tone="neutral">
+                    {writebackSSE.connected ? "实时连接中" : batchLoading ? "正在恢复状态" : "等待进度更新"}
+                  </s-text>
+                </div>
+                <ProgressBar
+                  percent={writebackPercent}
+                  animated={!isTerminalBatch(effectiveProgress.status)}
+                  size="large"
+                />
+                <div className={styles.progressStats}>
+                  <span>已完成 {(
+                    effectiveProgress.success +
+                    effectiveProgress.fail +
+                    effectiveProgress.skip
+                  ).toLocaleString("zh-CN")}/{effectiveProgress.total.toLocaleString("zh-CN")}</span>
+                  <span>成功 {effectiveProgress.success.toLocaleString("zh-CN")}</span>
+                  <span>跳过 {effectiveProgress.skip.toLocaleString("zh-CN")}</span>
+                  <span>失败 {effectiveProgress.fail.toLocaleString("zh-CN")}</span>
+                  <span>待处理 {effectiveProgress.pending.toLocaleString("zh-CN")}</span>
+                </div>
+                {writebackSSE.error && (
+                  <s-text tone="caution">{writebackSSE.error}</s-text>
+                )}
+              </s-stack>
+            </div>
+          </s-section>
+        )}
+
+        {batchDetail?.isTerminal && (
+          <s-section heading="写回汇总">
+            <div className={`${styles.summaryPanel} ${
+              batchDetail.fail > 0 ? styles.summaryPanelCaution : styles.summaryPanelSuccess
+            }`}>
+              <s-stack direction="block" gap="base">
+                <s-heading>
+                  {batchDetail.fail > 0 ? "写回已结束，存在失败项" : "写回已全部完成"}
+                </s-heading>
+                <div className={styles.summaryStats}>
+                  <div><strong>{batchDetail.total}</strong><span>总数</span></div>
+                  <div><strong>{batchDetail.success}</strong><span>成功</span></div>
+                  <div><strong>{batchDetail.skip}</strong><span>跳过</span></div>
+                  <div><strong>{batchDetail.fail}</strong><span>失败</span></div>
+                </div>
+                <s-text tone="neutral">
+                  耗时 {formatDuration(batchDetail.durationMs)}
+                </s-text>
+                {batchDetail.typeStats.length > 0 && (
+                  <div className={styles.typeStats}>
+                    {batchDetail.typeStats.map((stat) => (
+                      <s-text key={stat.altPlane} tone="neutral">
+                        {ALT_PLANE_LABELS[stat.altPlane]}：成功 {stat.success}，跳过 {stat.skip}，失败 {stat.fail}
+                      </s-text>
+                    ))}
+                  </div>
+                )}
+                <div className={styles.summaryActions}>
+                  {batchDetail.fail > 0 && (
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      onClick={() => {
+                        document.getElementById("writeback-failures")?.scrollIntoView({ behavior: "smooth" });
+                      }}
+                    >
+                      查看失败项
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    onClick={() => window.location.assign("/app/history")}
+                  >
+                    查看写回历史
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    onClick={() => {
+                      setActiveBatchId(null);
+                      setBatchDetail(null);
+                      setBatchParam(null);
+                    }}
+                  >
+                    返回审阅列表
+                  </button>
+                </div>
+              </s-stack>
+            </div>
+          </s-section>
+        )}
+
+        {failedItems.length > 0 && (
+          <s-section heading="写回失败项">
+            <div id="writeback-failures" className={styles.failurePanel}>
+              <div className={styles.failureHeader}>
+                <s-text tone="critical">
+                  {failedItems.length.toLocaleString("zh-CN")} 项写回失败，可选择后重试。
+                </s-text>
+                <button
+                  type="button"
+                  className={styles.primaryButton}
+                  onClick={() => retryCandidates(failedItems.map((item) => item.candidate.id))}
+                >
+                  重试全部失败项
+                </button>
+              </div>
+              <div className={styles.failureList}>
+                {failedItems.map((item) => (
+                  <article key={item.candidate.id} className={styles.failureItem}>
+                    {item.target.thumbnailUrl ? (
+                      <img className={styles.failureThumb} src={item.target.thumbnailUrl} alt="" loading="lazy" />
+                    ) : (
+                      <div className={styles.failureThumbFallback}>No image</div>
+                    )}
+                    <div className={styles.failureContent}>
+                      <div className={styles.meta}>
+                        <span className={`${styles.badge} ${styles[`plane_${item.candidate.altPlane}`]}`}>
+                          {ALT_PLANE_LABELS[item.candidate.altPlane]}
+                        </span>
+                        <span className={`${styles.badge} ${styles.status_WRITEBACK_FAILED_RETRYABLE}`}>
+                          写回失败
+                        </span>
+                        <span className={styles.badge}>
+                          重试 {item.candidate.retryCount}/3
+                        </span>
+                      </div>
+                      <s-heading>{getPrimaryUsageTitle(item)}</s-heading>
+                      <s-text tone="neutral">
+                        {getPrimaryUsageMeta(item.target.primaryUsage)}
+                      </s-text>
+                      <s-text tone="critical">
+                        {truncateText(item.candidate.errorMessage)}
+                      </s-text>
+                      {item.candidate.retryCount >= 3 && (
+                        <s-text tone="caution">
+                          已重试 3 次仍失败，建议联系支持或手动处理。
+                        </s-text>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      onClick={() => retryCandidates([item.candidate.id])}
+                    >
+                      重试
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </s-section>
+        )}
       </s-page>
 
       {selectedCount > 0 && (
