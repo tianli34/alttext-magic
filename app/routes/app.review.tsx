@@ -6,6 +6,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import styles from "../components/review/ReviewListPage.module.css";
+import {
+  WritebackConfirmModal,
+  type WritebackConfirmItem,
+} from "../components/review/WritebackConfirmModal";
 
 type AltPlane = "FILE_ALT" | "COLLECTION_IMAGE_ALT" | "ARTICLE_IMAGE_ALT";
 type ReviewStatus = "GENERATED" | "WRITEBACK_FAILED_RETRYABLE";
@@ -171,6 +175,7 @@ export default function AppReviewPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [writingBack, setWritingBack] = useState(false);
+  const [showWritebackModal, setShowWritebackModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: "critical" | "success" } | null>(null);
 
@@ -386,7 +391,34 @@ export default function AppReviewPage() {
     [decorativeIds, showToast, updateItem],
   );
 
-  const startWriteback = useCallback(async () => {
+  /** 构造弹窗所需的确认项数据 */
+  const writebackConfirmItems: WritebackConfirmItem[] = useMemo(
+    () =>
+      items
+        .filter((item) => selectedIds.has(item.candidate.id))
+        .map((item) => ({
+          candidateId: item.candidate.id,
+          altPlane: item.candidate.altPlane,
+          isSharedFile: item.isSharedFile,
+          usageCountPresent: item.target.usageCountPresent,
+        })),
+    [items, selectedIds],
+  );
+
+  /** 打开写回确认弹窗 */
+  const openWritebackModal = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    setShowWritebackModal(true);
+  }, [selectedIds]);
+
+  /** 关闭写回确认弹窗 */
+  const closeWritebackModal = useCallback(() => {
+    if (writingBack) return;
+    setShowWritebackModal(false);
+  }, [writingBack]);
+
+  /** 确认写回 —— 调用 API */
+  const confirmWriteback = useCallback(async () => {
     if (selectedIds.size === 0 || writingBack) return;
 
     setWritingBack(true);
@@ -397,12 +429,41 @@ export default function AppReviewPage() {
         body: JSON.stringify({ candidateIds: Array.from(selectedIds) }),
       });
 
+      if (response.status === 409) {
+        /** 锁冲突 —— Toast 提示 */
+        const body = await response.json().catch(() => ({} as Record<string, unknown>));
+        const rejected = Array.isArray((body as Record<string, unknown>).rejected)
+          ? (body.rejected as Array<{ candidateId: string; reason: string }>)
+          : [];
+        const parts = ["当前有其他操作进行中，请稍后重试。"];
+        if (rejected.length > 0) {
+          const reasons = rejected.map((r) => `${r.candidateId}: ${r.reason}`).join("；");
+          parts.push(`跳过项：${reasons}`);
+        }
+        showToast(parts.join(" "));
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(await readErrorMessage(response, `写回启动失败 (${response.status})`));
       }
 
+      const result = (await response.json()) as {
+        batchId: string;
+        totalQueued: number;
+        rejected: Array<{ candidateId: string; reason: string }>;
+      };
+
+      /** 有 rejected 项 → Toast 列出跳过原因 */
+      if (result.rejected.length > 0) {
+        const reasons = result.rejected.map((r) => `${r.candidateId}: ${r.reason}`).join("；");
+        showToast(`写回已启动，但有 ${result.rejected.length} 项被跳过：${reasons}`);
+      } else {
+        showToast("写回任务已启动", "success");
+      }
+
       setSelectedIds(new Set());
-      showToast("写回任务已启动", "success");
+      setShowWritebackModal(false);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "写回启动失败，请重试");
     } finally {
@@ -636,12 +697,21 @@ export default function AppReviewPage() {
             type="button"
             className={styles.primaryButton}
             disabled={writingBack}
-            onClick={() => void startWriteback()}
+            onClick={openWritebackModal}
           >
             {writingBack ? "启动中..." : "写回选中项"}
           </button>
         </div>
       )}
+
+      {/* 写回确认弹窗 */}
+      <WritebackConfirmModal
+        open={showWritebackModal}
+        selectedItems={writebackConfirmItems}
+        loading={writingBack}
+        onConfirm={() => void confirmWriteback()}
+        onCancel={closeWritebackModal}
+      />
 
       {toast && (
         <div className={`${styles.toast} ${toast.tone === "success" ? styles.toastSuccess : ""}`}>
