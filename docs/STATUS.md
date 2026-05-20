@@ -30,3 +30,7 @@
 - 服务：`server/modules/candidate/review-list.server.ts` — `listReviewCandidates()`
 - Query 参数：status / altPlane / page / pageSize / sortBy
 - 返回：candidate + target + draft 组合视图，含 displayText / isSharedFile 派生字段，分页 meta { total, page, pageSize, totalPages }
+
+### Task 7.4 — 审阅列表前端页面
+- 路由：`app/routes/app.review.tsx` — `/app/review`
+- 已接入审阅列表、筛选、分页、草稿编辑保存、装饰性切换、共享文件提示与批量写回入口。

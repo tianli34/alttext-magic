@@ -26,6 +26,7 @@ interface DecorativeCandidateRow {
   altTargetId: string;
   status: AltCandidateStatus;
   currentAltEmpty: boolean;
+  hasDraft: boolean;
   updatedAt: Date;
   decorativeActive: boolean;
   groupTypes: CandidateGroupType[];
@@ -74,6 +75,8 @@ const scopeFlagToGroupType: Record<keyof ScanScopeFlags, CandidateGroupType> = {
 const markableStatuses = new Set<AltCandidateStatus>([
   AltCandidateStatus.MISSING,
   AltCandidateStatus.GENERATION_FAILED_RETRYABLE,
+  AltCandidateStatus.GENERATED,
+  AltCandidateStatus.WRITEBACK_FAILED_RETRYABLE,
 ]);
 
 function mapScopeFlagsToGroupTypes(
@@ -85,10 +88,14 @@ function mapScopeFlagsToGroupTypes(
 }
 
 function restoreStatusAfterUnmark(
-  candidate: Pick<DecorativeCandidateRow, "currentAltEmpty" | "status">,
+  candidate: Pick<DecorativeCandidateRow, "currentAltEmpty" | "hasDraft" | "status">,
 ): AltCandidateStatus {
   if (!candidate.currentAltEmpty) {
     return AltCandidateStatus.RESOLVED;
+  }
+
+  if (candidate.hasDraft) {
+    return AltCandidateStatus.GENERATED;
   }
 
   if (candidate.status === AltCandidateStatus.GENERATION_FAILED_RETRYABLE) {
@@ -179,6 +186,9 @@ const prismaDecorativeMarkDataAccess: DecorativeMarkDataAccess = {
           where: { shopId },
           select: { groupType: true },
         },
+        draft: {
+          select: { id: true },
+        },
       },
     });
 
@@ -191,6 +201,7 @@ const prismaDecorativeMarkDataAccess: DecorativeMarkDataAccess = {
       altTargetId: candidate.altTargetId,
       status: candidate.status,
       currentAltEmpty: candidate.altTarget.currentAltEmpty,
+      hasDraft: candidate.draft !== null,
       updatedAt: candidate.updatedAt,
       decorativeActive: candidate.altTarget.decorativeMark?.isActive ?? false,
       groupTypes: candidate.groupProjections.map((group) => group.groupType),
@@ -259,6 +270,9 @@ const prismaDecorativeMarkDataAccess: DecorativeMarkDataAccess = {
           where: { shopId: input.shopId },
           select: { groupType: true },
         },
+        draft: {
+          select: { id: true },
+        },
       },
     });
 
@@ -267,6 +281,7 @@ const prismaDecorativeMarkDataAccess: DecorativeMarkDataAccess = {
       altTargetId: candidate.altTargetId,
       status: candidate.status,
       currentAltEmpty: candidate.altTarget.currentAltEmpty,
+      hasDraft: candidate.draft !== null,
       updatedAt: candidate.updatedAt,
       decorativeActive: candidate.altTarget.decorativeMark?.isActive ?? false,
       groupTypes: candidate.groupProjections.map((group) => group.groupType),

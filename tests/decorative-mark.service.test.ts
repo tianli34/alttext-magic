@@ -35,6 +35,7 @@ interface MutableCandidate {
   altTargetId: string;
   status: AltCandidateStatus;
   currentAltEmpty: boolean;
+  hasDraft: boolean;
   updatedAt: Date;
   decorativeActive: boolean;
   groupTypes: CandidateGroupType[];
@@ -54,6 +55,7 @@ function createCandidate(
     altTargetId: "target-1",
     status: AltCandidateStatus.MISSING,
     currentAltEmpty: true,
+    hasDraft: false,
     updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     decorativeActive: false,
     groupTypes: [CandidateGroupType.PRODUCT_MEDIA],
@@ -234,23 +236,39 @@ async function run(): Promise<void> {
   {
     const candidate = createCandidate({
       status: AltCandidateStatus.GENERATED,
+      hasDraft: true,
     });
     const capture = createCapture();
 
-    await assert.rejects(
-      markDecorativeCandidate(
-        "shop-1",
-        candidate.id,
-        createDataAccess(candidate, capture),
-      ),
-      (err: unknown) =>
-        err instanceof DecorativeActionError &&
-        err.code === "INVALID_STATUS" &&
-        err.status === 409,
-      "已生成候选应拒绝标记",
+    const data = await markDecorativeCandidate(
+      "shop-1",
+      candidate.id,
+      createDataAccess(candidate, capture),
     );
-    assert.equal(capture.upsertCount, 0, "非法状态不应写 decorative_mark");
-    assert.deepEqual(capture.updateStatuses, []);
+
+    assert.equal(capture.upsertCount, 1, "已生成候选允许标记装饰性");
+    assert.deepEqual(capture.updateStatuses, [
+      AltCandidateStatus.DECORATIVE_SKIPPED,
+    ]);
+    assert.equal(data.status, AltCandidateStatus.DECORATIVE_SKIPPED);
+  }
+
+  {
+    const candidate = createCandidate({
+      status: AltCandidateStatus.DECORATIVE_SKIPPED,
+      decorativeActive: true,
+      hasDraft: true,
+    });
+    const capture = createCapture();
+    const data = await unmarkDecorativeCandidate(
+      "shop-1",
+      candidate.id,
+      createDataAccess(candidate, capture),
+    );
+
+    assert.equal(capture.deactivateCount, 1, "有 draft 的装饰性候选取消后应恢复 GENERATED");
+    assert.deepEqual(capture.updateStatuses, [AltCandidateStatus.GENERATED]);
+    assert.equal(data.status, AltCandidateStatus.GENERATED);
   }
 
   console.log("✅ decorative-mark.service 单测全部通过");
