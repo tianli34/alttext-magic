@@ -4,16 +4,23 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
+  const shopDomain = session.shop;
+
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain },
+    select: { id: true },
+  });
 
   // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  return { apiKey: process.env.SHOPIFY_API_KEY || "", shopId: shop?.id ?? "" };
 };
 
 export default function App() {
-  const { apiKey } = useLoaderData<typeof loader>();
+  const { apiKey, shopId } = useLoaderData<typeof loader>();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
@@ -22,7 +29,9 @@ export default function App() {
         <s-link href="/app/candidates">Candidates</s-link>
         <s-link href="/app/review">Review</s-link>
         <s-link href="/app/history">History</s-link>
-        <s-link href="/app/ai-stats">AI 调用统计</s-link>
+        {shopId === "cmnidr9hh0000bsttv2rx99xq" && (
+          <s-link href="/app/ai-stats">AI 调用统计</s-link>
+        )}
         <s-link href="/app/billing">Billing</s-link>
         <s-link href="/app/settings">Settings</s-link>
         <s-link href="/app/help">Help</s-link>

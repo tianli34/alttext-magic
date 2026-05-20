@@ -3,7 +3,7 @@
  * 用途: AI 模型调用统计页面 — 展示所有模型调用成功/失败次数、成功率、耗时等数据
  */
 import { useEffect, useState, useCallback } from "react";
-import { displayModelName } from "~/lib/format";
+import { displayModelName } from "../lib/format";
 
 interface StatusDuration {
   avgDurationMs: number;
