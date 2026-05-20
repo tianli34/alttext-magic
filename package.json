@@ -37,6 +37,7 @@
     "node": ">=20.19 <22 || >=22.12"
   },
   "dependencies": {
+    "@google/genai": "^2.4.0",
     "@microsoft/fetch-event-source": "^2.0.1",
     "@openrouter/sdk": "^0.12.35",
     "@prisma/adapter-pg": "^7.5.0",

@@ -118,6 +118,30 @@ const envSchema = z.object({
   AI_4th_API_KEY: z.string().default(""),
   AI_4th_ENDPOINT: z.string().url().optional(),
 
+  // 第 5 候补模型
+  AI_5th_PROVIDER: z.string().min(1).default("openai"),
+  AI_5th_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  AI_5th_API_KEY: z.string().default(""),
+  AI_5th_ENDPOINT: z.string().url().optional(),
+
+  // 第 6 候补模型
+  AI_6th_PROVIDER: z.string().min(1).default("openai"),
+  AI_6th_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  AI_6th_API_KEY: z.string().default(""),
+  AI_6th_ENDPOINT: z.string().url().optional(),
+
+  // 第 7 候补模型
+  AI_7th_PROVIDER: z.string().min(1).default("openai"),
+  AI_7th_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  AI_7th_API_KEY: z.string().default(""),
+  AI_7th_ENDPOINT: z.string().url().optional(),
+
+  // 第 8 候补模型
+  AI_8th_PROVIDER: z.string().min(1).default("openai"),
+  AI_8th_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  AI_8th_API_KEY: z.string().default(""),
+  AI_8th_ENDPOINT: z.string().url().optional(),
+
   // ── Timezone ───────────────────────────────────────────
   // 项目级时区（默认北京时间），影响 Node.js Date 序列化与 pino 日志时间戳
   TZ: z.string().default("Asia/Shanghai"),

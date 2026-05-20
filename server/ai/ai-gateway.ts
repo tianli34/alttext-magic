@@ -9,6 +9,7 @@ import { AIGenerationError } from "./ai.types.js";
 import { FakeAIProvider } from "./providers/fake.provider.js";
 import { FallbackProvider } from "./providers/fallback.provider.js";
 import type { ProviderEntry } from "./providers/fallback.provider.js";
+import { GeminiProvider } from "./providers/gemini.provider.js";
 import { OpenAICompatibleProvider } from "./providers/openai.provider.js";
 
 const log = createLogger({ module: "ai-gateway" });
@@ -35,6 +36,10 @@ const MODEL_CONFIGS: ModelConfigMeta[] = [
   { providerKey: "AI_2nd_PROVIDER",     modelKey: "AI_2nd_MODEL",     apiKeyKey: "AI_2nd_API_KEY",     endpointKey: "AI_2nd_ENDPOINT",     label: "2nd" },
   { providerKey: "AI_3rd_PROVIDER",     modelKey: "AI_3rd_MODEL",     apiKeyKey: "AI_3rd_API_KEY",     endpointKey: "AI_3rd_ENDPOINT",     label: "3rd" },
   { providerKey: "AI_4th_PROVIDER",     modelKey: "AI_4th_MODEL",     apiKeyKey: "AI_4th_API_KEY",     endpointKey: "AI_4th_ENDPOINT",     label: "4th" },
+  { providerKey: "AI_5th_PROVIDER",     modelKey: "AI_5th_MODEL",     apiKeyKey: "AI_5th_API_KEY",     endpointKey: "AI_5th_ENDPOINT",     label: "5th" },
+  { providerKey: "AI_6th_PROVIDER",     modelKey: "AI_6th_MODEL",     apiKeyKey: "AI_6th_API_KEY",     endpointKey: "AI_6th_ENDPOINT",     label: "6th" },
+  { providerKey: "AI_7th_PROVIDER",     modelKey: "AI_7th_MODEL",     apiKeyKey: "AI_7th_API_KEY",     endpointKey: "AI_7th_ENDPOINT",     label: "7th" },
+  { providerKey: "AI_8th_PROVIDER",     modelKey: "AI_8th_MODEL",     apiKeyKey: "AI_8th_API_KEY",     endpointKey: "AI_8th_ENDPOINT",     label: "8th" },
 ];
 
 /** 根据 MODEL_CONFIGS 动态构建所有已配置（apiKey 非空）的 Provider 条目 */
@@ -43,17 +48,31 @@ function buildModelProviders(): ProviderEntry[] {
   const e = env as any;
   return MODEL_CONFIGS
     .filter((cfg) => e[cfg.apiKeyKey])
-    .map((cfg) => ({
-      provider: new OpenAICompatibleProvider({
-        providerName: e[cfg.providerKey] as string,
-        model: e[cfg.modelKey] as string,
-        apiKey: e[cfg.apiKeyKey] as string,
-        endpoint: e[cfg.endpointKey] as string | undefined,
-        timeoutMs: TIMEOUT_MS,
-        label: cfg.label,
-      }),
-      name: `${e[cfg.providerKey] as string}/${e[cfg.modelKey] as string}`,
-    }));
+    .map((cfg) => {
+      const providerName = e[cfg.providerKey] as string;
+      const model = e[cfg.modelKey] as string;
+      const apiKey = e[cfg.apiKeyKey] as string;
+      const endpoint = e[cfg.endpointKey] as string | undefined;
+
+      if (providerName === "google") {
+        return {
+          provider: new GeminiProvider({ apiKey, model, endpoint, timeoutMs: TIMEOUT_MS, label: cfg.label }),
+          name: `google/${model}`,
+        };
+      }
+
+      return {
+        provider: new OpenAICompatibleProvider({
+          providerName,
+          model,
+          apiKey,
+          endpoint,
+          timeoutMs: TIMEOUT_MS,
+          label: cfg.label,
+        }),
+        name: `${providerName}/${model}`,
+      };
+    });
 }
 
 // ----------------------------------------------------------------

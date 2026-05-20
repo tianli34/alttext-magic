@@ -6,6 +6,10 @@
 ## AI 生成闭环
 - 批量生成管线已完成，draft 已落库；Phase 7 直接消费。
 - 关键代码：`worker/processors/generate-alt.processor.ts`、`server/modules/generation/generation-batch.service.ts`。
+- AI Provider 架构：`AIProvider` 接口 → `AIGatewayService` 统一路由 → `FallbackProvider` 多级降级。
+- 内置 Provider：`OpenAICompatibleProvider`（OpenAI 兼容）、`GeminiProvider`（`@google/genai` SDK）、`FakeAIProvider`（本地测试）。
+- 网关 `buildModelProviders()` 按 `AI_*_PROVIDER` 值自动路由：`"google"` → `GeminiProvider`，其余 → `OpenAICompatibleProvider`。
+- Gemini 图片通过 base64 `inlineData` 传入，支持超时保护和 `NON_SERVER`/`SERVER` 错误分类。
 ## Shopify 能力
 - 限流器：`server/shopify/shopify-rate-limiter.server.ts`（写回需复用）。
 - 按 `alt_plane` 读线上 Alt：`server/modules/generation/truth-check.service.ts`。
