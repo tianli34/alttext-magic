@@ -1,6 +1,6 @@
 /**
  * File: worker/index.ts
- * Purpose: Boot BullMQ workers for persisted Shopify webhook events, scan-start, parse-bulk, quota-grant, and reservation-reaper jobs.
+ * Purpose: 启动 BullMQ worker，注册 webhook、扫描、生成、写回、计费与清理等队列处理器。
  */
 import { Worker } from "bullmq";
 import { processWebhookEvent } from "../app/lib/server/webhooks/webhook-process.service.js";
@@ -14,6 +14,7 @@ import {
   RESERVATION_REAPER_QUEUE_NAME,
   SCAN_START_QUEUE_NAME,
   WEBHOOK_QUEUE_NAME,
+  WRITEBACK_QUEUE_NAME,
 } from "../server/config/queue-names.js";
 import {
   createRedisConnection,
@@ -29,6 +30,7 @@ import type { BillingSyncJobData } from "../server/queues/billing-sync.queue.js"
 import type { QuotaGrantJobData } from "../server/queues/quota-grant.queue.js";
 import type { ReservationReaperJobData } from "../server/queues/reservation-reaper.queue.js";
 import type { GenerateAltJobData } from "../server/queues/generate-alt.queue.js";
+import type { WritebackJobData } from "../server/queues/writeback.queue.js";
 import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.service.js";
 import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
 import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
@@ -40,6 +42,12 @@ import {
   generateAltConcurrency,
   processGenerateAltJob,
 } from "./processors/generate-alt.processor.js";
+import {
+  finalizeBatchIfComplete,
+  markWritebackJobFailed,
+  processWritebackJob,
+  writebackConcurrency,
+} from "./processors/writeback.processor.js";
 import {
   DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS,
   runScanTimeoutSweepOnce,
@@ -58,6 +66,7 @@ const billingSyncConnection = createRedisConnection();
 const quotaGrantConnection = createRedisConnection();
 const reservationReaperConnection = createRedisConnection();
 const generateAltConnection = createRedisConnection();
+const writebackConnection = createRedisConnection();
 let scanTimeoutSweepRunning = false;
 
 const scanTimeoutSweepInterval = setInterval(() => {
@@ -176,6 +185,17 @@ const generateAltWorker = new Worker<GenerateAltJobData>(
   },
 );
 
+const writebackWorker = new Worker<WritebackJobData>(
+  WRITEBACK_QUEUE_NAME,
+  async (job) => {
+    await processWritebackJob(job.data);
+  },
+  {
+    connection: writebackConnection,
+    concurrency: writebackConcurrency,
+  },
+);
+
 // ---- 注册 Free 月配额每日 repeatable job ----
 void registerFreeMonthlyGrantScheduler().catch((error: unknown) => {
   logger.error({ err: error }, "quota-grant-scheduler.register.failed");
@@ -282,6 +302,17 @@ generateAltWorker.on("ready", () => {
   );
 });
 
+writebackWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: WRITEBACK_QUEUE_NAME,
+      concurrency: writebackConcurrency,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
 webhookWorker.on("completed", (job) => {
   logger.info(
     {
@@ -368,6 +399,19 @@ generateAltWorker.on("completed", (job) => {
   logger.info(
     {
       queue: GENERATE_ALT_QUEUE_NAME,
+      jobId: job.id,
+      batchId: job.data.batchId,
+      candidateId: job.data.candidateId,
+      shopId: job.data.shopId,
+    },
+    "worker.completed",
+  );
+});
+
+writebackWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: WRITEBACK_QUEUE_NAME,
       jobId: job.id,
       batchId: job.data.batchId,
       candidateId: job.data.candidateId,
@@ -480,6 +524,46 @@ generateAltWorker.on("failed", (job, error) => {
   );
 });
 
+writebackWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: WRITEBACK_QUEUE_NAME,
+      jobId: job?.id,
+      batchId: job?.data.batchId,
+      candidateId: job?.data.candidateId,
+      shopId: job?.data.shopId,
+      attemptsMade: job?.attemptsMade,
+      attempts: job?.opts.attempts,
+      err: error,
+    },
+    "worker.failed",
+  );
+
+  if (!job) return;
+
+  const attempts = job.opts.attempts ?? 1;
+  if (job.attemptsMade < attempts) return;
+
+  void markWritebackJobFailed(
+    job.data,
+    error instanceof Error ? error.message : String(error),
+  )
+    .then(() => finalizeBatchIfComplete(job.data))
+    .catch((finalizeError: unknown) => {
+      logger.error(
+        {
+          queue: WRITEBACK_QUEUE_NAME,
+          jobId: job.id,
+          batchId: job.data.batchId,
+          candidateId: job.data.candidateId,
+          shopId: job.data.shopId,
+          err: finalizeError,
+        },
+        "writeback.final-failure-persist.failed",
+      );
+    });
+});
+
 webhookWorker.on("error", (error) => {
   logger.error({ queue: WEBHOOK_QUEUE_NAME, err: error }, "worker.error");
 });
@@ -512,6 +596,10 @@ generateAltWorker.on("error", (error) => {
   logger.error({ queue: GENERATE_ALT_QUEUE_NAME, err: error }, "worker.error");
 });
 
+writebackWorker.on("error", (error) => {
+  logger.error({ queue: WRITEBACK_QUEUE_NAME, err: error }, "worker.error");
+});
+
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "worker.shutdown");
   clearInterval(scanTimeoutSweepInterval);
@@ -524,6 +612,7 @@ async function shutdown(signal: string): Promise<void> {
     quotaGrantWorker.close(),
     reservationReaperWorker.close(),
     generateAltWorker.close(),
+    writebackWorker.close(),
   ]);
   await Promise.all([
     webhookConnection.quit(),
@@ -534,6 +623,7 @@ async function shutdown(signal: string): Promise<void> {
     quotaGrantConnection.quit(),
     reservationReaperConnection.quit(),
     generateAltConnection.quit(),
+    writebackConnection.quit(),
   ]);
   process.exit(0);
 }
@@ -550,6 +640,7 @@ void (async () => {
         QUOTA_GRANT_QUEUE_NAME,
         RESERVATION_REAPER_QUEUE_NAME,
         GENERATE_ALT_QUEUE_NAME,
+        WRITEBACK_QUEUE_NAME,
       ],
       redis: getRedisConnectionSummary(),
     },

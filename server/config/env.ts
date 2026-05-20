@@ -129,6 +129,14 @@ const envSchema = z.object({
     .positive()
     .max(50)
     .default(5),
+
+  // ── 写回 Worker ─────────────────────────────────────────
+  WRITEBACK_CONCURRENCY: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(5)
+    .default(3),
 });
 
 /**

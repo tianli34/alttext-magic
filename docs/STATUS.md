@@ -56,3 +56,8 @@
 - 组件：`app/components/review/WritebackConfirmModal.tsx` + `WritebackConfirmModal.module.css`
 - 确认后：调用 `POST /api/writeback/start`
 - 审阅页面对接：`app/routes/app.review.tsx` 新增 `showWritebackModal` 状态、`writebackConfirmItems` 计算、`openWritebackModal` / `closeWritebackModal` / `confirmWriteback` 回调
+
+### Task 7.9 — Writeback Job 完整流水线
+- Worker 已注册 `writeback` queue：`worker/index.ts`，并发默认 3，`WRITEBACK_CONCURRENCY` 最大 5。
+- Processor：`worker/processors/writeback.processor.ts`，已实现二次读校验、路由写回、成功/跳过/失败落库、审计、batch 收尾与 WRITEBACK 锁释放。
+- 测试：`tests/writeback.processor.test.ts` 覆盖 WRITTEN、RESOLVED、WRITEBACK_FAILED_RETRYABLE、batch PARTIAL_SUCCESS 与锁释放。
