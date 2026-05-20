@@ -34,3 +34,8 @@
 ### Task 7.4 — 审阅列表前端页面
 - 路由：`app/routes/app.review.tsx` — `/app/review`
 - 已接入审阅列表、筛选、分页、草稿编辑保存、装饰性切换、共享文件提示与批量写回入口。
+
+### Task 7.5 — WritebackRouter 与 Mutation Executors
+- 服务：`server/modules/writeback/writeback-router.ts`，按 `AltPlane` 路由到 File / Collection / Article executor。
+- Executors：已实现 `fileUpdate`、`collectionUpdate`、`articleUpdate` 写回、`userErrors` 解析、网络错误可重试分类。
+- 测试：`tests/writeback-router.test.ts` 覆盖三类 executor 的 success / userError / networkError。
