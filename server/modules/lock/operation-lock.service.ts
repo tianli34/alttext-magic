@@ -323,6 +323,33 @@ export async function heartbeatLock(
 }
 
 /**
+ * 检查指定操作类型是否正在运行（RUNNING 且未过期）。
+ *
+ * 用于跨锁系统互斥检查（如 WRITEBACK 锁获取前检查 SCAN 是否活跃）。
+ *
+ * @param shopId 店铺 ID
+ * @param operationType 操作类型
+ * @returns 是否存在活跃的指定类型锁
+ */
+export async function isOperationRunning(
+  shopId: string,
+  operationType: ShopOperationType,
+): Promise<boolean> {
+  const now = new Date();
+  const rows = await prisma.$queryRaw<Array<{ shop_id: string }>>(Prisma.sql`
+    SELECT "shop_id"
+    FROM "shop_operation_lock"
+    WHERE "shop_id" = ${shopId}
+      AND "lock_type" = ${operationType}
+      AND "status" = 'RUNNING'
+      AND "expires_at" > ${now}
+    LIMIT 1
+  `);
+
+  return rows.length > 0;
+}
+
+/**
  * 回收所有已过期但仍标记为 RUNNING 的锁。
  */
 export async function cleanupExpiredLocks(): Promise<CleanupExpiredLocksResult> {

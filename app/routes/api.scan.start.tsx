@@ -1,13 +1,14 @@
 /**
  * File: app/routes/api.scan.start.tsx
- * Purpose: POST /api/scan/start —— 扫描启动接口（首次扫描 + 重新扫描）。
+ *          Purpose: POST /api/scan/start —— 扫描启动接口（首次扫描 + 重新扫描）。
  *          接收 scopeFlags + noticeVersion，完成：
  *          1. notice 确认写入（幂等）
  *          2. scope flags 更新
- *          3. scan lock 获取
- *          4. scan_job + scan_task 创建（事务）
- *          5. Redis 进度键初始化
- *          6. BullMQ 入队
+ *          3. WRITEBACK 锁互斥检查（Redis）
+ *          4. scan lock 获取（PG）
+ *          5. scan_job + scan_task 创建（事务）
+ *          6. Redis 进度键初始化
+ *          7. BullMQ 入队
  *
  * 请求体: { scopeFlags: ScopeFlagState, noticeVersion: string }
  * 响应体: { scanJobId: string, batchId: string, status: string }
@@ -19,6 +20,7 @@ import prisma from "../db.server";
 import { ackNotice } from "../../server/modules/notice/scan-notice-ack.service";
 import { updateScanScopeFlags } from "../../server/modules/shop/scope.service";
 import { acquireLock, releaseLock } from "../../server/modules/lock/operation-lock.service";
+import { isWritebackLocked } from "../../server/modules/lock/writeback-lock.service";
 import { createScanJobWithTasks } from "../../server/modules/scan/catalog/scan-job.service";
 import { scopeFlagsToResourceTypes } from "../../server/modules/scan/scan.constants";
 import { initScanProgress } from "../../server/sse/progress-publisher";
@@ -95,11 +97,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // 6. 将 ScopeFlag 转换为 ScanResourceType
   const enabledResourceTypes = scopeFlagsToResourceTypes(enabledFlags);
 
-  // 7. 生成 lock owner（batchId 同时作为响应中的 batchId）
+  // 7. 检查 WRITEBACK 锁是否存在（互斥）
+  const writebackActive = await isWritebackLocked(shop.id);
+  if (writebackActive) {
+    logger.warn({ shopId: shop.id }, "Scan blocked by active writeback lock");
+    return Response.json(
+      { error: "A writeback is already running. Please try again later." },
+      { status: 409 },
+    );
+  }
+
+  // 8. 生成 lock owner（batchId 同时作为响应中的 batchId）
   const batchId = `scan-${shop.id}-${Date.now()}`;
   const lockOwner = { batchId };
 
-  // 8. 尝试获取 scan 锁
+  // 9. 尝试获取 scan 锁
   const lockResult = await acquireLock(shop.id, "SCAN", lockOwner);
 
   if (!lockResult.acquired) {
@@ -108,14 +120,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       "Scan lock conflict",
     );
     const isGenerate = lockResult.lock?.operationType === "GENERATE";
-    const msg = isGenerate
-      ? "A generation is already running. Please try again later."
-      : "Another scan is already running. Please try again later.";
+    const isWriteback = lockResult.lock?.operationType === "WRITEBACK";
+    let msg: string;
+    if (isGenerate) {
+      msg = "A generation is already running. Please try again later.";
+    } else if (isWriteback) {
+      msg = "A writeback is already running. Please try again later.";
+    } else {
+      msg = "Another scan is already running. Please try again later.";
+    }
     return Response.json({ error: msg }, { status: 409 });
   }
 
   try {
-    // 9. 写入 notice 确认（幂等）
+    // 10. 写入 notice 确认（幂等）
     await ackNotice({
       shopId: shop.id,
       noticeKey: "SCAN_NOTICE",
@@ -124,10 +142,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       actor: "SHOP_OWNER",
     });
 
-    // 10. 更新 scope flags
+    // 11. 更新 scope flags
     await updateScanScopeFlags(shop.id, scopeFlags);
 
-    // 11. 在事务内创建 scan_job + scan_task
+    // 12. 在事务内创建 scan_job + scan_task
     const scanJobResult = await createScanJobWithTasks({
       shopId: shop.id,
       scopeFlags: scopeFlags as Record<string, boolean>,
@@ -135,10 +153,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       enabledResourceTypes,
     });
 
-    // 12. 初始化 Redis 进度键
+    // 13. 初始化 Redis 进度键
     await initScanProgress(scanJobResult.scanJobId, enabledResourceTypes.length);
 
-    // 13. 入队 BullMQ
+    // 14. 入队 BullMQ
     await enqueueScanStart({
       shopId: shop.id,
       scanJobId: scanJobResult.scanJobId,

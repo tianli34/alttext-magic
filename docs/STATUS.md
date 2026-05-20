@@ -38,4 +38,11 @@
 ### Task 7.5 — WritebackRouter 与 Mutation Executors
 - 服务：`server/modules/writeback/writeback-router.ts`，按 `AltPlane` 路由到 File / Collection / Article executor。
 - Executors：已实现 `fileUpdate`、`collectionUpdate`、`articleUpdate` 写回、`userErrors` 解析、网络错误可重试分类。
-- 测试：`tests/writeback-router.test.ts` 覆盖三类 executor 的 success / userError / networkError。
+
+### Task 7.6 — WRITEBACK 锁管理
+- 服务：`server/modules/lock/writeback-lock.service.ts` — 基于 Redis 的 WRITEBACK 写回锁。
+- API：`acquireWritebackLock(shopId, ttlMs)` / `releaseWritebackLock(shopId, lockId)` / `isWritebackLocked(shopId)`。
+- 锁 key：`shop:{shopId}:lock:writeback`，value 存 UUID lockId，默认 TTL 5 分钟，Redis `SET NX PX` 原子获取。
+- 互斥：WRITEBACK 锁获取前检查 PG SCAN 锁（`isOperationRunning`），SCAN 锁获取前检查 Redis WRITEBACK 锁（`isWritebackLocked`）。
+- 扩展：`server/modules/lock/operation-lock.service.ts` 新增 `isOperationRunning(shopId, operationType)`。
+- 路由：`app/routes/api.scan.start.tsx` 已补充 WRITEBACK 锁互斥检查（步骤 7），WRITEBACK 锁存在时返回 409。
