@@ -394,7 +394,7 @@ export default function AppReviewPage() {
       const response = await fetch("/api/writeback/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ altCandidateIds: Array.from(selectedIds) }),
+        body: JSON.stringify({ candidateIds: Array.from(selectedIds) }),
       });
 
       if (!response.ok) {

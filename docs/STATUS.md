@@ -46,3 +46,9 @@
 - 互斥：WRITEBACK 锁获取前检查 PG SCAN 锁（`isOperationRunning`），SCAN 锁获取前检查 Redis WRITEBACK 锁（`isWritebackLocked`）。
 - 扩展：`server/modules/lock/operation-lock.service.ts` 新增 `isOperationRunning(shopId, operationType)`。
 - 路由：`app/routes/api.scan.start.tsx` 已补充 WRITEBACK 锁互斥检查（步骤 7），WRITEBACK 锁存在时返回 409。
+
+### Task 7.7 — 写回启动 API
+- 路由：`app/routes/api.writeback.start.tsx` — `POST /api/writeback/start`
+- 服务：`server/modules/writeback/writeback.service.ts` — 校验候选、获取 WRITEBACK 锁、创建 `JobBatch(type=WRITEBACK)` + `JobItem`、投递 `writeback` BullMQ job。
+- 队列：`server/queues/writeback.queue.ts`，queue name = `writeback`，payload 含 shopId / candidateId / batchId / lockId / altPlane / shopifyGid / altText。
+- 测试：`tests/writeback-start.service.test.ts` 覆盖正常启动、锁冲突、混入无效候选、全部 decorative。

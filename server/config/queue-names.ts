@@ -12,6 +12,7 @@ export const BILLING_SYNC_QUEUE_NAME = "billing-sync";
 export const QUOTA_GRANT_QUEUE_NAME = "quota-grant";
 export const RESERVATION_REAPER_QUEUE_NAME = "reservation-reaper";
 export const GENERATE_ALT_QUEUE_NAME = "generate-alt";
+export const WRITEBACK_QUEUE_NAME = "writeback";
 
 export const queueNames = {
   webhook: WEBHOOK_QUEUE_NAME,
@@ -23,4 +24,5 @@ export const queueNames = {
   quotaGrant: QUOTA_GRANT_QUEUE_NAME,
   reservationReaper: RESERVATION_REAPER_QUEUE_NAME,
   generateAlt: GENERATE_ALT_QUEUE_NAME,
+  writeback: WRITEBACK_QUEUE_NAME,
 } as const;
