@@ -5,7 +5,7 @@
 工作流限制:
 - 始前必读: `docs/Specs/tree.txt` & `docs/STATUS.md`
 - 按需查阅: 仅限 `docs/Specs/*.md`
-- 任务结束: 极简更新 `docs/STATUS.md`
+- 任务结束: 极简更新（每个任务限1行） `docs/STATUS.md`
 - 严格纪律: 禁脑补; 须报告文档/代码冲突; 未经明确指示严禁读取其他文档(.md/.txt/.pdf等)
 - 使用技能: 需要读取 schema.prisma 时使用 prisma-query 技能 `.agents\skills\prisma-query\SKILL.md`
 
