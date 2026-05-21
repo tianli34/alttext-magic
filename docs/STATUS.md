@@ -21,3 +21,4 @@
 - Task 8-C4：`server/services/gates/scopeGate.ts` 实现 checkScopeForTopic（topic→resourceType 映射，查询 shops.scan_scope_flags，scope 关闭返回 false）。
 - Task 8-C5：`server/services/gates/fingerprintGate.ts` 实现 checkFingerprintChange（调用 fingerprintRepo.compareAndDecide，相同指纹返回 UNCHANGED → 调用方标记 SKIPPED_NO_IMAGE_CHANGE）。
 - Task 8-C6：`shops.incremental_scan_enabled` 冗余字段 + 计划升降级联动。Prisma 迁移新增字段含回填；apply-subscription-change / plan-change / subscription.service 三处双写（billingSubscription + shop）；planGate 改为直接读取 shops 表避免联表；单测覆盖 Free→Paid / Paid→Free 联动（63/63 通过）。
+- Task 8-D1：`getProductMedia.ts` 实现单个 Product 全部 MediaImage 读取，含游标分页，空 media 返回 `[]`。
