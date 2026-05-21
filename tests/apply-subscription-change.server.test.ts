@@ -305,12 +305,18 @@ async function run(): Promise<void> {
       'incrementalScanEnabled 设为 true',
     );
 
-    // 验证 shop.update 被调用（设置 firstPaidBonusGrantedAt）
-    const shopUpdateCall = mock._calls.find((c) => c.method === 'shop.update');
-    assertTrue(!!shopUpdateCall, 'shop.update 被调用');
+    // 验证 shop.update 被调用（设置 firstPaidBonusGrantedAt + incrementalScanEnabled）
+    const shopUpdateCalls = mock._calls.filter((c) => c.method === 'shop.update');
+    assertEqual(shopUpdateCalls.length, 2, 'shop.update 被调用 2 次');
+    // 第一次：设置 firstPaidBonusGrantedAt
     assertTrue(
-      !!shopUpdateCall!.data.firstPaidBonusGrantedAt,
+      shopUpdateCalls.some((c) => c.data.firstPaidBonusGrantedAt !== undefined),
       'firstPaidBonusGrantedAt 已设置',
+    );
+    // 第二次：设置 incrementalScanEnabled = true
+    assertTrue(
+      shopUpdateCalls.some((c) => c.data.incrementalScanEnabled === true),
+      'shop.incrementalScanEnabled = true',
     );
 
     // 验证 included bucket 的 create 参数
@@ -422,11 +428,17 @@ async function run(): Promise<void> {
     assertNull(result.freeMonthly, 'freeMonthly 为 null');
     assertTrue(result.incrementalScanEnabled, 'incrementalScanEnabled = true');
 
-    // 验证 shop.update 没有被调用
-    const shopUpdateCall = mock._calls.find((c) => c.method === 'shop.update');
+    // 验证 shop.update 仅被调用一次（设置 incrementalScanEnabled，不再设置 firstPaidBonusGrantedAt）
+    const shopUpdateCalls = mock._calls.filter((c) => c.method === 'shop.update');
+    assertEqual(shopUpdateCalls.length, 1, 'shop.update 被调用 1 次（仅 incrementalScanEnabled）');
+    assertEqual(
+      shopUpdateCalls[0].data.incrementalScanEnabled,
+      true,
+      'shop.incrementalScanEnabled = true',
+    );
     assertFalse(
-      !!shopUpdateCall,
-      'shop.update 未被调用（不再设置 firstPaidBonusGrantedAt）',
+      shopUpdateCalls.some((c) => c.data.firstPaidBonusGrantedAt !== undefined),
+      '未设置 firstPaidBonusGrantedAt（非首次付费）',
     );
   }
 
@@ -502,6 +514,12 @@ async function run(): Promise<void> {
       false,
       'incrementalScanEnabled 设为 false',
     );
+
+    // 验证 shop.update 关闭增量扫描（Shop 级冗余字段）
+    const shopUpdateCall = mock._calls.find(
+      (c) => c.method === 'shop.update' && c.data.incrementalScanEnabled === false,
+    );
+    assertTrue(!!shopUpdateCall, 'shop.update(incrementalScanEnabled=false) 被调用');
 
     // 验证 FREE_MONTHLY_INCLUDED 的 create 参数
     const freeCreate = mock._calls.find(
@@ -595,6 +613,96 @@ async function run(): Promise<void> {
         }),
       'subscriptionId 为空应抛错',
     );
+  }
+
+  // ------------------------------------------------------------------
+  // 9. Free→Paid 联动：shop.incrementalScanEnabled 应变为 true
+  //    模拟从 FREE 升级到 STARTER 月付（非首次付费）
+  // ------------------------------------------------------------------
+  {
+    console.log('9. Free→Paid 联动：shop.incrementalScanEnabled 变为 true');
+    const mock = createMockPrisma({
+      firstPaidBonusGrantedAt: new Date('2026-01-01T00:00:00Z'), // 已发放过
+      existingBuckets: [false],
+      createdBuckets: [
+        {
+          id: 'bucket-included-9',
+          bucketType: 'MONTHLY_INCLUDED',
+          amount: 150,
+          cycleKey: 'STARTER:MONTHLY:2026-05',
+        },
+      ],
+    });
+
+    const result = await applySubscriptionChange(
+      {
+        shopId: 'shop-001',
+        subscriptionId: 'sub-upgrade',
+        planKey: 'STARTER',
+        interval: 'MONTHLY',
+      },
+      asClient(mock),
+    );
+
+    assertTrue(result.incrementalScanEnabled, 'result.incrementalScanEnabled = true');
+
+    // 验证 billingSubscription.update 设置 true
+    const subUpdate = mock._calls.find(
+      (c) => c.method === 'billingSubscription.update',
+    );
+    assertTrue(!!subUpdate, 'billingSubscription.update 被调用');
+    assertEqual(subUpdate!.data.incrementalScanEnabled, true, 'sub.incrementalScanEnabled = true');
+
+    // 验证 shop.update 设置 true
+    const shopUpdate = mock._calls.find(
+      (c) => c.method === 'shop.update' && c.data.incrementalScanEnabled === true,
+    );
+    assertTrue(!!shopUpdate, 'shop.update(incrementalScanEnabled=true) 被调用');
+  }
+
+  // ------------------------------------------------------------------
+  // 10. Paid→Free 联动：shop.incrementalScanEnabled 应变为 false
+  //     模拟从 STARTER 降级到 FREE
+  // ------------------------------------------------------------------
+  {
+    console.log('10. Paid→Free 联动：shop.incrementalScanEnabled 变为 false');
+    const mock = createMockPrisma({
+      firstPaidBonusGrantedAt: new Date('2026-01-01T00:00:00Z'),
+      existingBuckets: [false],
+      createdBuckets: [
+        {
+          id: 'bucket-free-10',
+          bucketType: 'FREE_MONTHLY_INCLUDED',
+          amount: 25,
+          cycleKey: 'FREE:2026-05',
+        },
+      ],
+    });
+
+    const result = await applySubscriptionChange(
+      {
+        shopId: 'shop-001',
+        subscriptionId: 'sub-downgrade',
+        planKey: 'FREE',
+        interval: 'NONE',
+      },
+      asClient(mock),
+    );
+
+    assertFalse(result.incrementalScanEnabled, 'result.incrementalScanEnabled = false');
+
+    // 验证 billingSubscription.update 设置 false
+    const subUpdate = mock._calls.find(
+      (c) => c.method === 'billingSubscription.update',
+    );
+    assertTrue(!!subUpdate, 'billingSubscription.update 被调用');
+    assertEqual(subUpdate!.data.incrementalScanEnabled, false, 'sub.incrementalScanEnabled = false');
+
+    // 验证 shop.update 设置 false
+    const shopUpdate = mock._calls.find(
+      (c) => c.method === 'shop.update' && c.data.incrementalScanEnabled === false,
+    );
+    assertTrue(!!shopUpdate, 'shop.update(incrementalScanEnabled=false) 被调用');
   }
 
   // ------------------------------------------------------------------

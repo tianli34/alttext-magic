@@ -255,9 +255,14 @@ async function applyUpgradeToPaid(
     log.info({ shopId }, '首次付费欢迎额度已发放过，跳过');
   }
 
-  // ---- 3. 开启增量扫描 ----
+  // ---- 3. 开启增量扫描（billingSubscription + shop 双写） ----
   await db.billingSubscription.update({
     where: { id: subscriptionId },
+    data: { incrementalScanEnabled: true },
+  });
+
+  await db.shop.update({
+    where: { id: shopId },
     data: { incrementalScanEnabled: true },
   });
 
@@ -304,9 +309,14 @@ async function applyDowngradeToFree(
 ): Promise<ApplySubscriptionChangeResult> {
   log.info({ shopId, subscriptionId }, '处理降级到 Free 计划');
 
-  // ---- 1. 关闭增量扫描 ----
+  // ---- 1. 关闭增量扫描（billingSubscription + shop 双写） ----
   await db.billingSubscription.update({
     where: { id: subscriptionId },
+    data: { incrementalScanEnabled: false },
+  });
+
+  await db.shop.update({
+    where: { id: shopId },
     data: { incrementalScanEnabled: false },
   });
 

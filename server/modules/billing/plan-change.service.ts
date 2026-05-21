@@ -244,10 +244,10 @@ export async function changePlanToFree(
       },
     });
 
-    // 2c. 更新 shop 的 currentPlan
+    // 2c. 更新 shop 的 currentPlan + 关闭增量扫描
     await tx.shop.update({
       where: { id: shopId },
-      data: { currentPlan: 'FREE' },
+      data: { currentPlan: 'FREE', incrementalScanEnabled: false },
     });
   });
 

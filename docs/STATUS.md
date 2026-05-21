@@ -17,3 +17,7 @@
 - Task 8-A4：`fingerprintRepo.ts` 实现 get/upsert/compareAndDecide。
 - Task 8-C1：`continuous-scan-debounce.processor.ts` 实现 consume → 按 topic 分发到 product/collection 入队。
 - Task 8-C2：`server/services/gates/lockGate.ts` 实现 checkScanLock + delayJobForLock（SCAN 锁互斥门控，moveToDelayed 重试，超限标记 FAILED）。
+- Task 8-C3：`server/services/gates/planGate.ts` 实现 checkIncrementalEnabled（查询 active 订阅的 incrementalScanEnabled，Free 返回 false 付费返回 true）。
+- Task 8-C4：`server/services/gates/scopeGate.ts` 实现 checkScopeForTopic（topic→resourceType 映射，查询 shops.scan_scope_flags，scope 关闭返回 false）。
+- Task 8-C5：`server/services/gates/fingerprintGate.ts` 实现 checkFingerprintChange（调用 fingerprintRepo.compareAndDecide，相同指纹返回 UNCHANGED → 调用方标记 SKIPPED_NO_IMAGE_CHANGE）。
+- Task 8-C6：`shops.incremental_scan_enabled` 冗余字段 + 计划升降级联动。Prisma 迁移新增字段含回填；apply-subscription-change / plan-change / subscription.service 三处双写（billingSubscription + shop）；planGate 改为直接读取 shops 表避免联表；单测覆盖 Free→Paid / Paid→Free 联动（63/63 通过）。
