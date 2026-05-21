@@ -16,3 +16,4 @@
 - Task 8-A3：`imageFingerprint.ts` 实现 computeProductFingerprint / computeCollectionFingerprint。
 - Task 8-A4：`fingerprintRepo.ts` 实现 get/upsert/compareAndDecide。
 - Task 8-C1：`continuous-scan-debounce.processor.ts` 实现 consume → 按 topic 分发到 product/collection 入队。
+- Task 8-C2：`server/services/gates/lockGate.ts` 实现 checkScanLock + delayJobForLock（SCAN 锁互斥门控，moveToDelayed 重试，超限标记 FAILED）。
