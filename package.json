@@ -30,7 +30,8 @@
     "enum": "tsx E:/typescript-prisma-query-tool/src/cli.ts enum",
     "context": "tsx E:/typescript-prisma-query-tool/src/cli.ts context",
     "field": "tsx E:/typescript-prisma-query-tool/src/cli.ts field",
-    "search": "tsx E:/typescript-prisma-query-tool/src/cli.ts search"
+    "search": "tsx E:/typescript-prisma-query-tool/src/cli.ts search",
+    "testpublish": "tsx tests/publish-scan.test.ts"
   },
   "type": "module",
   "engines": {

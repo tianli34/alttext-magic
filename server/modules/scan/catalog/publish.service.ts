@@ -16,6 +16,7 @@ import {
 } from "@prisma/client";
 import prisma from "../../../db/prisma.server";
 import { createLogger } from "../../../utils/logger";
+import { convergeProduct } from "../productConvergence";
 
 const logger = createLogger({ module: "publish-service" });
 
@@ -72,7 +73,7 @@ interface ResultUsageRow {
   positionIndex: number | null;
 }
 
-interface ImpactedTargetSummary {
+export interface ImpactedTargetSummary {
   id: string;
   altPlane: AltPlane;
   writeTargetId: string;
@@ -229,11 +230,60 @@ export async function publishScanResult(
     const impactedTargetIds = new Set<string>();
     let publishedTargetCount = 0;
     let publishedUsageCount = 0;
+    let candidateCount = 0;
+    let projectionCount = 0;
 
     const successfulSet = new Set(successfulResourceTypes);
 
+    // 1. 处理 PRODUCT_MEDIA 类型的资源
+    if (successfulSet.has("PRODUCT_MEDIA")) {
+      const productMediaUsages = resultUsages.filter(
+        (usage) => usage.resourceType === "PRODUCT_MEDIA",
+      );
+
+      const usagesByProductId = new Map<string, typeof productMediaUsages>();
+      for (const usage of productMediaUsages) {
+        const list = usagesByProductId.get(usage.usageId) || [];
+        list.push(usage);
+        usagesByProductId.set(usage.usageId, list);
+      }
+
+      for (const [productId, groupUsages] of usagesByProductId.entries()) {
+        const mediaImages = groupUsages.map((u) => {
+          const target = resultTargetMap.get(
+            buildTargetSliceKey("FILE_ALT", u.writeTargetId, DEFAULT_LOCALE),
+          );
+          return {
+            id: u.writeTargetId,
+            alt: target?.currentAltText ?? null,
+            url: target?.previewUrl ?? "",
+            positionIndex: u.positionIndex ?? undefined,
+          };
+        });
+
+        const firstUsage = groupUsages[0];
+        const productTitle = firstUsage?.title;
+        const productHandle = firstUsage?.handle;
+
+        const convergeResult = await convergeProduct(tx, {
+          shopId: scanJob.shopId,
+          productId,
+          mediaImages,
+          productTitle,
+          productHandle,
+          scanJobId: scanJob.id,
+        });
+
+        publishedTargetCount += convergeResult.publishedTargetCount;
+        publishedUsageCount += convergeResult.publishedUsageCount;
+        candidateCount += convergeResult.candidateCount;
+        projectionCount += convergeResult.projectionCount;
+      }
+    }
+
+    // 2. 处理 FILES 类型的资源
     const fileUsageRows = resultUsages.filter((usage) =>
-      FILE_ALT_RESOURCE_TYPES.has(usage.resourceType),
+      usage.resourceType === "FILES",
     );
     const fileWriteTargetIds = new Set(
       fileUsageRows
@@ -283,24 +333,6 @@ export async function publishScanResult(
         publishedUsageCount += 1;
       }
 
-      if (successfulSet.has("PRODUCT_MEDIA")) {
-        const sweptTargetIds = await sweepUsageSlice(tx, {
-          shopId: scanJob.shopId,
-          usageType: "PRODUCT",
-          currentUsageKeys: new Set(
-            fileUsageRows
-              .filter((usage) => usage.resourceType === "PRODUCT_MEDIA")
-              .map((usage) => {
-                const altTargetId = altTargetIdByWriteTargetId.get(usage.writeTargetId);
-                return altTargetId ? buildUsageSliceKey(altTargetId, usage.usageType, usage.usageId) : null;
-              })
-              .filter(isNonNull),
-          ),
-          scanJobId: scanJob.id,
-        });
-        sweptTargetIds.forEach((targetId) => impactedTargetIds.add(targetId));
-      }
-
       if (successfulSet.has("FILES")) {
         const sweptTargetIds = await sweepUsageSlice(tx, {
           shopId: scanJob.shopId,
@@ -325,6 +357,7 @@ export async function publishScanResult(
       });
     }
 
+    // 3. 处理 COLLECTION_IMAGE 类型的资源
     if (successfulSet.has("COLLECTION_IMAGE")) {
       const impacted = await publishSingleTargetSlice(tx, {
         shopId: scanJob.shopId,
@@ -339,6 +372,7 @@ export async function publishScanResult(
       publishedTargetCount += impacted.length;
     }
 
+    // 4. 处理 ARTICLE_IMAGE 类型的资源
     if (successfulSet.has("ARTICLE_IMAGE")) {
       const impacted = await publishSingleTargetSlice(tx, {
         shopId: scanJob.shopId,
@@ -353,6 +387,7 @@ export async function publishScanResult(
       publishedTargetCount += impacted.length;
     }
 
+    // 5. 对非 PRODUCT_MEDIA 类型的受影响 targets 进行 candidate/projection 更新计算
     const impactedTargets = impactedTargetIds.size
       ? await tx.altTarget.findMany({
           where: {
@@ -387,7 +422,6 @@ export async function publishScanResult(
       : [];
 
     const candidateByTargetId = new Map<string, string>();
-    let candidateCount = 0;
 
     for (const target of impactedTargets) {
       const nextCandidate = computeNextCandidateState({
@@ -440,8 +474,7 @@ export async function publishScanResult(
         })
       : [];
 
-    // [DEBUG] 诊断日志：追踪 presentUsages 中 PRODUCT 类型数量
-    const productPresentUsages = presentUsages.filter((u) => u.usageType === "PRODUCT");
+    // [DEBUG] 诊断日志：追踪 presentUsages 中 PRODUCT/FILE 类型数量
     if (presentUsages.length > 0) {
       logger.info(
         {
@@ -449,7 +482,7 @@ export async function publishScanResult(
           scanJobId: scanJob.id,
           impactedTargetCount: impactedTargetIds.size,
           totalPresentUsages: presentUsages.length,
-          productPresentUsageCount: productPresentUsages.length,
+          productPresentUsageCount: presentUsages.filter((u) => u.usageType === "PRODUCT").length,
           filePresentUsageCount: presentUsages.filter((u) => u.usageType === "FILE").length,
         },
         "publish.present-usages-debug",
@@ -457,7 +490,6 @@ export async function publishScanResult(
     }
 
     const usagesByTargetId = groupPresentUsagesByTargetId(presentUsages);
-    let projectionCount = 0;
 
     for (const target of impactedTargets) {
       const altCandidateId = candidateByTargetId.get(target.id);
@@ -919,7 +951,7 @@ function groupPresentUsagesByTargetId(
   return result;
 }
 
-async function rebuildTargetProjections(
+export async function rebuildTargetProjections(
   tx: Prisma.TransactionClient,
   input: {
     shopId: string;
