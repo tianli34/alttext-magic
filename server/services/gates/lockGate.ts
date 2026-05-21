@@ -13,8 +13,8 @@
  */
 
 import type { Job } from "bullmq";
-import prisma from "../../db/prisma.server";
 import { isOperationRunning } from "../../modules/lock/operation-lock.service";
+import { markFailed } from "../../modules/scan/continuous/webhook-event.service";
 import { createLogger } from "../../utils/logger";
 
 const logger = createLogger({ module: "lock-gate" });
@@ -57,9 +57,7 @@ let _checkScanLock: CheckScanLockFn = (shopId) =>
 
 /** 当前注入的 markFailed 实现 */
 let _markWebhookEventFailed: MarkWebhookEventFailedFn = (id) =>
-  prisma.webhookEvent
-    .update({ where: { id }, data: { status: "FAILED" } })
-    .then(() => {});
+  markFailed(id, new Error("lock-gate.retry-exceeded"));
 
 /**
  * 注入自定义 checkScanLock 实现（测试用）。
@@ -81,9 +79,7 @@ export function setMarkWebhookEventFailedFn(fn: MarkWebhookEventFailedFn): void 
 export function resetLockGateDeps(): void {
   _checkScanLock = (shopId) => isOperationRunning(shopId, "SCAN");
   _markWebhookEventFailed = (id) =>
-    prisma.webhookEvent
-      .update({ where: { id }, data: { status: "FAILED" } })
-      .then(() => {});
+    markFailed(id, new Error("lock-gate.retry-exceeded"));
 }
 
 /* ------------------------------------------------------------------ */

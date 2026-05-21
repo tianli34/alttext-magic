@@ -61,6 +61,7 @@ import {
 } from "../server/queues/continuous-scan.queue.js";
 import { processContinuousScanDebounceJob } from "./processors/continuous-scan-debounce.processor.js";
 import { processContinuousScanProductJob } from "./processors/continuous-scan-product.processor.js";
+import { processContinuousScanCollectionJob } from "./processors/continuous-scan-collection.processor.js";
 import {
   DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS,
   runScanTimeoutSweepOnce,
@@ -210,31 +211,45 @@ const writebackWorker = new Worker<WritebackJobData>(
   },
 );
 
-const continuousScanWorker = new Worker<
+const continuousScanDebounceWorker = new Worker<
   ContinuousScanDebouncePayload | ContinuousScanProductPayload | ContinuousScanCollectionPayload
 >(
   CONTINUOUS_SCAN_QUEUE_NAME,
   async (job) => {
-    switch (job.name) {
-      case JOB_DEBOUNCE:
-        await processContinuousScanDebounceJob(job.data as ContinuousScanDebouncePayload);
-        break;
-      case JOB_PRODUCT:
-        await processContinuousScanProductJob(job as Job<ContinuousScanProductPayload>);
-        break;
-      case JOB_COLLECTION:
-        logger.info(
-          { jobId: job.id, collectionId: (job.data as ContinuousScanCollectionPayload).collectionId },
-          "continuous-scan-collection.processor.placeholder",
-        );
-        break;
-      default:
-        logger.warn({ jobName: job.name, jobId: job.id }, "continuous-scan.unknown_job_name");
-    }
+    if (job.name !== JOB_DEBOUNCE) return;
+    await processContinuousScanDebounceJob(job.data as ContinuousScanDebouncePayload);
   },
   {
     connection: continuousScanConnection,
-    concurrency: 5,
+    concurrency: 10,
+  },
+);
+
+const continuousScanProductWorker = new Worker<
+  ContinuousScanDebouncePayload | ContinuousScanProductPayload | ContinuousScanCollectionPayload
+>(
+  CONTINUOUS_SCAN_QUEUE_NAME,
+  async (job) => {
+    if (job.name !== JOB_PRODUCT) return;
+    await processContinuousScanProductJob(job as Job<ContinuousScanProductPayload>);
+  },
+  {
+    connection: continuousScanConnection,
+    concurrency: 3,
+  },
+);
+
+const continuousScanCollectionWorker = new Worker<
+  ContinuousScanDebouncePayload | ContinuousScanProductPayload | ContinuousScanCollectionPayload
+>(
+  CONTINUOUS_SCAN_QUEUE_NAME,
+  async (job) => {
+    if (job.name !== JOB_COLLECTION) return;
+    await processContinuousScanCollectionJob(job as Job<ContinuousScanCollectionPayload>);
+  },
+  {
+    connection: continuousScanConnection,
+    concurrency: 3,
   },
 );
 
@@ -355,10 +370,36 @@ writebackWorker.on("ready", () => {
   );
 });
 
-continuousScanWorker.on("ready", () => {
+continuousScanDebounceWorker.on("ready", () => {
   logger.info(
     {
       queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobName: JOB_DEBOUNCE,
+      concurrency: 10,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
+continuousScanProductWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobName: JOB_PRODUCT,
+      concurrency: 3,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
+continuousScanCollectionWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobName: JOB_COLLECTION,
+      concurrency: 3,
       redis: getRedisConnectionSummary(),
     },
     "worker.ready",
@@ -473,7 +514,7 @@ writebackWorker.on("completed", (job) => {
   );
 });
 
-continuousScanWorker.on("completed", (job) => {
+continuousScanDebounceWorker.on("completed", (job) => {
   logger.info(
     {
       queue: CONTINUOUS_SCAN_QUEUE_NAME,
@@ -481,7 +522,31 @@ continuousScanWorker.on("completed", (job) => {
       jobName: job.name,
       shopId: job.data.shopId,
     },
-    "worker.completed",
+    "debounce-worker.completed",
+  );
+});
+
+continuousScanProductWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job.id,
+      jobName: job.name,
+      shopId: job.data.shopId,
+    },
+    "product-worker.completed",
+  );
+});
+
+continuousScanCollectionWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job.id,
+      jobName: job.name,
+      shopId: job.data.shopId,
+    },
+    "collection-worker.completed",
   );
 });
 
@@ -628,7 +693,7 @@ writebackWorker.on("failed", (job, error) => {
     });
 });
 
-continuousScanWorker.on("failed", (job, error) => {
+continuousScanDebounceWorker.on("failed", (job, error) => {
   logger.error(
     {
       queue: CONTINUOUS_SCAN_QUEUE_NAME,
@@ -637,12 +702,46 @@ continuousScanWorker.on("failed", (job, error) => {
       shopId: job?.data.shopId,
       err: error,
     },
-    "worker.failed",
+    "debounce-worker.failed",
   );
 });
 
-continuousScanWorker.on("error", (error) => {
-  logger.error({ queue: CONTINUOUS_SCAN_QUEUE_NAME, err: error }, "worker.error");
+continuousScanProductWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job?.id,
+      jobName: job?.name,
+      shopId: job?.data.shopId,
+      err: error,
+    },
+    "product-worker.failed",
+  );
+});
+
+continuousScanCollectionWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job?.id,
+      jobName: job?.name,
+      shopId: job?.data.shopId,
+      err: error,
+    },
+    "collection-worker.failed",
+  );
+});
+
+continuousScanDebounceWorker.on("error", (error) => {
+  logger.error({ queue: CONTINUOUS_SCAN_QUEUE_NAME, err: error }, "debounce-worker.error");
+});
+
+continuousScanProductWorker.on("error", (error) => {
+  logger.error({ queue: CONTINUOUS_SCAN_QUEUE_NAME, err: error }, "product-worker.error");
+});
+
+continuousScanCollectionWorker.on("error", (error) => {
+  logger.error({ queue: CONTINUOUS_SCAN_QUEUE_NAME, err: error }, "collection-worker.error");
 });
 
 webhookWorker.on("error", (error) => {
@@ -694,7 +793,9 @@ async function shutdown(signal: string): Promise<void> {
     reservationReaperWorker.close(),
     generateAltWorker.close(),
     writebackWorker.close(),
-    continuousScanWorker.close(),
+    continuousScanDebounceWorker.close(),
+    continuousScanProductWorker.close(),
+    continuousScanCollectionWorker.close(),
   ]);
   await Promise.all([
     webhookConnection.quit(),

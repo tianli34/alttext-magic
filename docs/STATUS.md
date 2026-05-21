@@ -26,3 +26,6 @@
 - Task 8-D3：`continuous_scan_product` Worker 与处理器实现完成，已完整集成到统一 Worker 架构并支持多级门控验证与事务性收敛。
 - Task 8-E1：`getCollectionImage.ts` 实现单个 Collection 封面图读取，无图返回 null。
 - Task 8-E2：共享收敛模块 `collectionConvergence.ts` 实现，全量发布 `publish.service.ts` 重构第 3 阶段（COLLECTION_IMAGE）改为循环调用 convergeCollection。
+- Task 8-E3：`continuous-scan-collection.processor.ts` 实现完成，四层门控（lock→plan→scope→fingerprint）+ getCollectionImage 读取封面图 + 指纹比对 + prisma.$transaction（convergeCollection + upsert fingerprint）→ PROCESSED，已集成到 worker/index.ts 统一 Worker 架构。
+- Task 8-F1：`webhook-event.service.ts` 新增 markCoalesced/markProcessing/markProcessed/markSkipped/markFailed 五个状态更新工具函数，所有 worker 通过此工具更新 webhook_event 状态。B1/D/E/C2（lockGate）已全部改造完毕。
+- Task 8-F2：将 `worker/index.ts` 中单 `continuousScanWorker` 拆分为三个独立 Worker（debounce=10、product=3、collection=3），共享 `continuous-scan` 队列，启动无错误。

@@ -15,6 +15,12 @@ import { checkFingerprintChange } from "../../server/services/gates/fingerprintG
 import { getProductMedia } from "../../server/shopify/queries/getProductMedia";
 import { computeProductFingerprint } from "../../server/modules/fingerprint/imageFingerprint";
 import { convergeProduct } from "../../server/modules/scan/productConvergence";
+import {
+  markProcessing,
+  markProcessed,
+  markSkipped,
+  markFailed,
+} from "../../server/modules/scan/continuous/webhook-event.service";
 import { createLogger } from "../../server/utils/logger";
 import type { ContinuousScanProductPayload } from "../../server/queues/continuous-scan.types";
 
@@ -53,13 +59,7 @@ export async function processContinuousScanProductJob(
 
   try {
     // 2. 将 WebhookEvent 标记为 PROCESSING 并记录开始处理时间
-    await prisma.webhookEvent.update({
-      where: { id: latestWebhookEventId },
-      data: {
-        status: "PROCESSING",
-        processingStartedAt: new Date(),
-      },
-    });
+    await markProcessing(latestWebhookEventId);
 
     // 3. Gate 2：planGate 校验增量扫描权限
     const planEnabled = await checkIncrementalEnabled(shopId);
@@ -68,13 +68,7 @@ export async function processContinuousScanProductJob(
         { shopId, latestWebhookEventId },
         "continuous-scan-product.processor.skipped_plan",
       );
-      await prisma.webhookEvent.update({
-        where: { id: latestWebhookEventId },
-        data: {
-          status: "SKIPPED_PLAN",
-          processedAt: new Date(),
-        },
-      });
+      await markSkipped(latestWebhookEventId, "PLAN");
       return;
     }
 
@@ -85,13 +79,7 @@ export async function processContinuousScanProductJob(
         { shopId, latestWebhookEventId },
         "continuous-scan-product.processor.skipped_scope",
       );
-      await prisma.webhookEvent.update({
-        where: { id: latestWebhookEventId },
-        data: {
-          status: "SKIPPED_SCOPE",
-          processedAt: new Date(),
-        },
-      });
+      await markSkipped(latestWebhookEventId, "SCOPE");
       return;
     }
 
@@ -149,13 +137,7 @@ export async function processContinuousScanProductJob(
         { shopId, productId, latestWebhookEventId },
         "continuous-scan-product.processor.skipped_no_image_change",
       );
-      await prisma.webhookEvent.update({
-        where: { id: latestWebhookEventId },
-        data: {
-          status: "SKIPPED_NO_IMAGE_CHANGE",
-          processedAt: new Date(),
-        },
-      });
+      await markSkipped(latestWebhookEventId, "NO_IMAGE_CHANGE");
       return;
     }
 
@@ -195,13 +177,7 @@ export async function processContinuousScanProductJob(
     });
 
     // 10. WebhookEvent 标记为 PROCESSED，完成全部操作
-    await prisma.webhookEvent.update({
-      where: { id: latestWebhookEventId },
-      data: {
-        status: "PROCESSED",
-        processedAt: now,
-      },
-    });
+    await markProcessed(latestWebhookEventId);
 
     logger.info(
       { shopId, productId, latestWebhookEventId },
@@ -214,17 +190,7 @@ export async function processContinuousScanProductJob(
     );
 
     // 异常处理：更新为 FAILED 并记录错误消息
-    await prisma.webhookEvent
-      .update({
-        where: { id: latestWebhookEventId },
-        data: {
-          status: "FAILED",
-          errorMessage: error instanceof Error ? error.message : String(error),
-        },
-      })
-      .catch((updateErr) => {
-        logger.error({ err: updateErr }, "failed-to-update-webhook-event-status");
-      });
+    await markFailed(latestWebhookEventId, error);
 
     // 重新抛出以触发 BullMQ 自动指数退避重试
     throw error;
