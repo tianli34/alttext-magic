@@ -17,6 +17,7 @@ import {
 import prisma from "../../../db/prisma.server";
 import { createLogger } from "../../../utils/logger";
 import { convergeProduct } from "../productConvergence";
+import { convergeCollection } from "../collectionConvergence";
 
 const logger = createLogger({ module: "publish-service" });
 
@@ -357,19 +358,62 @@ export async function publishScanResult(
       });
     }
 
-    // 3. 处理 COLLECTION_IMAGE 类型的资源
+    // 3. 处理 COLLECTION_IMAGE 类型的资源（通过 convergeCollection 共享收敛规则）
     if (successfulSet.has("COLLECTION_IMAGE")) {
-      const impacted = await publishSingleTargetSlice(tx, {
-        shopId: scanJob.shopId,
-        scanJobId: scanJob.id,
-        altPlane: "COLLECTION_IMAGE_ALT",
-        resultTargets: resultTargets.filter(
-          (target) => target.resourceType === "COLLECTION_IMAGE",
-        ),
-        now,
+      const collectionTargets = resultTargets.filter(
+        (target) => target.resourceType === "COLLECTION_IMAGE",
+      );
+
+      // 3a. 构建本次扫描结果中包含的 collectionId 集合
+      const scannedCollectionIds = new Set(
+        collectionTargets.map((t) => t.writeTargetId),
+      );
+
+      // 3b. 对本次扫描到的每个 Collection 执行 upsert 收敛
+      for (const target of collectionTargets) {
+        const convergeResult = await convergeCollection(tx, {
+          shopId: scanJob.shopId,
+          collectionId: target.writeTargetId,
+          image:
+            target.previewUrl
+              ? { url: target.previewUrl, alt: target.currentAltText }
+              : null,
+          collectionTitle: target.displayTitle,
+          collectionHandle: target.displayHandle,
+          scanJobId: scanJob.id,
+        });
+        if (convergeResult.upserted) {
+          publishedTargetCount += 1;
+        }
+      }
+
+      // 3c. 找出数据库中已有但本次扫描未返回的 Collection，标记为 NOT_FOUND (不存在)
+      const existingCollectionTargets = await tx.altTarget.findMany({
+        where: {
+          shopId: scanJob.shopId,
+          altPlane: "COLLECTION_IMAGE_ALT",
+          presentStatus: "PRESENT",
+        },
+        select: {
+          writeTargetId: true,
+          displayTitle: true,
+          displayHandle: true,
+        },
       });
-      impacted.forEach((targetId) => impactedTargetIds.add(targetId));
-      publishedTargetCount += impacted.length;
+
+      for (const existing of existingCollectionTargets) {
+        if (!scannedCollectionIds.has(existing.writeTargetId)) {
+          // 系列已不存在于最新扫描结果，执行 sweep (陈旧记录清理)
+          await convergeCollection(tx, {
+            shopId: scanJob.shopId,
+            collectionId: existing.writeTargetId,
+            image: null,
+            collectionTitle: existing.displayTitle,
+            collectionHandle: existing.displayHandle,
+            scanJobId: scanJob.id,
+          });
+        }
+      }
     }
 
     // 4. 处理 ARTICLE_IMAGE 类型的资源
@@ -387,7 +431,8 @@ export async function publishScanResult(
       publishedTargetCount += impacted.length;
     }
 
-    // 5. 对非 PRODUCT_MEDIA 类型的受影响 targets 进行 candidate/projection 更新计算
+    // 5. 对 ARTICLE_IMAGE 和 FILES 类型的受影响 targets 进行 candidate/projection 更新计算
+    //    注：PRODUCT_MEDIA 由 convergeProduct 内聚管理，COLLECTION_IMAGE 由 convergeCollection 内聚管理
     const impactedTargets = impactedTargetIds.size
       ? await tx.altTarget.findMany({
           where: {

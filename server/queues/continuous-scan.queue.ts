@@ -98,7 +98,7 @@ export async function enqueueProductScan(
 
   await queue.add(JOB_PRODUCT, data, {
     jobId: `product_${safe(data.shopId)}_${safe(data.productId)}`,
-    attempts: 3,
+    attempts: 5,
     backoff: { type: "exponential", delay: 5_000 },
     removeOnComplete: { count: 1_000 },
     removeOnFail: { count: 2_000 },

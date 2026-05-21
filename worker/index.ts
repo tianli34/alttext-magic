@@ -2,7 +2,7 @@
  * File: worker/index.ts
  * Purpose: 启动 BullMQ worker，注册 webhook、扫描、生成、写回、计费与清理等队列处理器。
  */
-import { Worker } from "bullmq";
+import { Worker, Job } from "bullmq";
 import { processWebhookEvent } from "../app/lib/server/webhooks/webhook-process.service.js";
 import {
   BILLING_SYNC_QUEUE_NAME,
@@ -15,6 +15,7 @@ import {
   SCAN_START_QUEUE_NAME,
   WEBHOOK_QUEUE_NAME,
   WRITEBACK_QUEUE_NAME,
+  CONTINUOUS_SCAN_QUEUE_NAME,
 } from "../server/config/queue-names.js";
 import {
   createRedisConnection,
@@ -48,6 +49,18 @@ import {
   processWritebackJob,
   writebackConcurrency,
 } from "./processors/writeback.processor.js";
+import type {
+  ContinuousScanDebouncePayload,
+  ContinuousScanProductPayload,
+  ContinuousScanCollectionPayload,
+} from "../server/queues/continuous-scan.types.js";
+import {
+  JOB_DEBOUNCE,
+  JOB_PRODUCT,
+  JOB_COLLECTION,
+} from "../server/queues/continuous-scan.queue.js";
+import { processContinuousScanDebounceJob } from "./processors/continuous-scan-debounce.processor.js";
+import { processContinuousScanProductJob } from "./processors/continuous-scan-product.processor.js";
 import {
   DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS,
   runScanTimeoutSweepOnce,
@@ -67,6 +80,7 @@ const quotaGrantConnection = createRedisConnection();
 const reservationReaperConnection = createRedisConnection();
 const generateAltConnection = createRedisConnection();
 const writebackConnection = createRedisConnection();
+const continuousScanConnection = createRedisConnection();
 let scanTimeoutSweepRunning = false;
 
 const scanTimeoutSweepInterval = setInterval(() => {
@@ -196,6 +210,34 @@ const writebackWorker = new Worker<WritebackJobData>(
   },
 );
 
+const continuousScanWorker = new Worker<
+  ContinuousScanDebouncePayload | ContinuousScanProductPayload | ContinuousScanCollectionPayload
+>(
+  CONTINUOUS_SCAN_QUEUE_NAME,
+  async (job) => {
+    switch (job.name) {
+      case JOB_DEBOUNCE:
+        await processContinuousScanDebounceJob(job.data as ContinuousScanDebouncePayload);
+        break;
+      case JOB_PRODUCT:
+        await processContinuousScanProductJob(job as Job<ContinuousScanProductPayload>);
+        break;
+      case JOB_COLLECTION:
+        logger.info(
+          { jobId: job.id, collectionId: (job.data as ContinuousScanCollectionPayload).collectionId },
+          "continuous-scan-collection.processor.placeholder",
+        );
+        break;
+      default:
+        logger.warn({ jobName: job.name, jobId: job.id }, "continuous-scan.unknown_job_name");
+    }
+  },
+  {
+    connection: continuousScanConnection,
+    concurrency: 5,
+  },
+);
+
 // ---- 注册 Free 月配额每日 repeatable job ----
 void registerFreeMonthlyGrantScheduler().catch((error: unknown) => {
   logger.error({ err: error }, "quota-grant-scheduler.register.failed");
@@ -313,6 +355,16 @@ writebackWorker.on("ready", () => {
   );
 });
 
+continuousScanWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
 webhookWorker.on("completed", (job) => {
   logger.info(
     {
@@ -415,6 +467,18 @@ writebackWorker.on("completed", (job) => {
       jobId: job.id,
       batchId: job.data.batchId,
       candidateId: job.data.candidateId,
+      shopId: job.data.shopId,
+    },
+    "worker.completed",
+  );
+});
+
+continuousScanWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job.id,
+      jobName: job.name,
       shopId: job.data.shopId,
     },
     "worker.completed",
@@ -564,6 +628,23 @@ writebackWorker.on("failed", (job, error) => {
     });
 });
 
+continuousScanWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job?.id,
+      jobName: job?.name,
+      shopId: job?.data.shopId,
+      err: error,
+    },
+    "worker.failed",
+  );
+});
+
+continuousScanWorker.on("error", (error) => {
+  logger.error({ queue: CONTINUOUS_SCAN_QUEUE_NAME, err: error }, "worker.error");
+});
+
 webhookWorker.on("error", (error) => {
   logger.error({ queue: WEBHOOK_QUEUE_NAME, err: error }, "worker.error");
 });
@@ -613,6 +694,7 @@ async function shutdown(signal: string): Promise<void> {
     reservationReaperWorker.close(),
     generateAltWorker.close(),
     writebackWorker.close(),
+    continuousScanWorker.close(),
   ]);
   await Promise.all([
     webhookConnection.quit(),
@@ -624,6 +706,7 @@ async function shutdown(signal: string): Promise<void> {
     reservationReaperConnection.quit(),
     generateAltConnection.quit(),
     writebackConnection.quit(),
+    continuousScanConnection.quit(),
   ]);
   process.exit(0);
 }
@@ -641,6 +724,7 @@ void (async () => {
         RESERVATION_REAPER_QUEUE_NAME,
         GENERATE_ALT_QUEUE_NAME,
         WRITEBACK_QUEUE_NAME,
+        CONTINUOUS_SCAN_QUEUE_NAME,
       ],
       redis: getRedisConnectionSummary(),
     },

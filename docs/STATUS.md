@@ -23,3 +23,6 @@
 - Task 8-C6：`shops.incremental_scan_enabled` 冗余字段 + 计划升降级联动。Prisma 迁移新增字段含回填；apply-subscription-change / plan-change / subscription.service 三处双写（billingSubscription + shop）；planGate 改为直接读取 shops 表避免联表；单测覆盖 Free→Paid / Paid→Free 联动（63/63 通过）。
 - Task 8-D1：`getProductMedia.ts` 实现单个 Product 全部 MediaImage 读取，含游标分页，空 media 返回 `[]`。
 - Task 8-D2：共享收敛模块 `productConvergence.ts` 实现，全量发布 `publish.service.ts` 重构并完美复用该纯函数收敛规则。
+- Task 8-D3：`continuous_scan_product` Worker 与处理器实现完成，已完整集成到统一 Worker 架构并支持多级门控验证与事务性收敛。
+- Task 8-E1：`getCollectionImage.ts` 实现单个 Collection 封面图读取，无图返回 null。
+- Task 8-E2：共享收敛模块 `collectionConvergence.ts` 实现，全量发布 `publish.service.ts` 重构第 3 阶段（COLLECTION_IMAGE）改为循环调用 convergeCollection。
