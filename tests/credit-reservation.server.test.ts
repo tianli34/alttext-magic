@@ -264,7 +264,7 @@ const {
   consumeReservation,
   releaseReservation,
   InsufficientCreditError,
-} = await import('../app/services/credits/credit-reservation.server.js');
+} = await import('../server/modules/billing/credit/credit-reservation.service.js');
 
 async function run(): Promise<void> {
   console.log('\n=== credit-reservation.server.test.ts ===\n');

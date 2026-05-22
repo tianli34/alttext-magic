@@ -13,7 +13,7 @@
  */
 
 import prisma from "../../server/db/prisma.server";
-import { releaseReservation } from "../../app/services/credits/credit-reservation.server";
+import { releaseReservation } from "../../server/modules/billing/credit/credit-reservation.service";
 import { createLogger } from "../../server/utils/logger";
 import type { ReservationReaperJobData } from "../../server/queues/reservation-reaper.queue";
 

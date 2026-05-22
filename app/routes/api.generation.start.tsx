@@ -17,7 +17,7 @@ import {
   InsufficientCreditError,
   releaseReservation,
   type CreditReservationWithLines,
-} from "../services/credits/credit-reservation.server";
+} from "../../server/modules/billing/credit/credit-reservation.service";
 import { acquireGenerateLock, releaseGenerateLock } from "../../server/modules/lock/generate-lock.service";
 import { GenerationBatchService } from "../../server/modules/generation/generation-batch.service";
 import { enqueueGenerateAltJob } from "../../server/queues/generate-alt.queue";
