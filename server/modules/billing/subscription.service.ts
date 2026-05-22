@@ -305,10 +305,13 @@ export async function syncSubscriptionFromShopify(
       },
     });
 
-    // 更新 shop.currentPlan
+    // 更新 shop.currentPlan + incrementalScanEnabled
     await db.shop.update({
       where: { id: shop.id },
-      data: { currentPlan: mapped.planKey },
+      data: {
+        currentPlan: mapped.planKey,
+        incrementalScanEnabled: mapped.incrementalScanEnabled,
+      },
     });
 
     log.info(
@@ -361,10 +364,13 @@ export async function syncSubscriptionFromShopify(
       select: { id: true },
     });
 
-    // 6c. 更新 shop.currentPlan
+    // 6c. 更新 shop.currentPlan + incrementalScanEnabled
     await tx.shop.update({
       where: { id: shop.id },
-      data: { currentPlan: mapped.planKey },
+      data: {
+        currentPlan: mapped.planKey,
+        incrementalScanEnabled: mapped.incrementalScanEnabled,
+      },
     });
 
     return { subscriptionId: newSub.id, deactivatedCount: oldSubs.length };

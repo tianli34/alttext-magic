@@ -2,7 +2,7 @@
  * File: worker/index.ts
  * Purpose: 启动 BullMQ worker，注册 webhook、扫描、生成、写回、计费与清理等队列处理器。
  */
-import { Worker } from "bullmq";
+import { Worker, Job } from "bullmq";
 import { processWebhookEvent } from "../app/lib/server/webhooks/webhook-process.service.js";
 import {
   BILLING_SYNC_QUEUE_NAME,
@@ -15,6 +15,7 @@ import {
   SCAN_START_QUEUE_NAME,
   WEBHOOK_QUEUE_NAME,
   WRITEBACK_QUEUE_NAME,
+  CONTINUOUS_SCAN_QUEUE_NAME,
 } from "../server/config/queue-names.js";
 import {
   createRedisConnection,
@@ -48,6 +49,19 @@ import {
   processWritebackJob,
   writebackConcurrency,
 } from "./processors/writeback.processor.js";
+import type {
+  ContinuousScanDebouncePayload,
+  ContinuousScanProductPayload,
+  ContinuousScanCollectionPayload,
+} from "../server/queues/continuous-scan.types.js";
+import {
+  JOB_DEBOUNCE,
+  JOB_PRODUCT,
+  JOB_COLLECTION,
+} from "../server/queues/continuous-scan.queue.js";
+import { processContinuousScanDebounceJob } from "./processors/continuous-scan-debounce.processor.js";
+import { processContinuousScanProductJob } from "./processors/continuous-scan-product.processor.js";
+import { processContinuousScanCollectionJob } from "./processors/continuous-scan-collection.processor.js";
 import {
   DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS,
   runScanTimeoutSweepOnce,
@@ -67,6 +81,7 @@ const quotaGrantConnection = createRedisConnection();
 const reservationReaperConnection = createRedisConnection();
 const generateAltConnection = createRedisConnection();
 const writebackConnection = createRedisConnection();
+const continuousScanConnection = createRedisConnection();
 let scanTimeoutSweepRunning = false;
 
 const scanTimeoutSweepInterval = setInterval(() => {
@@ -196,6 +211,48 @@ const writebackWorker = new Worker<WritebackJobData>(
   },
 );
 
+const continuousScanDebounceWorker = new Worker<
+  ContinuousScanDebouncePayload | ContinuousScanProductPayload | ContinuousScanCollectionPayload
+>(
+  CONTINUOUS_SCAN_QUEUE_NAME,
+  async (job) => {
+    if (job.name !== JOB_DEBOUNCE) return;
+    await processContinuousScanDebounceJob(job.data as ContinuousScanDebouncePayload);
+  },
+  {
+    connection: continuousScanConnection,
+    concurrency: 10,
+  },
+);
+
+const continuousScanProductWorker = new Worker<
+  ContinuousScanDebouncePayload | ContinuousScanProductPayload | ContinuousScanCollectionPayload
+>(
+  CONTINUOUS_SCAN_QUEUE_NAME,
+  async (job) => {
+    if (job.name !== JOB_PRODUCT) return;
+    await processContinuousScanProductJob(job as Job<ContinuousScanProductPayload>);
+  },
+  {
+    connection: continuousScanConnection,
+    concurrency: 3,
+  },
+);
+
+const continuousScanCollectionWorker = new Worker<
+  ContinuousScanDebouncePayload | ContinuousScanProductPayload | ContinuousScanCollectionPayload
+>(
+  CONTINUOUS_SCAN_QUEUE_NAME,
+  async (job) => {
+    if (job.name !== JOB_COLLECTION) return;
+    await processContinuousScanCollectionJob(job as Job<ContinuousScanCollectionPayload>);
+  },
+  {
+    connection: continuousScanConnection,
+    concurrency: 3,
+  },
+);
+
 // ---- 注册 Free 月配额每日 repeatable job ----
 void registerFreeMonthlyGrantScheduler().catch((error: unknown) => {
   logger.error({ err: error }, "quota-grant-scheduler.register.failed");
@@ -313,6 +370,42 @@ writebackWorker.on("ready", () => {
   );
 });
 
+continuousScanDebounceWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobName: JOB_DEBOUNCE,
+      concurrency: 10,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
+continuousScanProductWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobName: JOB_PRODUCT,
+      concurrency: 3,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
+continuousScanCollectionWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobName: JOB_COLLECTION,
+      concurrency: 3,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
 webhookWorker.on("completed", (job) => {
   logger.info(
     {
@@ -418,6 +511,42 @@ writebackWorker.on("completed", (job) => {
       shopId: job.data.shopId,
     },
     "worker.completed",
+  );
+});
+
+continuousScanDebounceWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job.id,
+      jobName: job.name,
+      shopId: job.data.shopId,
+    },
+    "debounce-worker.completed",
+  );
+});
+
+continuousScanProductWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job.id,
+      jobName: job.name,
+      shopId: job.data.shopId,
+    },
+    "product-worker.completed",
+  );
+});
+
+continuousScanCollectionWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job.id,
+      jobName: job.name,
+      shopId: job.data.shopId,
+    },
+    "collection-worker.completed",
   );
 });
 
@@ -564,6 +693,57 @@ writebackWorker.on("failed", (job, error) => {
     });
 });
 
+continuousScanDebounceWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job?.id,
+      jobName: job?.name,
+      shopId: job?.data.shopId,
+      err: error,
+    },
+    "debounce-worker.failed",
+  );
+});
+
+continuousScanProductWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job?.id,
+      jobName: job?.name,
+      shopId: job?.data.shopId,
+      err: error,
+    },
+    "product-worker.failed",
+  );
+});
+
+continuousScanCollectionWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: CONTINUOUS_SCAN_QUEUE_NAME,
+      jobId: job?.id,
+      jobName: job?.name,
+      shopId: job?.data.shopId,
+      err: error,
+    },
+    "collection-worker.failed",
+  );
+});
+
+continuousScanDebounceWorker.on("error", (error) => {
+  logger.error({ queue: CONTINUOUS_SCAN_QUEUE_NAME, err: error }, "debounce-worker.error");
+});
+
+continuousScanProductWorker.on("error", (error) => {
+  logger.error({ queue: CONTINUOUS_SCAN_QUEUE_NAME, err: error }, "product-worker.error");
+});
+
+continuousScanCollectionWorker.on("error", (error) => {
+  logger.error({ queue: CONTINUOUS_SCAN_QUEUE_NAME, err: error }, "collection-worker.error");
+});
+
 webhookWorker.on("error", (error) => {
   logger.error({ queue: WEBHOOK_QUEUE_NAME, err: error }, "worker.error");
 });
@@ -613,6 +793,9 @@ async function shutdown(signal: string): Promise<void> {
     reservationReaperWorker.close(),
     generateAltWorker.close(),
     writebackWorker.close(),
+    continuousScanDebounceWorker.close(),
+    continuousScanProductWorker.close(),
+    continuousScanCollectionWorker.close(),
   ]);
   await Promise.all([
     webhookConnection.quit(),
@@ -624,6 +807,7 @@ async function shutdown(signal: string): Promise<void> {
     reservationReaperConnection.quit(),
     generateAltConnection.quit(),
     writebackConnection.quit(),
+    continuousScanConnection.quit(),
   ]);
   process.exit(0);
 }
@@ -641,6 +825,7 @@ void (async () => {
         RESERVATION_REAPER_QUEUE_NAME,
         GENERATE_ALT_QUEUE_NAME,
         WRITEBACK_QUEUE_NAME,
+        CONTINUOUS_SCAN_QUEUE_NAME,
       ],
       redis: getRedisConnectionSummary(),
     },

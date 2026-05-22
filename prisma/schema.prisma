@@ -267,6 +267,7 @@ model Shop {
   accessTokenTag          String    @map("access_token_tag")
   scopes                  String?
   currentPlan             String    @default("FREE") @map("current_plan")
+  incrementalScanEnabled  Boolean   @default(false) @map("incremental_scan_enabled")
   scanScopeFlags          Json      @default("{\"PRODUCT_MEDIA\":true,\"FILES\":true,\"COLLECTION_IMAGE\":true,\"ARTICLE_IMAGE\":true}") @map("scan_scope_flags")
   scanScopeUpdatedAt      DateTime? @map("scan_scope_updated_at")
   firstPaidBonusGrantedAt DateTime? @map("first_paid_bonus_granted_at")
