@@ -14,6 +14,9 @@ export const RESERVATION_REAPER_QUEUE_NAME = "reservation-reaper";
 export const GENERATE_ALT_QUEUE_NAME = "generate-alt";
 export const WRITEBACK_QUEUE_NAME = "writeback";
 export const CONTINUOUS_SCAN_QUEUE_NAME = "continuous-scan";
+export const CLEANUP_QUEUE_NAME = "cleanup";
+export const GDPR_DELETE_QUEUE_NAME = "gdpr-delete";
+export const LOCK_REAPER_QUEUE_NAME = "lock-reaper";
 
 export const queueNames = {
   webhook: WEBHOOK_QUEUE_NAME,
@@ -27,4 +30,7 @@ export const queueNames = {
   generateAlt: GENERATE_ALT_QUEUE_NAME,
   writeback: WRITEBACK_QUEUE_NAME,
   continuousScan: CONTINUOUS_SCAN_QUEUE_NAME,
+  cleanup: CLEANUP_QUEUE_NAME,
+  gdprDelete: GDPR_DELETE_QUEUE_NAME,
+  lockReaper: LOCK_REAPER_QUEUE_NAME,
 } as const;
