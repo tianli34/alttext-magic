@@ -360,6 +360,7 @@ model ShopOperationLock {
   // ---------- Indexes ----------
   @@index([status, expiresAt])
   @@index([lockType, status])
+  @@index([status, heartbeatAt])
   @@map("shop_operation_lock")
 }
 

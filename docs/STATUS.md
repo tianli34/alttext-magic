@@ -18,3 +18,5 @@
 - Task 9.2: 实现 Cleanup BullMQ Repeatable Job（5 子任务：过期 AltDraft / 90 天审计日志 / 7 天 staging+scan_result / 7 天失败 attempt / 7 天已处理 webhook）；cron `0 2 * * *`；migration 新增 `audit_log_created_at_idx` + `webhook_events_created_at_idx` 索引；EXPLAIN 分析完成。
 - Task 9.5: 实现 `gdpr_delete` BullMQ Job（34 表拓扑顺序分批删除 + 幂等校验 + 结构化日志）；`gdpr-delete.queue.ts` 接口增加 `shopId`/`reason`；Worker 注册至 `worker/index.ts`；
 - Task 9.4: `APP_UNINSTALLED` webhook 完整实现：鉴权 → 幂等持久化 → 同步清空 shop accessToken + 标记 uninstalledAt → 入列 gdpr-delete → 返 200
+- Task 9.3: GDPR 三个 webhook handler 实现：`customers/data_request`（返空对象）、`customers/redact`（返 200）、`shop/redact`（入列 gdpr-delete + reason SHOP_REDACT）；均含 HMAC 校验 + 幂等 audit_log 持久化
+- Task 9.6: 锁超时回收 Job：`worker/jobs/lockReaper.ts` 心跳超时 30 分钟检测 + `worker/processors/lock-reaper.processor.ts` + `lock-timeout.scheduler.ts` BullMQ repeatable（每 5 分钟）；migration 新增 `shop_operation_lock(status, heartbeat_at)` 联合索引

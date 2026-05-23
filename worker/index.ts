@@ -10,6 +10,7 @@ import {
   DERIVE_SCAN_QUEUE_NAME,
   GDPR_DELETE_QUEUE_NAME,
   GENERATE_ALT_QUEUE_NAME,
+  LOCK_REAPER_QUEUE_NAME,
   PARSE_BULK_QUEUE_NAME,
   PUBLISH_SCAN_QUEUE_NAME,
   QUOTA_GRANT_QUEUE_NAME,
@@ -36,6 +37,7 @@ import type { GenerateAltJobData } from "../server/queues/generate-alt.queue.js"
 import type { WritebackJobData } from "../server/queues/writeback.queue.js";
 import type { CleanupJobData } from "../server/queues/cleanup.queue.js";
 import type { GdprDeleteJobData } from "../server/queues/gdpr-delete.queue.js";
+import type { LockReaperJobData } from "../server/queues/lock-reaper.queue.js";
 import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.service.js";
 import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
 import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
@@ -55,6 +57,7 @@ import {
 } from "./processors/writeback.processor.js";
 import { processCleanupJob } from "./processors/cleanup.processor.js";
 import { processGdprDeleteJob } from "./processors/gdpr-delete.processor.js";
+import { processLockReaperJob } from "./processors/lock-reaper.processor.js";
 import type {
   ContinuousScanDebouncePayload,
   ContinuousScanProductPayload,
@@ -76,6 +79,7 @@ import { registerFreeMonthlyGrantScheduler } from "./schedulers/free-monthly-gra
 import { registerReservationReaperScheduler } from "./schedulers/reservation-reaper.scheduler.js";
 import { registerBillingSyncScheduler } from "./schedulers/billing-sync.scheduler.js";
 import { registerCleanupScheduler } from "./schedulers/cleanup.scheduler.js";
+import { registerLockReaperScheduler } from "./schedulers/lock-timeout.scheduler.js";
 import { withJobLogger } from "./utils/job-logger.js";
 
 const logger = createLogger({ module: "worker-runtime" });
@@ -92,6 +96,7 @@ const writebackConnection = createRedisConnection();
 const continuousScanConnection = createRedisConnection();
 const cleanupConnection = createRedisConnection();
 const gdprDeleteConnection = createRedisConnection();
+const lockReaperConnection = createRedisConnection();
 let scanTimeoutSweepRunning = false;
 
 const scanTimeoutSweepInterval = setInterval(() => {
@@ -315,6 +320,19 @@ const gdprDeleteWorker = new Worker<GdprDeleteJobData>(
   },
 );
 
+const lockReaperWorker = new Worker<LockReaperJobData>(
+  LOCK_REAPER_QUEUE_NAME,
+  async (job) => {
+    await withJobLogger(job, async () => {
+      await processLockReaperJob(job.data);
+    });
+  },
+  {
+    connection: lockReaperConnection,
+    concurrency: 1,
+  },
+);
+
 // ---- 注册 Free 月配额每日 repeatable job ----
 void registerFreeMonthlyGrantScheduler().catch((error: unknown) => {
   logger.error({ err: error }, "quota-grant-scheduler.register.failed");
@@ -333,6 +351,11 @@ void registerBillingSyncScheduler().catch((error: unknown) => {
 // ---- 注册 cleanup 每日 02:00 UTC repeatable job ----
 void registerCleanupScheduler().catch((error: unknown) => {
   logger.error({ err: error }, "cleanup-scheduler.register.failed");
+});
+
+// ---- 注册 lock-reaper 每 5 分钟 repeatable job ----
+void registerLockReaperScheduler().catch((error: unknown) => {
+  logger.error({ err: error }, "lock-reaper-scheduler.register.failed");
 });
 
 webhookWorker.on("ready", () => {
@@ -487,6 +510,16 @@ gdprDeleteWorker.on("ready", () => {
   logger.info(
     {
       queue: GDPR_DELETE_QUEUE_NAME,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
+lockReaperWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: LOCK_REAPER_QUEUE_NAME,
       redis: getRedisConnectionSummary(),
     },
     "worker.ready",
@@ -656,6 +689,17 @@ gdprDeleteWorker.on("completed", (job) => {
       shopId: job.data.shopId,
       shopDomain: job.data.shopDomain,
       reason: job.data.reason,
+    },
+    "worker.completed",
+  );
+});
+
+lockReaperWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: LOCK_REAPER_QUEUE_NAME,
+      jobId: job.id,
+      source: job.data.source,
     },
     "worker.completed",
   );
@@ -881,12 +925,28 @@ gdprDeleteWorker.on("failed", (job, error) => {
   );
 });
 
+lockReaperWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: LOCK_REAPER_QUEUE_NAME,
+      jobId: job?.id,
+      source: job?.data.source,
+      err: error,
+    },
+    "worker.failed",
+  );
+});
+
 cleanupWorker.on("error", (error) => {
   logger.error({ queue: CLEANUP_QUEUE_NAME, err: error }, "worker.error");
 });
 
 gdprDeleteWorker.on("error", (error) => {
   logger.error({ queue: GDPR_DELETE_QUEUE_NAME, err: error }, "worker.error");
+});
+
+lockReaperWorker.on("error", (error) => {
+  logger.error({ queue: LOCK_REAPER_QUEUE_NAME, err: error }, "worker.error");
 });
 
 webhookWorker.on("error", (error) => {
@@ -943,6 +1003,7 @@ async function shutdown(signal: string): Promise<void> {
     continuousScanCollectionWorker.close(),
     cleanupWorker.close(),
     gdprDeleteWorker.close(),
+    lockReaperWorker.close(),
   ]);
   await Promise.all([
     webhookConnection.quit(),
@@ -957,6 +1018,7 @@ async function shutdown(signal: string): Promise<void> {
     continuousScanConnection.quit(),
     cleanupConnection.quit(),
     gdprDeleteConnection.quit(),
+    lockReaperConnection.quit(),
   ]);
   process.exit(0);
 }
@@ -977,6 +1039,7 @@ void (async () => {
         CONTINUOUS_SCAN_QUEUE_NAME,
         CLEANUP_QUEUE_NAME,
         GDPR_DELETE_QUEUE_NAME,
+        LOCK_REAPER_QUEUE_NAME,
       ],
       redis: getRedisConnectionSummary(),
     },
