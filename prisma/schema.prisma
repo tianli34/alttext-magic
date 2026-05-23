@@ -405,6 +405,7 @@ model WebhookEvent {
   @@index([processedAt])
   @@index([lastAttemptAt])
   @@index([receivedAt])
+  @@index([createdAt])
   @@map("webhook_events")
 }
 
@@ -1069,6 +1070,7 @@ model AuditLog {
   @@index([altTargetId])
   @@index([altCandidateId])
   @@index([altDraftId])
+  @@index([createdAt])
   @@unique([shopId, writeTargetId, altCandidateId])
   @@index([shopId, writtenAt])
   @@index([shopId, altPlane, writtenAt])
