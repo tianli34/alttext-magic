@@ -167,6 +167,11 @@ const envSchema = z.object({
   SETTINGS_HELP_FAQ_URL: z.string().url().optional(),
   SETTINGS_HELP_CONTACT_URL: z.string().url().optional(),
   SETTINGS_HELP_DOCS_URL: z.string().url().optional(),
+
+  // ── Navigation Help Links ─────────────────────────────
+  HELP_FAQ_URL: z.string().url().optional(),
+  SUPPORT_EMAIL: z.string().email().optional(),
+  DOCS_URL: z.string().url().optional(),
 });
 
 /**

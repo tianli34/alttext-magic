@@ -7,6 +7,7 @@ import { Prisma, type CreditReservation, type CreditReservationLine, type Prisma
 
 import prisma from '../../../db/prisma.server.js';
 import { createLogger } from '../../../utils/logger.js';
+import { recordMetric } from '../../../../shared/logger/metrics.js';
 import { sortBucketsByConsumptionOrder, type SpendableBucket } from './consumption-order.js';
 import type { CreditBucketType } from '../billing.types.js';
 
@@ -315,6 +316,9 @@ export async function createReservation(
 
       log.info({ shopId, batchId, reservationId: reservation.id, amount }, 'reservation 创建完成');
 
+      // ── 指标：预留获取 ──
+      recordMetric("reservation.acquired", 1, { shop_domain: shopId, batch_id: batchId, amount });
+
       return {
         reservation: {
           ...reservation,
@@ -510,6 +514,12 @@ export async function releaseReservation(
     });
 
     log.info({ shopId, reservationId, releasedTotal, status: targetStatus }, 'reservation 释放完成');
+
+    // ── 指标：预留释放/过期 ──
+    const metricName = targetStatus === 'EXPIRED'
+      ? 'reservation.expired'
+      : 'reservation.released';
+    recordMetric(metricName, 1, { shop_domain: shopId, reservation_id: reservationId });
 
     return { reservation: toReservationWithLines(updatedReservation), changed: true };
   });

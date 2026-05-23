@@ -16,6 +16,7 @@ import {
 } from "@prisma/client";
 import prisma from "../../../db/prisma.server";
 import { createLogger } from "../../../utils/logger";
+import { recordMetric } from "../../../../shared/logger/metrics";
 import { convergeProduct } from "../productConvergence";
 import { convergeCollection } from "../collectionConvergence";
 
@@ -598,6 +599,15 @@ export async function publishScanResult(
     },
     "publish-scan.success",
   );
+
+  // ── 指标埋点：扫描完成 ──
+  const missingAltCount = resultTargets.filter((t) => t.currentAltEmpty).length;
+  recordMetric("scan.rows_total", resultTargets.length, {
+    shop_domain: await resolveShopDomain(input.shopId),
+  });
+  recordMetric("scan.rows_missing_alt", missingAltCount, {
+    shop_domain: await resolveShopDomain(input.shopId),
+  });
 
   return {
     skipped: false,
@@ -1240,4 +1250,12 @@ function normalizeJsonForPrisma(
   value: Prisma.JsonValue,
 ): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
   return value === null ? Prisma.JsonNull : (value as Prisma.InputJsonValue);
+}
+
+async function resolveShopDomain(shopId: string): Promise<string> {
+  const shop = await prisma.shop.findUnique({
+    where: { id: shopId },
+    select: { shopDomain: true },
+  });
+  return shop?.shopDomain ?? "unknown";
 }

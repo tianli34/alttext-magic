@@ -20,3 +20,5 @@
 - Task 9.4: `APP_UNINSTALLED` webhook 完整实现：鉴权 → 幂等持久化 → 同步清空 shop accessToken + 标记 uninstalledAt → 入列 gdpr-delete → 返 200
 - Task 9.3: GDPR 三个 webhook handler 实现：`customers/data_request`（返空对象）、`customers/redact`（返 200）、`shop/redact`（入列 gdpr-delete + reason SHOP_REDACT）；均含 HMAC 校验 + 幂等 audit_log 持久化
 - Task 9.6: 锁超时回收 Job：`worker/jobs/lockReaper.ts` 心跳超时 30 分钟检测 + `worker/processors/lock-reaper.processor.ts` + `lock-timeout.scheduler.ts` BullMQ repeatable（每 5 分钟）；migration 新增 `shop_operation_lock(status, heartbeat_at)` 联合索引
+- Task 9.8: 关键指标埋点：`shared/logger/metrics.ts` 提供 `recordMetric(name, value, tags)`；在扫描发布、AI 生成、增量扫描 gate、写回、Reservation 5 大业务点完成埋点（17 个指标名）；`docs/phase9-metrics.md` 列出全部指标 + tags 供 Grafana 接入
+- Task 9.9: 主导航 Help 链接替换为 FAQ/联系支持/文档三个外链（新标签页）；env schema 新增 `HELP_FAQ_URL`/`SUPPORT_EMAIL`/`DOCS_URL`；`.env.example` 同步更新

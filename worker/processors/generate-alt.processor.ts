@@ -21,6 +21,7 @@ import { TruthCheckService } from "../../server/modules/generation/truth-check.s
 import prisma from "../../server/db/prisma.server";
 import { publishGenerationProgress } from "../../server/sse/progress-publisher";
 import { createLogger, type ExtendedLogger } from "../../server/utils/logger";
+import { recordMetric } from "../../shared/logger/metrics";
 import type { GenerateAltJobData } from "../../server/queues/generate-alt.queue";
 import type { ContextSnapshot } from "../../server/ai/ai.types";
 
@@ -249,6 +250,13 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
     write_target_id: data.shopifyImageId,
   });
 
+  // ── 指标：生成 attempt ──
+  recordMetric("generate.attempt.count", 1, {
+    shop_domain: data.shopId,
+    batch_id: data.batchId,
+    alt_plane: data.altPlane,
+  });
+
   const candidate = await loadCandidate(data);
 
   if (TERMINAL_STATUSES.has(candidate.status)) {
@@ -256,6 +264,10 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
       { candidateId: data.candidateId, status: candidate.status },
       "generate-alt.terminal-skip",
     );
+    recordMetric("generate.skip.terminal", 1, {
+      shop_domain: data.shopId,
+      batch_id: data.batchId,
+    });
     await publishGenerationProgress(data.batchId);
     return;
   }
@@ -265,6 +277,10 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
       { candidateId: data.candidateId, status: candidate.status },
       "generate-alt.non-processable-skip",
     );
+    recordMetric("generate.skip.non_processable", 1, {
+      shop_domain: data.shopId,
+      batch_id: data.batchId,
+    });
     await publishGenerationProgress(data.batchId);
     return;
   }
@@ -279,6 +295,10 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
 
     if (!truth.isEmpty) {
       await markSkippedAlreadyFilled(data, candidate, truth.currentAlt ?? "", jobLogger);
+      recordMetric("generate.skip.already_filled", 1, {
+        shop_domain: data.shopId,
+        batch_id: data.batchId,
+      });
       return;
     }
 
@@ -311,16 +331,23 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
       model_used: raw.modelUsed,
       context_mode: contextMode,
     });
+await markGenerated(
+  data,
+  candidate,
+  generatedText,
+  raw.modelUsed,
+  contextMode,
+  contextSnapshot,
+  successLogger,
+);
 
-    await markGenerated(
-      data,
-      candidate,
-      generatedText,
-      raw.modelUsed,
-      contextMode,
-      contextSnapshot,
-      successLogger,
-    );
+// ── 指标：生成成功 ──
+recordMetric("generate.success", 1, {
+  shop_domain: data.shopId,
+  batch_id: data.batchId,
+  model_used: raw.modelUsed,
+  context_mode: contextMode,
+});
   } catch (error) {
     if (error instanceof AIGenerationError) {
       if (error.modelCalls) {
@@ -332,11 +359,19 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
         error_message: error.message,
       });
       await markGenerationFailed(data, candidate, error, failedLogger);
+
+      // ── 指标：AI 生成失败 ──
+      recordMetric(`generate.fail.${error.name}`, 1, {
+        shop_domain: data.shopId,
+        batch_id: data.batchId,
+        error_code: error.name,
+      });
       return;
     }
 
+    const errorCode = error instanceof Error ? error.name : "UNKNOWN_ERROR";
     const failedLogger = jobLogger.withContext({
-      error_code: error instanceof Error ? error.name : "UNKNOWN_ERROR",
+      error_code: errorCode,
       error_message: error instanceof Error ? error.message : String(error),
     });
     // 非 AIGenerationError 兜底：标记失败而非抛出，避免候选人卡在 GENERATING
@@ -349,6 +384,13 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
       ),
       failedLogger,
     );
+
+    // ── 指标：未知错误导致失败 ──
+    recordMetric(`generate.fail.${errorCode}`, 1, {
+      shop_domain: data.shopId,
+      batch_id: data.batchId,
+      error_code: errorCode,
+    });
     return;
   } finally {
     await publishGenerationProgress(data.batchId);

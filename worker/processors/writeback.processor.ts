@@ -25,6 +25,7 @@ import type {
 } from "../../server/modules/writeback/writeback.types";
 import type { WritebackJobData } from "../../server/queues/writeback.queue";
 import { createLogger, type ExtendedLogger } from "../../server/utils/logger";
+import { recordMetric } from "../../shared/logger/metrics";
 
 const logger = createLogger({ module: "writeback-processor" });
 
@@ -132,11 +133,22 @@ export async function processWritebackJob(
 
   if (result.success) {
     await markWritten(data, candidate, altText, truth.currentAlt, jobLogger, dependencies);
+    // ── 指标：写回成功 ──
+    recordMetric("writeback.success", 1, {
+      shop_domain: data.shopId,
+      batch_id: data.batchId,
+    });
     await finalizeBatchIfComplete(data, jobLogger, dependencies);
     return;
   }
 
   await markWritebackJobFailed(data, result.error, jobLogger, dependencies);
+  // ── 指标：写回失败 ──
+  recordMetric("writeback.fail.WRITEBACK_FAILED", 1, {
+    shop_domain: data.shopId,
+    batch_id: data.batchId,
+    error_code: "WRITEBACK_FAILED",
+  });
   await finalizeBatchIfComplete(data, jobLogger, dependencies);
 }
 
@@ -242,6 +254,17 @@ export async function finalizeBatchIfComplete(
     },
     "writeback.batch-finalized",
   );
+
+  // ── 指标：写回批次完成率 ──
+  const rate = batch.total > 0 ? batch.success / batch.total : 0;
+  recordMetric("writeback.rate", rate, {
+    shop_domain: data.shopId,
+    batch_id: data.batchId,
+    total: batch.total,
+    success: batch.success,
+    failed: batch.failed,
+    skipped: batch.skipped,
+  });
 }
 
 async function loadCandidate(

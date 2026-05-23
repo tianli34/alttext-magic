@@ -15,12 +15,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     select: { id: true },
   });
 
-  // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "", shopId: shop?.id ?? "" };
+  return {
+    apiKey: process.env.SHOPIFY_API_KEY || "",
+    shopId: shop?.id ?? "",
+    helpFaqUrl: process.env.HELP_FAQ_URL || null,
+    supportEmail: process.env.SUPPORT_EMAIL || null,
+    docsUrl: process.env.DOCS_URL || null,
+  };
 };
 
 export default function App() {
-  const { apiKey, shopId } = useLoaderData<typeof loader>();
+  const { apiKey, shopId, helpFaqUrl, supportEmail, docsUrl } =
+    useLoaderData<typeof loader>();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
@@ -34,7 +40,21 @@ export default function App() {
         )}
         <s-link href="/app/billing">Billing</s-link>
         <s-link href="/app/settings">Settings</s-link>
-        <s-link href="/app/help">Help</s-link>
+        {helpFaqUrl && (
+          <s-link href={helpFaqUrl} target="_blank">
+            FAQ
+          </s-link>
+        )}
+        {supportEmail && (
+          <s-link href={`mailto:${supportEmail}`} target="_blank">
+            联系支持
+          </s-link>
+        )}
+        {docsUrl && (
+          <s-link href={docsUrl} target="_blank">
+            文档
+          </s-link>
+        )}
       </s-app-nav>
       <Outlet />
     </AppProvider>

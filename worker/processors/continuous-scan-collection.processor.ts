@@ -22,6 +22,7 @@ import {
   markFailed,
 } from "../../server/modules/scan/continuous/webhook-event.service";
 import { createLogger } from "../../server/utils/logger";
+import { recordMetric } from "../../shared/logger/metrics";
 import type { ContinuousScanCollectionPayload } from "../../server/queues/continuous-scan.types";
 
 const logger = createLogger({ module: "continuous-scan-collection-processor" });
@@ -54,6 +55,7 @@ export async function processContinuousScanCollectionJob(
       },
       "continuous-scan-collection.processor.lock_gate_blocked",
     );
+    recordMetric("incremental.skip.lock_gate", 1, { shop_domain: shopId });
     return;
   }
 
@@ -68,6 +70,7 @@ export async function processContinuousScanCollectionJob(
         { shopId, latestWebhookEventId },
         "continuous-scan-collection.processor.skipped_plan",
       );
+      recordMetric("incremental.skip.plan", 1, { shop_domain: shopId });
       await markSkipped(latestWebhookEventId, "PLAN");
       return;
     }
@@ -79,6 +82,7 @@ export async function processContinuousScanCollectionJob(
         { shopId, latestWebhookEventId },
         "continuous-scan-collection.processor.skipped_scope",
       );
+      recordMetric("incremental.skip.scope", 1, { shop_domain: shopId });
       await markSkipped(latestWebhookEventId, "SCOPE");
       return;
     }
@@ -134,6 +138,7 @@ export async function processContinuousScanCollectionJob(
         { shopId, collectionId, latestWebhookEventId },
         "continuous-scan-collection.processor.skipped_no_image_change",
       );
+      recordMetric("incremental.skip.no_image_change", 1, { shop_domain: shopId });
       await markSkipped(latestWebhookEventId, "NO_IMAGE_CHANGE");
       return;
     }
