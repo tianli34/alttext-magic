@@ -16,3 +16,4 @@
 - Task 9.10: `altDraftRepo` + `findActive*` 方法封装 `expiresAt > NOW()` 过滤；所有 7 处 draft read（candidate-list/review-list/draft.service/writeback.processor/writeback.service/decorative-mark×2）已统一过滤；processor 改用共享 `computeExpiresAt()`；migration 含历史回填
 - Task 9.7: 实现 `shared/logger/` 结构化日志库，挂载 Web 端 `pino-http` 日志拦截与 Worker 端 `withJobLogger` 任务包装，并规范化了全部 6 个核心处理器的日志字段输出。
 - Task 9.2: 实现 Cleanup BullMQ Repeatable Job（5 子任务：过期 AltDraft / 90 天审计日志 / 7 天 staging+scan_result / 7 天失败 attempt / 7 天已处理 webhook）；cron `0 2 * * *`；migration 新增 `audit_log_created_at_idx` + `webhook_events_created_at_idx` 索引；EXPLAIN 分析完成。
+- Task 9.5: 实现 `gdpr_delete` BullMQ Job（34 表拓扑顺序分批删除 + 幂等校验 + 结构化日志）；`gdpr-delete.queue.ts` 接口增加 `shopId`/`reason`；Worker 注册至 `worker/index.ts`；删除顺序文档 `docs/phase9-delete-order.md`

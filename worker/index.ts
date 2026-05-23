@@ -8,6 +8,7 @@ import {
   BILLING_SYNC_QUEUE_NAME,
   CLEANUP_QUEUE_NAME,
   DERIVE_SCAN_QUEUE_NAME,
+  GDPR_DELETE_QUEUE_NAME,
   GENERATE_ALT_QUEUE_NAME,
   PARSE_BULK_QUEUE_NAME,
   PUBLISH_SCAN_QUEUE_NAME,
@@ -34,6 +35,7 @@ import type { ReservationReaperJobData } from "../server/queues/reservation-reap
 import type { GenerateAltJobData } from "../server/queues/generate-alt.queue.js";
 import type { WritebackJobData } from "../server/queues/writeback.queue.js";
 import type { CleanupJobData } from "../server/queues/cleanup.queue.js";
+import type { GdprDeleteJobData } from "../server/queues/gdpr-delete.queue.js";
 import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.service.js";
 import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
 import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
@@ -52,6 +54,7 @@ import {
   writebackConcurrency,
 } from "./processors/writeback.processor.js";
 import { processCleanupJob } from "./processors/cleanup.processor.js";
+import { processGdprDeleteJob } from "./processors/gdpr-delete.processor.js";
 import type {
   ContinuousScanDebouncePayload,
   ContinuousScanProductPayload,
@@ -88,6 +91,7 @@ const generateAltConnection = createRedisConnection();
 const writebackConnection = createRedisConnection();
 const continuousScanConnection = createRedisConnection();
 const cleanupConnection = createRedisConnection();
+const gdprDeleteConnection = createRedisConnection();
 let scanTimeoutSweepRunning = false;
 
 const scanTimeoutSweepInterval = setInterval(() => {
@@ -298,6 +302,19 @@ const cleanupWorker = new Worker<CleanupJobData>(
   },
 );
 
+const gdprDeleteWorker = new Worker<GdprDeleteJobData>(
+  GDPR_DELETE_QUEUE_NAME,
+  async (job) => {
+    await withJobLogger(job, async () => {
+      await processGdprDeleteJob(job.data);
+    });
+  },
+  {
+    connection: gdprDeleteConnection,
+    concurrency: 1,
+  },
+);
+
 // ---- 注册 Free 月配额每日 repeatable job ----
 void registerFreeMonthlyGrantScheduler().catch((error: unknown) => {
   logger.error({ err: error }, "quota-grant-scheduler.register.failed");
@@ -466,6 +483,16 @@ cleanupWorker.on("ready", () => {
   );
 });
 
+gdprDeleteWorker.on("ready", () => {
+  logger.info(
+    {
+      queue: GDPR_DELETE_QUEUE_NAME,
+      redis: getRedisConnectionSummary(),
+    },
+    "worker.ready",
+  );
+});
+
 webhookWorker.on("completed", (job) => {
   logger.info(
     {
@@ -616,6 +643,19 @@ cleanupWorker.on("completed", (job) => {
       queue: CLEANUP_QUEUE_NAME,
       jobId: job.id,
       source: job.data.source,
+    },
+    "worker.completed",
+  );
+});
+
+gdprDeleteWorker.on("completed", (job) => {
+  logger.info(
+    {
+      queue: GDPR_DELETE_QUEUE_NAME,
+      jobId: job.id,
+      shopId: job.data.shopId,
+      shopDomain: job.data.shopDomain,
+      reason: job.data.reason,
     },
     "worker.completed",
   );
@@ -827,8 +867,26 @@ cleanupWorker.on("failed", (job, error) => {
   );
 });
 
+gdprDeleteWorker.on("failed", (job, error) => {
+  logger.error(
+    {
+      queue: GDPR_DELETE_QUEUE_NAME,
+      jobId: job?.id,
+      shopId: job?.data.shopId,
+      shopDomain: job?.data.shopDomain,
+      reason: job?.data.reason,
+      err: error,
+    },
+    "worker.failed",
+  );
+});
+
 cleanupWorker.on("error", (error) => {
   logger.error({ queue: CLEANUP_QUEUE_NAME, err: error }, "worker.error");
+});
+
+gdprDeleteWorker.on("error", (error) => {
+  logger.error({ queue: GDPR_DELETE_QUEUE_NAME, err: error }, "worker.error");
 });
 
 webhookWorker.on("error", (error) => {
@@ -884,6 +942,7 @@ async function shutdown(signal: string): Promise<void> {
     continuousScanProductWorker.close(),
     continuousScanCollectionWorker.close(),
     cleanupWorker.close(),
+    gdprDeleteWorker.close(),
   ]);
   await Promise.all([
     webhookConnection.quit(),
@@ -897,6 +956,7 @@ async function shutdown(signal: string): Promise<void> {
     writebackConnection.quit(),
     continuousScanConnection.quit(),
     cleanupConnection.quit(),
+    gdprDeleteConnection.quit(),
   ]);
   process.exit(0);
 }
@@ -916,6 +976,7 @@ void (async () => {
         WRITEBACK_QUEUE_NAME,
         CONTINUOUS_SCAN_QUEUE_NAME,
         CLEANUP_QUEUE_NAME,
+        GDPR_DELETE_QUEUE_NAME,
       ],
       redis: getRedisConnectionSummary(),
     },
