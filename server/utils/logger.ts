@@ -1,6 +1,9 @@
 // server/utils/logger.ts
 import { createLogger as sharedCreateLogger, rootLogger, type LogContext, type ExtendedLogger } from "../../shared/logger/index.js";
 
+// 重新导出 ExtendedLogger 类型，供 worker 层引用
+export type { ExtendedLogger } from "../../shared/logger/index.js";
+
 /* ------------------------------------------------------------------ */
 /*  代理与重新导出，以保持对旧代码的向后兼容                                   */
 /* ------------------------------------------------------------------ */

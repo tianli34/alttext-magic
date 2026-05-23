@@ -1,7 +1,7 @@
 // server/web-server.ts
 import http from "http";
 import pinoHttp from "pino-http";
-import { createRequestHandler } from "@react-router/node";
+import { createRequestListener } from "@react-router/node";
 import { rootLogger } from "../shared/logger/index.js";
 import { v4 as uuidv4 } from "uuid";
 
@@ -9,8 +9,9 @@ import { v4 as uuidv4 } from "uuid";
 // @ts-ignore
 const build = await import("../build/server/index.js");
 
-// 2. 创建 React Router 处理器
-const handleRequest = createRequestHandler(build);
+// 2. 创建 React Router 请求监听器（build 产物类型在运行时满足 ServerBuild 契约）
+// @ts-ignore
+const handleRequest = createRequestListener({ build });
 
 // 3. 配置生产环境的 pino-http 中间件
 const httpLogger = pinoHttp({
