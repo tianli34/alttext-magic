@@ -16,15 +16,15 @@ import { env } from "../../server/config/env";
 import { GenerationBatchService } from "../../server/modules/generation/generation-batch.service";
 import { ContextBuilderService } from "../../server/modules/generation/context-builder.service";
 import { GenerationCreditService } from "../../server/modules/generation/generation-credit.service";
+import { DRAFT_TTL_MS, computeExpiresAt } from "../../server/modules/generation/alt-draft-repo";
 import { TruthCheckService } from "../../server/modules/generation/truth-check.service";
 import prisma from "../../server/db/prisma.server";
 import { publishGenerationProgress } from "../../server/sse/progress-publisher";
-import { createLogger } from "../../server/utils/logger";
+import { createLogger, type ExtendedLogger } from "../../server/utils/logger";
 import type { GenerateAltJobData } from "../../server/queues/generate-alt.queue";
 import type { ContextSnapshot } from "../../server/ai/ai.types";
 
 const logger = createLogger({ module: "generate-alt-processor" });
-const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 
 const CHINESE_SHOP_ID = "cmnidr9hh0000bsttv2rx99xq";
 
@@ -69,6 +69,7 @@ async function markSkippedAlreadyFilled(
   data: GenerateAltJobData,
   candidate: CandidateWithTarget,
   currentAlt: string,
+  log: ExtendedLogger,
 ): Promise<void> {
   const updated = await prisma.altCandidate.updateMany({
     where: {
@@ -84,7 +85,7 @@ async function markSkippedAlreadyFilled(
   });
 
   if (updated.count !== 1) {
-    logger.info(
+    log.info(
       { candidateId: candidate.id, batchId: data.batchId },
       "generate-alt.skip-already-filled.idempotent-skip",
     );
@@ -122,6 +123,7 @@ async function markGenerated(
   modelUsed: string,
   contextMode: Awaited<ReturnType<typeof ContextBuilderService.buildContext>>["contextMode"],
   contextSnapshot: Awaited<ReturnType<typeof ContextBuilderService.buildContext>>["contextSnapshot"],
+  log: ExtendedLogger,
 ): Promise<void> {
   const updated = await prisma.altCandidate.updateMany({
     where: {
@@ -137,7 +139,7 @@ async function markGenerated(
   });
 
   if (updated.count !== 1) {
-    logger.info(
+    log.info(
       { candidateId: candidate.id, batchId: data.batchId },
       "generate-alt.generated.idempotent-skip",
     );
@@ -154,7 +156,7 @@ async function markGenerated(
       modelUsed,
       contextMode,
       contextSnapshot: toInputJsonObject(contextSnapshot),
-      expiresAt: new Date(Date.now() + DRAFT_TTL_MS),
+      expiresAt: computeExpiresAt(),
     },
     update: {
       batchId: data.batchId,
@@ -164,7 +166,7 @@ async function markGenerated(
       contextSnapshot: toInputJsonObject(contextSnapshot),
       editedText: null,
       finalText: null,
-      expiresAt: new Date(Date.now() + DRAFT_TTL_MS),
+      expiresAt: computeExpiresAt(),
     },
   });
 
@@ -184,6 +186,7 @@ async function markGenerationFailed(
   data: GenerateAltJobData,
   candidate: CandidateWithTarget,
   error: AIGenerationError,
+  log: ExtendedLogger,
 ): Promise<void> {
   const updated = await prisma.altCandidate.updateMany({
     where: {
@@ -199,7 +202,7 @@ async function markGenerationFailed(
   });
 
   if (updated.count !== 1) {
-    logger.info(
+    log.info(
       { candidateId: candidate.id, batchId: data.batchId },
       "generate-alt.failed.idempotent-skip",
     );
@@ -239,11 +242,18 @@ async function persistModelCalls(
 }
 
 export async function processGenerateAltJob(data: GenerateAltJobData): Promise<void> {
+  const jobLogger = logger.withContext({
+    batch_id: data.batchId,
+    alt_plane: data.altPlane,
+    job_item_id: data.candidateId,
+    write_target_id: data.shopifyImageId,
+  });
+
   const candidate = await loadCandidate(data);
 
   if (TERMINAL_STATUSES.has(candidate.status)) {
-    logger.info(
-      { candidateId: data.candidateId, batchId: data.batchId, status: candidate.status },
+    jobLogger.info(
+      { candidateId: data.candidateId, status: candidate.status },
       "generate-alt.terminal-skip",
     );
     await publishGenerationProgress(data.batchId);
@@ -251,8 +261,8 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
   }
 
   if (!PROCESSABLE_STATUS_SET.has(candidate.status)) {
-    logger.info(
-      { candidateId: data.candidateId, batchId: data.batchId, status: candidate.status },
+    jobLogger.info(
+      { candidateId: data.candidateId, status: candidate.status },
       "generate-alt.non-processable-skip",
     );
     await publishGenerationProgress(data.batchId);
@@ -268,7 +278,7 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
     });
 
     if (!truth.isEmpty) {
-      await markSkippedAlreadyFilled(data, candidate, truth.currentAlt ?? "");
+      await markSkippedAlreadyFilled(data, candidate, truth.currentAlt ?? "", jobLogger);
       return;
     }
 
@@ -297,6 +307,11 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
       );
     }
 
+    const successLogger = jobLogger.withContext({
+      model_used: raw.modelUsed,
+      context_mode: contextMode,
+    });
+
     await markGenerated(
       data,
       candidate,
@@ -304,16 +319,26 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
       raw.modelUsed,
       contextMode,
       contextSnapshot,
+      successLogger,
     );
   } catch (error) {
     if (error instanceof AIGenerationError) {
       if (error.modelCalls) {
         await persistModelCalls(data, error.modelCalls);
       }
-      await markGenerationFailed(data, candidate, error);
+      
+      const failedLogger = jobLogger.withContext({
+        error_code: error.name,
+        error_message: error.message,
+      });
+      await markGenerationFailed(data, candidate, error, failedLogger);
       return;
     }
 
+    const failedLogger = jobLogger.withContext({
+      error_code: error instanceof Error ? error.name : "UNKNOWN_ERROR",
+      error_message: error instanceof Error ? error.message : String(error),
+    });
     // 非 AIGenerationError 兜底：标记失败而非抛出，避免候选人卡在 GENERATING
     await markGenerationFailed(
       data,
@@ -322,6 +347,7 @@ export async function processGenerateAltJob(data: GenerateAltJobData): Promise<v
         error instanceof Error ? error.message : "生成过程未知错误",
         error,
       ),
+      failedLogger,
     );
     return;
   } finally {

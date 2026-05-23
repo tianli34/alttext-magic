@@ -163,6 +163,10 @@ export async function trySubmitNextBatch(
     return null;
   }
 
+  const jobLogger = logger.withContext({
+    batch_id: scanJobId,
+  });
+
   const ownerToken = `${scanJobId}:${randomUUID()}`;
   const lockAcquired = await scanStartServiceDependencies.acquireBulkSlotLock(
     scanJob.shopId,
@@ -171,8 +175,8 @@ export async function trySubmitNextBatch(
   );
 
   if (!lockAcquired) {
-    logger.info(
-      { scanJobId, shopId: scanJob.shopId },
+    jobLogger.info(
+      { shopId: scanJob.shopId },
       "scan-start.try-submit-lock-skipped",
     );
     return createEmptySubmitResult(scanJobId, scanJob.shopId, 0, false);
@@ -183,8 +187,8 @@ export async function trySubmitNextBatch(
       scanJob.shopId,
     );
     if (availableSlots <= 0) {
-      logger.info(
-        { scanJobId, shopId: scanJob.shopId },
+      jobLogger.info(
+        { shopId: scanJob.shopId },
         "scan-start.no-available-slots",
       );
       return createEmptySubmitResult(scanJobId, scanJob.shopId, 0, true);
@@ -211,9 +215,8 @@ export async function trySubmitNextBatch(
     const summary = summarizeSubmitResults(results);
     await scanStartServiceDependencies.finalizeScanJobIfTerminal(scanJobId);
 
-    logger.info(
+    jobLogger.info(
       {
-        scanJobId,
         shopId: scanJob.shopId,
         availableSlots,
         selectedTaskCount: pendingTasks.length,
@@ -256,9 +259,13 @@ export async function handleBulkOperationsFinishWebhook(input: {
     input.shopDomain,
   );
 
+  const webhookLogger = logger.withContext({
+    shop_domain: input.shopDomain,
+  });
+
   if (!shop) {
-    logger.warn(
-      { shopDomain: input.shopDomain },
+    webhookLogger.warn(
+      { payload },
       "scan-start.bulk-finish-shop-not-found",
     );
     return;
@@ -288,7 +295,7 @@ export async function handleBulkOperationsFinishWebhook(input: {
       normalizedStatus === "COMPLETED" ? null : "Bulk operation finished with terminal error",
   });
 
-  logger.info(
+  webhookLogger.info(
     {
       shopId: shop.id,
       bulkOperationId: payload.admin_graphql_api_id,
@@ -303,6 +310,10 @@ export async function handleBulkOperationsFinishWebhook(input: {
   if (!completion) {
     return;
   }
+
+  const completeLogger = webhookLogger.withContext({
+    batch_id: completion.scanJobId,
+  });
 
   if (completion.shouldEnqueueParse) {
     await scanStartServiceDependencies.enqueueParseBulkToStaging({

@@ -69,6 +69,7 @@ import {
 import { registerFreeMonthlyGrantScheduler } from "./schedulers/free-monthly-grant.scheduler.js";
 import { registerReservationReaperScheduler } from "./schedulers/reservation-reaper.scheduler.js";
 import { registerBillingSyncScheduler } from "./schedulers/billing-sync.scheduler.js";
+import { withJobLogger } from "./utils/job-logger.js";
 
 const logger = createLogger({ module: "worker-runtime" });
 const webhookConnection = createRedisConnection();
@@ -104,7 +105,9 @@ scanTimeoutSweepInterval.unref();
 const webhookWorker = new Worker<WebhookQueueJobData>(
   WEBHOOK_QUEUE_NAME,
   async (job) => {
-    await processWebhookEvent(job.data.webhookEventId);
+    await withJobLogger(job, async () => {
+      await processWebhookEvent(job.data.webhookEventId);
+    });
   },
   {
     connection: webhookConnection,
@@ -115,7 +118,9 @@ const webhookWorker = new Worker<WebhookQueueJobData>(
 const scanStartWorker = new Worker<ScanStartJobData>(
   SCAN_START_QUEUE_NAME,
   async (job) => {
-    await processScanStartJob(job.data.scanJobId);
+    await withJobLogger(job, async () => {
+      await processScanStartJob(job.data.scanJobId);
+    });
   },
   {
     connection: scanStartConnection,
@@ -126,7 +131,9 @@ const scanStartWorker = new Worker<ScanStartJobData>(
 const parseBulkWorker = new Worker<ParseBulkJobData>(
   PARSE_BULK_QUEUE_NAME,
   async (job) => {
-    await processParseBulkJob(job.data);
+    await withJobLogger(job, async () => {
+      await processParseBulkJob(job.data);
+    });
   },
   {
     connection: parseBulkConnection,
@@ -137,7 +144,9 @@ const parseBulkWorker = new Worker<ParseBulkJobData>(
 const deriveScanWorker = new Worker<DeriveScanJobData>(
   DERIVE_SCAN_QUEUE_NAME,
   async (job) => {
-    await processDeriveScanJob(job.data);
+    await withJobLogger(job, async () => {
+      await processDeriveScanJob(job.data);
+    });
   },
   {
     connection: deriveScanConnection,
@@ -148,7 +157,9 @@ const deriveScanWorker = new Worker<DeriveScanJobData>(
 const publishScanWorker = new Worker<PublishScanJobData>(
   PUBLISH_SCAN_QUEUE_NAME,
   async (job) => {
-    await processPublishScanJob(job.data);
+    await withJobLogger(job, async () => {
+      await processPublishScanJob(job.data);
+    });
   },
   {
     connection: publishScanConnection,
@@ -159,7 +170,9 @@ const publishScanWorker = new Worker<PublishScanJobData>(
 const billingSyncWorker = new Worker<BillingSyncJobData>(
   BILLING_SYNC_QUEUE_NAME,
   async (job) => {
-    await processBillingSyncJob(job.data);
+    await withJobLogger(job, async () => {
+      await processBillingSyncJob(job.data);
+    });
   },
   {
     connection: billingSyncConnection,
@@ -170,7 +183,9 @@ const billingSyncWorker = new Worker<BillingSyncJobData>(
 const quotaGrantWorker = new Worker<QuotaGrantJobData>(
   QUOTA_GRANT_QUEUE_NAME,
   async (job) => {
-    await processQuotaGrantJob(job.data);
+    await withJobLogger(job, async () => {
+      await processQuotaGrantJob(job.data);
+    });
   },
   {
     connection: quotaGrantConnection,
@@ -181,7 +196,9 @@ const quotaGrantWorker = new Worker<QuotaGrantJobData>(
 const reservationReaperWorker = new Worker<ReservationReaperJobData>(
   RESERVATION_REAPER_QUEUE_NAME,
   async (job) => {
-    await processReservationReaperJob(job.data);
+    await withJobLogger(job, async () => {
+      await processReservationReaperJob(job.data);
+    });
   },
   {
     connection: reservationReaperConnection,
@@ -192,7 +209,9 @@ const reservationReaperWorker = new Worker<ReservationReaperJobData>(
 const generateAltWorker = new Worker<GenerateAltJobData>(
   GENERATE_ALT_QUEUE_NAME,
   async (job) => {
-    await processGenerateAltJob(job.data);
+    await withJobLogger(job, async () => {
+      await processGenerateAltJob(job.data);
+    });
   },
   {
     connection: generateAltConnection,
@@ -203,7 +222,9 @@ const generateAltWorker = new Worker<GenerateAltJobData>(
 const writebackWorker = new Worker<WritebackJobData>(
   WRITEBACK_QUEUE_NAME,
   async (job) => {
-    await processWritebackJob(job.data);
+    await withJobLogger(job, async () => {
+      await processWritebackJob(job.data);
+    });
   },
   {
     connection: writebackConnection,
@@ -217,7 +238,9 @@ const continuousScanDebounceWorker = new Worker<
   CONTINUOUS_SCAN_QUEUE_NAME,
   async (job) => {
     if (job.name !== JOB_DEBOUNCE) return;
-    await processContinuousScanDebounceJob(job.data as ContinuousScanDebouncePayload);
+    await withJobLogger(job, async () => {
+      await processContinuousScanDebounceJob(job.data as ContinuousScanDebouncePayload);
+    });
   },
   {
     connection: continuousScanConnection,
@@ -231,7 +254,9 @@ const continuousScanProductWorker = new Worker<
   CONTINUOUS_SCAN_QUEUE_NAME,
   async (job) => {
     if (job.name !== JOB_PRODUCT) return;
-    await processContinuousScanProductJob(job as Job<ContinuousScanProductPayload>);
+    await withJobLogger(job, async () => {
+      await processContinuousScanProductJob(job as Job<ContinuousScanProductPayload>);
+    });
   },
   {
     connection: continuousScanConnection,
@@ -245,7 +270,9 @@ const continuousScanCollectionWorker = new Worker<
   CONTINUOUS_SCAN_QUEUE_NAME,
   async (job) => {
     if (job.name !== JOB_COLLECTION) return;
-    await processContinuousScanCollectionJob(job as Job<ContinuousScanCollectionPayload>);
+    await withJobLogger(job, async () => {
+      await processContinuousScanCollectionJob(job as Job<ContinuousScanCollectionPayload>);
+    });
   },
   {
     connection: continuousScanConnection,

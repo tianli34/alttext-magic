@@ -1,6 +1,9 @@
 import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig, type UserConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
+import pinoHttp from "pino-http";
+import { rootLogger } from "./shared/logger/index.js";
+import { v4 as uuidv4 } from "uuid";
 
 if (
   process.env.HOST &&
@@ -46,6 +49,33 @@ export default defineConfig({
   plugins: [
     reactRouter(),
     tsconfigPaths(),
+    {
+      name: "vite-pino-http-logger",
+      configureServer(server) {
+        const httpLogger = pinoHttp({
+          logger: rootLogger,
+          genReqId(req, res) {
+            const id = req.headers["x-request-id"] || req.headers["x-shopify-request-id"] || uuidv4();
+            if (res) {
+              res.setHeader("x-request-id", id);
+            }
+            return id;
+          },
+          customProps(req) {
+            const url = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
+            const shopDomain = url.searchParams.get("shop") || req.headers["x-shopify-shop-domain"] || undefined;
+            return {
+              request_id: req.id,
+              shop_domain: shopDomain,
+            };
+          },
+        });
+
+        server.middlewares.use((req, res, next) => {
+          httpLogger(req, res, next);
+        });
+      },
+    },
   ],
   build: {
     assetsInlineLimit: 0,

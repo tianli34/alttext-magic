@@ -8,7 +8,7 @@
     "dev:all": "npm-run-all2 --parallel dev:web dev:worker",
     "build": "react-router build",
     "build:worker": "tsc --project tsconfig.worker.json",
-    "start": "react-router-serve ./build/server/index.js",
+    "start": "node ./dist-worker/server/web-server.js",
     "start:worker": "node ./dist-worker/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",

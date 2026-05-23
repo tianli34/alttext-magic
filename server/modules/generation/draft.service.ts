@@ -90,6 +90,7 @@ function createPrismaDataAccess(): DraftUpdateDataAccess {
           shopId: true,
           status: true,
           draft: {
+            where: { expiresAt: { gt: new Date() } },
             select: { id: true, editedText: true, updatedAt: true },
           },
         },

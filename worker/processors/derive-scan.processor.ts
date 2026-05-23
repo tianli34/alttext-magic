@@ -112,7 +112,13 @@ export async function processDeriveScanJob(
 ): Promise<void> {
   const { shopId, scanJobId, scanTaskId, scanTaskAttemptId } = data;
 
-  logger.info(
+  const jobLogger = logger.withContext({
+    shop_domain: shopId,
+    batch_id: scanJobId,
+    job_item_id: scanTaskAttemptId,
+  });
+
+  jobLogger.info(
     { shopId, scanTaskId, scanTaskAttemptId },
     "derive-scan.start",
   );
@@ -134,7 +140,7 @@ export async function processDeriveScanJob(
         await deriveProcessorDependencies.getTaskSuccessfulAttemptId(scanTaskId);
 
       if (successfulAttemptId !== scanTaskAttemptId) {
-        logger.warn(
+        jobLogger.warn(
           {
             shopId,
             scanJobId,
@@ -180,7 +186,7 @@ export async function processDeriveScanJob(
       await deriveProcessorDependencies.releaseLockByType(shopId, "SCAN");
     }
 
-    logger.info(
+    jobLogger.info(
       {
         shopId,
         scanJobId,

@@ -266,6 +266,7 @@ const prismaDataAccess: ReviewListDataAccess = {
           },
         },
         draft: {
+          where: { expiresAt: { gt: new Date() } },
           select: {
             generatedText: true,
             editedText: true,

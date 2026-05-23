@@ -133,7 +133,9 @@ export async function startWriteback(
           decorativeMark: true,
         },
       },
-      draft: true,
+      draft: {
+        where: { expiresAt: { gt: new Date() } },
+      },
     },
   });
 

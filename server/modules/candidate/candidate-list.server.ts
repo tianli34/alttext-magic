@@ -245,6 +245,7 @@ export function buildCandidateListQuery(
     LEFT JOIN alt_draft AS alt_draft
       ON alt_draft.alt_candidate_id = cgp.alt_candidate_id
       AND alt_draft.shop_id = cgp.shop_id
+      AND alt_draft.expires_at > NOW()
     LEFT JOIN decorative_mark AS decorative_mark
       ON decorative_mark.alt_target_id = cgp.alt_target_id
       AND decorative_mark.shop_id = cgp.shop_id

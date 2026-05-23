@@ -187,6 +187,7 @@ const prismaDecorativeMarkDataAccess: DecorativeMarkDataAccess = {
           select: { groupType: true },
         },
         draft: {
+          where: { expiresAt: { gt: new Date() } },
           select: { id: true },
         },
       },
@@ -271,6 +272,7 @@ const prismaDecorativeMarkDataAccess: DecorativeMarkDataAccess = {
           select: { groupType: true },
         },
         draft: {
+          where: { expiresAt: { gt: new Date() } },
           select: { id: true },
         },
       },

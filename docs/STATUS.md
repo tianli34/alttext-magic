@@ -12,3 +12,6 @@
 
 ## Phase 9：设置、清理与运维收尾
 - Task 9.0:`shared/logger/` 占位；`cleanup`/`gdpr-delete`/`lock-reaper` 三个 Queue 名常量及桩声明完成
+- Task 9.1: `GET /api/settings` 返回 scope/plan/helpLinks；`PUT /api/settings/scopes` 更新 scan_scope_flags 不触发扫描；完整 Settings 页面（scope 复选框+计划卡片+帮助链接+保存按钮+toast）
+- Task 9.10: `altDraftRepo` + `findActive*` 方法封装 `expiresAt > NOW()` 过滤；所有 7 处 draft read（candidate-list/review-list/draft.service/writeback.processor/writeback.service/decorative-mark×2）已统一过滤；processor 改用共享 `computeExpiresAt()`；migration 含历史回填
+- Task 9.7: 实现 `shared/logger/` 结构化日志库，挂载 Web 端 `pino-http` 日志拦截与 Worker 端 `withJobLogger` 任务包装，并规范化了全部 6 个核心处理器的日志字段输出。

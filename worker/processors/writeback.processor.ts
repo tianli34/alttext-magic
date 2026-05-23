@@ -24,7 +24,7 @@ import type {
   WritebackResult,
 } from "../../server/modules/writeback/writeback.types";
 import type { WritebackJobData } from "../../server/queues/writeback.queue";
-import { createLogger } from "../../server/utils/logger";
+import { createLogger, type ExtendedLogger } from "../../server/utils/logger";
 
 const logger = createLogger({ module: "writeback-processor" });
 
@@ -81,12 +81,17 @@ export async function processWritebackJob(
 ): Promise<void> {
   const candidate = await loadCandidate(data, dependencies.prisma);
 
+  const jobLogger = logger.withContext({
+    batch_id: data.batchId,
+    alt_plane: candidate.altTarget.altPlane,
+    job_item_id: candidate.id,
+    write_target_id: candidate.altTarget.writeTargetId,
+  });
+
   if (!PROCESSABLE_STATUS_SET.has(candidate.status)) {
-    logger.info(
+    jobLogger.info(
       {
         shopId: data.shopId,
-        batchId: data.batchId,
-        candidateId: data.candidateId,
         status: candidate.status,
       },
       "writeback.non-processable-skip",
@@ -96,8 +101,8 @@ export async function processWritebackJob(
 
   const claimed = await claimJobItem(data, dependencies.prisma);
   if (!claimed) {
-    logger.info(
-      { shopId: data.shopId, batchId: data.batchId, candidateId: data.candidateId },
+    jobLogger.info(
+      { shopId: data.shopId },
       "writeback.job-item-terminal-skip",
     );
     return;
@@ -111,8 +116,8 @@ export async function processWritebackJob(
   });
 
   if (!truth.isEmpty) {
-    await markSkippedAlreadyFilled(data, candidate, truth.currentAlt ?? "", dependencies);
-    await finalizeBatchIfComplete(data, dependencies);
+    await markSkippedAlreadyFilled(data, candidate, truth.currentAlt ?? "", jobLogger, dependencies);
+    await finalizeBatchIfComplete(data, jobLogger, dependencies);
     return;
   }
 
@@ -126,18 +131,19 @@ export async function processWritebackJob(
   });
 
   if (result.success) {
-    await markWritten(data, candidate, altText, truth.currentAlt, dependencies);
-    await finalizeBatchIfComplete(data, dependencies);
+    await markWritten(data, candidate, altText, truth.currentAlt, jobLogger, dependencies);
+    await finalizeBatchIfComplete(data, jobLogger, dependencies);
     return;
   }
 
-  await markWritebackJobFailed(data, result.error, dependencies);
-  await finalizeBatchIfComplete(data, dependencies);
+  await markWritebackJobFailed(data, result.error, jobLogger, dependencies);
+  await finalizeBatchIfComplete(data, jobLogger, dependencies);
 }
 
 export async function markWritebackJobFailed(
   data: WritebackJobData,
   errorMessage: string,
+  log: ExtendedLogger = logger,
   dependencies: WritebackProcessorDependencies = defaultDependencies,
 ): Promise<void> {
   const message = truncateError(errorMessage);
@@ -178,12 +184,11 @@ export async function markWritebackJobFailed(
     });
   });
 
-  logger.error(
+  log.error(
     {
       shopId: data.shopId,
-      batchId: data.batchId,
-      candidateId: data.candidateId,
-      error: message,
+      error_code: "WRITEBACK_FAILED",
+      error_message: message,
     },
     "writeback.failed",
   );
@@ -191,6 +196,7 @@ export async function markWritebackJobFailed(
 
 export async function finalizeBatchIfComplete(
   data: Pick<WritebackJobData, "shopId" | "batchId" | "lockId">,
+  log: ExtendedLogger = logger,
   dependencies: WritebackProcessorDependencies = defaultDependencies,
 ): Promise<void> {
   const batch = await dependencies.prisma.jobBatch.findUnique({
@@ -225,10 +231,9 @@ export async function finalizeBatchIfComplete(
 
   await dependencies.releaseLock(data.shopId, data.lockId);
 
-  logger.info(
+  log.info(
     {
       shopId: data.shopId,
-      batchId: data.batchId,
       status,
       total: batch.total,
       success: batch.success,
@@ -250,7 +255,9 @@ async function loadCandidate(
     },
     include: {
       altTarget: true,
-      draft: true,
+      draft: {
+        where: { expiresAt: { gt: new Date() } },
+      },
     },
   });
 
@@ -343,6 +350,7 @@ async function markSkippedAlreadyFilled(
   data: WritebackJobData,
   candidate: CandidateForWriteback,
   currentAlt: string,
+  log: ExtendedLogger,
   dependencies: WritebackProcessorDependencies,
 ): Promise<void> {
   await dependencies.prisma.$transaction(async (tx) => {
@@ -388,11 +396,9 @@ async function markSkippedAlreadyFilled(
     });
   });
 
-  logger.info(
+  log.info(
     {
       shopId: data.shopId,
-      batchId: data.batchId,
-      candidateId: data.candidateId,
     },
     "跳过，商家已手动补 Alt",
   );
@@ -403,6 +409,7 @@ async function markWritten(
   candidate: CandidateForWriteback,
   altText: string,
   oldAltText: string | null,
+  log: ExtendedLogger,
   dependencies: WritebackProcessorDependencies,
 ): Promise<void> {
   const writtenAt = dependencies.now();
@@ -487,11 +494,9 @@ async function markWritten(
     });
   });
 
-  logger.info(
+  log.info(
     {
       shopId: data.shopId,
-      batchId: data.batchId,
-      candidateId: data.candidateId,
     },
     "writeback.written",
   );

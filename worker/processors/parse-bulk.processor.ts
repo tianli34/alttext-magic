@@ -203,7 +203,13 @@ export async function processParseBulkJob(
 ): Promise<void> {
   const { shopId, scanJobId, scanTaskId, scanTaskAttemptId } = data;
 
-  logger.info({ shopId, scanTaskId, scanTaskAttemptId }, "parse-bulk.start");
+  const jobLogger = logger.withContext({
+    shop_domain: shopId,
+    batch_id: scanJobId,
+    job_item_id: scanTaskAttemptId,
+  });
+
+  jobLogger.info({ shopId, scanTaskId, scanTaskAttemptId }, "parse-bulk.start");
 
   // 1. 读取 attempt 信息，获取 bulkResultUrl 和 resourceType
   const attempt = await parseBulkProcessorDependencies.findAttempt(scanTaskAttemptId);
@@ -216,7 +222,7 @@ export async function processParseBulkJob(
     attempt.status === "SUCCESS" &&
     attempt.scanTask.successfulAttemptId === scanTaskAttemptId
   ) {
-    logger.warn(
+    jobLogger.warn(
       {
         attemptId: scanTaskAttemptId,
         status: attempt.status,
@@ -236,7 +242,7 @@ export async function processParseBulkJob(
       scanTaskAttemptId,
     });
 
-    logger.info(
+    jobLogger.info(
       { shopId, scanTaskId, scanTaskAttemptId },
       "parse-bulk.derive-reenqueued",
     );
@@ -245,7 +251,7 @@ export async function processParseBulkJob(
   }
 
   if (attempt.status !== "READY_TO_PARSE") {
-    logger.warn(
+    jobLogger.warn(
       {
         attemptId: scanTaskAttemptId,
         status: attempt.status,
@@ -297,7 +303,7 @@ export async function processParseBulkJob(
       finishedAt,
     });
 
-    logger.info(
+    jobLogger.info(
       { shopId, scanTaskId, scanTaskAttemptId, resourceType, parsedRows },
       "parse-bulk.success",
     );
@@ -310,7 +316,7 @@ export async function processParseBulkJob(
       scanTaskAttemptId,
     });
 
-    logger.info(
+    jobLogger.info(
       { shopId, scanTaskId, scanTaskAttemptId },
       "parse-bulk.derive-enqueued",
     );
@@ -325,7 +331,7 @@ export async function processParseBulkJob(
       finishedAt,
     });
 
-    logger.error(
+    jobLogger.error(
       {
         shopId,
         scanJobId,
@@ -353,7 +359,7 @@ export async function processParseBulkJob(
         scanTaskId,
       );
 
-      logger.warn(
+      jobLogger.warn(
         {
           shopId,
           scanJobId,

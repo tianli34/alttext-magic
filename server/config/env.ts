@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 import dotenv from "dotenv";
 
 // 在最早期加载 .env
@@ -84,6 +84,7 @@ const envSchema = z.object({
 
   // ── Logging ──────────────────────────────────────────────
   LOG_LEVEL: LogLevel.default("info"),
+  LOG_FORMAT: z.enum(["json", "pretty"]).default("pretty"),
 
   // ── Billing Adapter ─────────────────────────────────────
   BILLING_ADAPTER: z
@@ -161,6 +162,11 @@ const envSchema = z.object({
     .positive()
     .max(5)
     .default(3),
+
+  // ── Settings / Help Links ──────────────────────────────
+  SETTINGS_HELP_FAQ_URL: z.string().url().optional(),
+  SETTINGS_HELP_CONTACT_URL: z.string().url().optional(),
+  SETTINGS_HELP_DOCS_URL: z.string().url().optional(),
 });
 
 /**

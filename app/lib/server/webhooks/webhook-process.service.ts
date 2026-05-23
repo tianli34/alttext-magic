@@ -29,9 +29,14 @@ export async function processWebhookEvent(webhookEventId: string): Promise<void>
     return;
   }
 
+  const jobLogger = logger.withContext({
+    shop_domain: event.shopDomain,
+    job_item_id: event.id,
+  });
+
   // 已处理或已合并的事件跳过
   if (event.status === "PROCESSED" || event.coalescedIntoEventId) {
-    logger.info(
+    jobLogger.info(
       { webhookEventId, status: event.status },
       "webhook.process.skipped",
     );
@@ -50,7 +55,7 @@ export async function processWebhookEvent(webhookEventId: string): Promise<void>
   });
 
   try {
-    await dispatchByTopic(event);
+    await dispatchByTopic(event, jobLogger);
 
     await prisma.webhookEvent.update({
       where: { id: webhookEventId },
@@ -60,7 +65,7 @@ export async function processWebhookEvent(webhookEventId: string): Promise<void>
       },
     });
 
-    logger.info(
+    jobLogger.info(
       { webhookEventId, topic: event.topic },
       "webhook.process.completed",
     );
@@ -76,8 +81,8 @@ export async function processWebhookEvent(webhookEventId: string): Promise<void>
       },
     });
 
-    logger.error(
-      { webhookEventId, topic: event.topic, err: error },
+    jobLogger.error(
+      { webhookEventId, topic: event.topic, err: error, error_code: "WEBHOOK_PROCESS_FAILED", error_message: message },
       "webhook.process.failed",
     );
 
@@ -89,10 +94,10 @@ export async function processWebhookEvent(webhookEventId: string): Promise<void>
  * 根据 topic 分发到对应业务处理器。
  * TODO: 接入各业务模块（scan-continuous / gdpr / scope-update 等）
  */
-async function dispatchByTopic(event: WebhookEvent): Promise<void> {
+async function dispatchByTopic(event: WebhookEvent, log: typeof logger): Promise<void> {
   const normalizedTopic = event.topic.toUpperCase().replace(/\//g, "_");
 
-  logger.info(
+  log.info(
     {
       webhookEventId: event.id,
       topic: event.topic,
@@ -111,7 +116,7 @@ async function dispatchByTopic(event: WebhookEvent): Promise<void> {
 
   // APP_SUBSCRIPTIONS_UPDATE: 订阅状态变化 → 调用统一订阅同步服务
   if (normalizedTopic === "APP_SUBSCRIPTIONS_UPDATE") {
-    logger.info(
+    log.info(
       { webhookEventId: event.id, shopDomain: event.shopDomain },
       "webhook.process.billing-sync",
     );
