@@ -610,21 +610,23 @@ export function deriveArticleResults(input: {
 }): DeriveComputationResult {
   return {
     targets: dedupeTargets(
-      input.rows.map((row) =>
-        toTargetRecord(
-          input.shopId,
-          input.scanJobId,
-          "ARTICLE_IMAGE",
-          "ARTICLE_IMAGE_ALT",
-          {
-            writeTargetId: row.articleId,
-            previewUrl: row.imageUrl,
-            currentAltText: row.imageAltText,
-            displayTitle: row.title,
-            displayHandle: row.handle,
-          },
+      input.rows
+        .filter((row) => row.imageUrl !== null)
+        .map((row) =>
+          toTargetRecord(
+            input.shopId,
+            input.scanJobId,
+            "ARTICLE_IMAGE",
+            "ARTICLE_IMAGE_ALT",
+            {
+              writeTargetId: row.articleId,
+              previewUrl: row.imageUrl,
+              currentAltText: row.imageAltText,
+              displayTitle: row.title,
+              displayHandle: row.handle,
+            },
+          ),
         ),
-      ),
     ),
     usages: [],
     warnings: [],

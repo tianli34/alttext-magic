@@ -16,6 +16,7 @@ import { GenerationFlow } from "../components/generation/GenerationFlow";
 type GroupType = "PRODUCT_MEDIA" | "FILES" | "COLLECTION" | "ARTICLE";
 type CandidateStatus =
   | "MISSING"
+  | "PENDING"
   | "HAS_ALT"
   | "DECORATIVE_SKIPPED"
   | "GENERATION_FAILED_RETRYABLE"
@@ -25,7 +26,7 @@ type CandidateStatus =
   | "RESOLVED"
   | "NOT_FOUND"
   | "SKIPPED_ALREADY_FILLED";
-type StatusFilter = "" | "MISSING" | "HAS_ALT" | "DECORATIVE_SKIPPED";
+type StatusFilter = "" | "PENDING" | "GENERATED" | "HAS_ALT" | "DECORATIVE_SKIPPED";
 type ContextMode = "SHARED" | "SINGLE" | string;
 
 interface DashboardGroup {
@@ -34,6 +35,8 @@ interface DashboardGroup {
   hasAlt: number;
   missing: number;
   decorative: number;
+  pending: number;
+  generated: number;
 }
 
 interface DashboardResponse {
@@ -99,13 +102,15 @@ const GROUP_LABELS: Record<GroupType, string> = {
 
 const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "", label: "All" },
-  { value: "MISSING", label: "Missing" },
+  { value: "PENDING", label: "Pending" },
+  { value: "GENERATED", label: "Generated" },
   { value: "HAS_ALT", label: "Has Alt" },
   { value: "DECORATIVE_SKIPPED", label: "Decorative" },
 ];
 
 const STATUS_LABELS: Record<CandidateStatus, string> = {
   MISSING: "Missing",
+  PENDING: "Pending",
   HAS_ALT: "Has Alt",
   DECORATIVE_SKIPPED: "Decorative",
   GENERATION_FAILED_RETRYABLE: "Generation failed",
@@ -119,13 +124,17 @@ const STATUS_LABELS: Record<CandidateStatus, string> = {
 
 /** 可选中的候选状态（用于生成 Alt Text） */
 const SELECTABLE_STATUSES: ReadonlySet<CandidateStatus> = new Set([
+  "PENDING",
   "MISSING",
   "GENERATION_FAILED_RETRYABLE",
 ]);
 
 function normalizeStatusFilter(value: string | null): StatusFilter {
+  if (value === "ALL") return "";
+
   if (
-    value === "MISSING" ||
+    value === "PENDING" ||
+    value === "GENERATED" ||
     value === "HAS_ALT" ||
     value === "DECORATIVE_SKIPPED"
   ) {
@@ -136,7 +145,7 @@ function normalizeStatusFilter(value: string | null): StatusFilter {
     return "DECORATIVE_SKIPPED";
   }
 
-  return "";
+  return "PENDING";
 }
 
 function isGroupType(value: string | null): value is GroupType {
@@ -149,7 +158,7 @@ function isGroupType(value: string | null): value is GroupType {
 }
 
 function getStatusToneClass(status: CandidateStatus): string {
-  if (status === "MISSING") return styles.badgeCritical;
+  if (status === "MISSING" || status === "PENDING") return styles.badgeCritical;
   if (status === "HAS_ALT") return styles.badgeSuccess;
   if (status === "DECORATIVE_SKIPPED") return styles.badgeCaution;
   return "";
@@ -279,7 +288,7 @@ export default function AppCandidatesPage() {
       else params.delete("group");
 
       if (status) params.set("status", status);
-      else params.delete("status");
+      else params.set("status", "ALL");
 
       setSearchParams(params);
       setExpandedId(null);
@@ -343,6 +352,22 @@ export default function AppCandidatesPage() {
 
   const groupOptions = useMemo(() => groups, [groups]);
 
+  /** 按当前筛选的 group 汇总各状态计数 */
+  const filterCounts = useMemo(() => {
+    const activeGroups = selectedGroup
+      ? groups.filter((g) => g.groupType === selectedGroup)
+      : groups;
+    const sum = (...keys: Array<"total" | "hasAlt" | "missing" | "decorative" | "pending" | "generated">) =>
+      keys.reduce((s, key) => s + activeGroups.reduce((sg, g) => sg + g[key], 0), 0);
+    return {
+      all: sum("total"),
+      pending: sum("pending"),
+      generated: sum("generated"),
+      hasAlt: sum("hasAlt"),
+      decorative: sum("decorative"),
+    };
+  }, [groups, selectedGroup]);
+
   const handleLoadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
 
@@ -380,11 +405,8 @@ export default function AppCandidatesPage() {
       }));
 
       try {
-        const params = new URLSearchParams();
-        if (selectedGroup) params.set("group", selectedGroup);
-        const query = params.toString();
         const response = await fetch(
-          `/api/candidates/${encodeURIComponent(item.altCandidateId)}/usages${query ? `?${query}` : ""}`,
+          `/api/candidates/${encodeURIComponent(item.altCandidateId)}/usages`,
         );
 
         if (!response.ok) {
@@ -407,7 +429,7 @@ export default function AppCandidatesPage() {
         }));
       }
     },
-    [expandedId, selectedGroup, usageByCandidateId],
+    [expandedId, usageByCandidateId],
   );
 
   /* ---- Toast helper ---- */
@@ -454,7 +476,7 @@ export default function AppCandidatesPage() {
         setItems((current) =>
           current.map((i) =>
             i.altCandidateId === item.altCandidateId
-              ? { ...i, status: data.candidate.status }
+              ? { ...i, status: data.candidate.status as CandidateStatus }
               : i,
           ),
         );
@@ -510,7 +532,7 @@ export default function AppCandidatesPage() {
 
   // 判断是否所有可选项都已选中
   const allSelectableSelected = selectableItems.length > 0 &&
-    selectableItems.every((item) => selectedIds.has(item.id));
+    selectableItems.every((item) => selectedIds.has(item.altCandidateId));
 
   return (
     <>
@@ -539,18 +561,28 @@ export default function AppCandidatesPage() {
             <div className={styles.field}>
               <s-text tone="neutral">Status</s-text>
               <div className={styles.tabs} role="tablist" aria-label="候选状态筛选">
-                {STATUS_OPTIONS.map((option) => (
-                  <button
-                    key={option.value || "ALL"}
-                    type="button"
-                    className={`${styles.tabButton} ${
-                      selectedStatus === option.value ? styles.tabButtonActive : ""
-                    }`}
-                    onClick={() => updateFilter({ status: option.value })}
-                  >
-                    {option.label}
-                  </button>
-                ))}
+                {STATUS_OPTIONS.map((option) => {
+                  const countKey = option.value === "" ? "all"
+                    : option.value === "DECORATIVE_SKIPPED" ? "decorative"
+                    : option.value === "HAS_ALT" ? "hasAlt"
+                    : option.value.toLowerCase() as "all" | "pending" | "generated" | "hasAlt" | "decorative";
+                  const count = filterCounts[countKey];
+                  return (
+                    <button
+                      key={option.value || "ALL"}
+                      type="button"
+                      className={`${styles.tabButton} ${
+                        selectedStatus === option.value ? styles.tabButtonActive : ""
+                      }`}
+                      onClick={() => updateFilter({ status: option.value })}
+                    >
+                      {option.label}
+                      {count > 0 && (
+                        <span className={styles.tabCount}> ({count.toLocaleString("zh-CN")})</span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -695,6 +727,7 @@ export default function AppCandidatesPage() {
                       <div className={styles.rowAction}>
                         {/* 装饰性标记 / 取消标记 */}
                         {(item.status === "MISSING" ||
+                          item.status === "PENDING" ||
                           item.status === "DECORATIVE_SKIPPED") && (
                           <>
                             {confirmId === item.altCandidateId ? (
@@ -708,7 +741,7 @@ export default function AppCandidatesPage() {
                                   onClick={() =>
                                     void handleDecorativeConfirm(
                                       item,
-                                      item.status === "MISSING"
+                                      item.status === "PENDING" || item.status === "MISSING"
                                         ? "mark"
                                         : "unmark",
                                     )
@@ -739,7 +772,7 @@ export default function AppCandidatesPage() {
                               >
                                 {markingIds.has(item.altCandidateId)
                                   ? "处理中…"
-                                  : item.status === "MISSING"
+                                  : item.status === "PENDING" || item.status === "MISSING"
                                     ? "标记为装饰性"
                                     : "取消装饰性标记"}
                               </button>
@@ -775,9 +808,11 @@ export default function AppCandidatesPage() {
                                     {usage.title ?? usage.handle ?? usage.usageId}
                                   </s-link>
                                 </s-stack>
-                                <s-text tone="neutral">
-                                  {formatUsagePosition(usage.positionIndex)}
-                                </s-text>
+                                {usage.usageType === "PRODUCT" && (
+                                  <s-text tone="neutral">
+                                    {formatUsagePosition(usage.positionIndex)}
+                                  </s-text>
+                                )}
                               </div>
                             ))}
                           </div>

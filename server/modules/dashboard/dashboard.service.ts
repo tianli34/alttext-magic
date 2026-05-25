@@ -28,6 +28,8 @@ interface DashboardGroupStatsRow {
   hasAlt: number;
   missing: number;
   decorative: number;
+  pending: number;
+  generated: number;
 }
 
 export interface DashboardDataAccess {
@@ -72,7 +74,17 @@ export function buildDashboardGroupStatsQuery(
       )::integer AS "missing",
       COUNT(*) FILTER (
         WHERE decorative_mark.is_active = true
-      )::integer AS "decorative"
+      )::integer AS "decorative",
+      COUNT(*) FILTER (
+        WHERE alt_target.current_alt_empty = true
+          AND COALESCE(decorative_mark.is_active, false) = false
+          AND alt_candidate.status = ANY(ARRAY['MISSING','GENERATING','GENERATION_FAILED_RETRYABLE','NOT_FOUND']::"AltCandidateStatus"[])
+      )::integer AS "pending",
+      COUNT(*) FILTER (
+        WHERE alt_target.current_alt_empty = true
+          AND COALESCE(decorative_mark.is_active, false) = false
+          AND alt_candidate.status = ANY(ARRAY['GENERATED','WRITEBACK_FAILED_RETRYABLE']::"AltCandidateStatus"[])
+      )::integer AS "generated"
     FROM candidate_group_projection AS cgp
     JOIN alt_target AS alt_target
       ON alt_target.id = cgp.alt_target_id
@@ -81,6 +93,9 @@ export function buildDashboardGroupStatsQuery(
       ON decorative_mark.alt_target_id = cgp.alt_target_id
       AND decorative_mark.shop_id = cgp.shop_id
       AND decorative_mark.is_active = true
+    LEFT JOIN alt_candidate AS alt_candidate
+      ON alt_candidate.id = cgp.alt_candidate_id
+      AND alt_candidate.shop_id = cgp.shop_id
     WHERE cgp.shop_id = ${shopId}
       AND cgp.group_type = ANY(ARRAY[${Prisma.join(allowedGroups)}]::"CandidateGroupType"[])
     GROUP BY cgp.group_type
@@ -133,6 +148,8 @@ function normalizeGroupStatsRows(
     hasAlt: Number(row.hasAlt),
     missing: Number(row.missing),
     decorative: Number(row.decorative),
+    pending: Number(row.pending),
+    generated: Number(row.generated),
   }));
 }
 

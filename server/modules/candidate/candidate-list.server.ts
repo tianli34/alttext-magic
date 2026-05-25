@@ -22,12 +22,12 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
 export const candidateListStatusValues = [
-  "MISSING",
+  "PENDING",
+  "GENERATED",
   "GENERATING",
   "HAS_ALT",
   "DECORATIVE_SKIPPED",
   "GENERATION_FAILED_RETRYABLE",
-  "GENERATED",
   "WRITEBACK_FAILED_RETRYABLE",
   "WRITTEN",
   "RESOLVED",
@@ -35,7 +35,9 @@ export const candidateListStatusValues = [
   "SKIPPED_ALREADY_FILLED",
 ] as const;
 
-export type CandidateListStatus = (typeof candidateListStatusValues)[number];
+export type CandidateListStatus =
+  | (typeof candidateListStatusValues)[number]
+  | "MISSING";
 
 export interface CandidateListQuery {
   group?: CandidateGroupType;
@@ -169,15 +171,36 @@ function deriveStatus(row: CandidateListRow): CandidateListStatus {
   return row.candidateStatus;
 }
 
+const PENDING_STATUSES = [
+  "MISSING",
+  "GENERATING",
+  "GENERATION_FAILED_RETRYABLE",
+  "NOT_FOUND",
+] as const;
+
+const GENERATED_STATUSES = [
+  "GENERATED",
+  "WRITEBACK_FAILED_RETRYABLE",
+] as const;
+
 function buildStatusCondition(status: CandidateListStatus | undefined): Prisma.Sql {
   if (!status) {
     return Prisma.empty;
   }
 
-  if (status === "MISSING") {
+  if (status === "PENDING") {
     return Prisma.sql`
       AND alt_target.current_alt_empty = true
       AND COALESCE(decorative_mark.is_active, false) = false
+      AND alt_candidate.status = ANY(ARRAY[${Prisma.join(PENDING_STATUSES)}]::"AltCandidateStatus"[])
+    `;
+  }
+
+  if (status === "GENERATED") {
+    return Prisma.sql`
+      AND alt_target.current_alt_empty = true
+      AND COALESCE(decorative_mark.is_active, false) = false
+      AND alt_candidate.status = ANY(ARRAY[${Prisma.join(GENERATED_STATUSES)}]::"AltCandidateStatus"[])
     `;
   }
 

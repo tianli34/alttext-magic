@@ -130,7 +130,7 @@ async function run(): Promise<void> {
     const capture: { status?: string } = {};
     const data = await listCandidates(
       "shop-1",
-      { status: "MISSING" },
+      { status: "PENDING" },
       createDataAccess(
         [
           createRow({
@@ -143,7 +143,7 @@ async function run(): Promise<void> {
       ),
     );
 
-    assert.equal(capture.status, "MISSING", "MISSING 过滤条件应传入查询层");
+    assert.equal(capture.status, "PENDING", "PENDING 过滤条件应传入查询层");
     assert.equal(data.items[0].status, "MISSING");
     assert.equal(data.items[0].currentAlt, null);
   }

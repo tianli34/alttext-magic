@@ -58,6 +58,8 @@ async function run(): Promise<void> {
             hasAlt: 1,
             missing: 1,
             decorative: 1,
+            pending: 1,
+            generated: 0,
           },
           {
             groupType: CandidateGroupType.FILES,
@@ -65,6 +67,8 @@ async function run(): Promise<void> {
             hasAlt: 0,
             missing: 2,
             decorative: 0,
+            pending: 1,
+            generated: 1,
           },
         ];
       },

@@ -48,7 +48,7 @@ export function GroupStatsCard({ stats }: GroupStatsCardProps) {
   const icon = GROUP_TYPE_ICONS[stats.groupType] ?? "📊";
   const missingHref = `/app/candidates?group=${encodeURIComponent(
     stats.groupType,
-  )}&status=MISSING`;
+  )}&status=PENDING`;
 
   // 计算 hasAlt 百分比（用于进度条）
   const hasAltPercent =

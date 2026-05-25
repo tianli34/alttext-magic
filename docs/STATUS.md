@@ -22,3 +22,9 @@
 - Task 9.6: 锁超时回收 Job：`worker/jobs/lockReaper.ts` 心跳超时 30 分钟检测 + `worker/processors/lock-reaper.processor.ts` + `lock-timeout.scheduler.ts` BullMQ repeatable（每 5 分钟）；migration 新增 `shop_operation_lock(status, heartbeat_at)` 联合索引
 - Task 9.8: 关键指标埋点：`shared/logger/metrics.ts` 提供 `recordMetric(name, value, tags)`；在扫描发布、AI 生成、增量扫描 gate、写回、Reservation 5 大业务点完成埋点（17 个指标名）；`docs/phase9-metrics.md` 列出全部指标 + tags 供 Grafana 接入
 - Task 9.9: 主导航 Help 链接替换为 FAQ/联系支持/文档三个外链（新标签页）；env schema 新增 `HELP_FAQ_URL`/`SUPPORT_EMAIL`/`DOCS_URL`；`.env.example` 同步更新
+- Task 9.11: 7 项集成验收全部 PASS（`docs/phase9-acceptance.md`）
+- 候选列表: "No Alt" 筛选按钮拆分为 Pending 和 Generated 两个按钮，对应后端 `buildStatusCondition` 两支 SQL，`deriveStatus` 将 MISSING 映射为 PENDING
+- 候选列表: 修复"全选"按钮 `allSelectableSelected` 误用 `item.id` 而非 `item.altCandidateId`，使全选/全不选切换逻辑正确生效
+- 候选列表: `deriveArticleResults` 跳过无图的文章，避免空文章出现在候选列表
+- 候选列表: 默认选中 tab 由 All 改为 Pending (`normalizeStatusFilter` + `updateFilter`)
+- 候选列表: "影响范围"展开不再按 group 过滤，所有类型 usage 均展示

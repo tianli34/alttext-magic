@@ -38,6 +38,11 @@
   cursor: pointer;
 }
 
+.tabCount {
+  color: var(--p-color-text-subdued, #6d7175);
+  font-variant-numeric: tabular-nums;
+}
+
 .tabButtonActive {
   border-color: var(--p-color-border-emphasis, #1f1f21);
   background: var(--p-color-bg-fill-brand, #303030);

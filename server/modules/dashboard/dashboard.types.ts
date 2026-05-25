@@ -10,6 +10,8 @@ export interface DashboardGroupStats {
   hasAlt: number;
   missing: number;
   decorative: number;
+  pending: number;
+  generated: number;
 }
 
 export interface DashboardData {
