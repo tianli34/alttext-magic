@@ -10,6 +10,7 @@ import {
   type UsageDetailDataAccess,
   type UsageDetailUsageRow,
   type UsageDetailCandidateRow,
+  type UsageDetailProjectionRow,
 } from "../server/modules/candidate/candidate-usage.service";
 import type { ScanScopeFlags } from "../server/modules/shop/shop.types";
 
@@ -56,6 +57,10 @@ function createUsageRow(
   };
 }
 
+function nullProjection(): UsageDetailProjectionRow | null {
+  return null;
+}
+
 /** 构建数据访问层 mock，默认 product-only scope */
 function createProductOnlyDataAccess(
   candidate: UsageDetailCandidateRow | null,
@@ -78,6 +83,9 @@ function createProductOnlyDataAccess(
       capture.altTargetId = altTargetId;
       return usages;
     },
+    async getProjection() {
+      return nullProjection();
+    },
   };
 }
 
@@ -86,6 +94,7 @@ function createAllScopeDataAccess(
   candidate: UsageDetailCandidateRow | null,
   usages: UsageDetailUsageRow[],
   capture: { altTargetId?: string; called?: boolean } = {},
+  projection?: UsageDetailProjectionRow | null,
 ): UsageDetailDataAccess {
   return {
     async getCandidate() {
@@ -102,6 +111,9 @@ function createAllScopeDataAccess(
       capture.called = true;
       capture.altTargetId = altTargetId;
       return usages;
+    },
+    async getProjection() {
+      return projection ?? nullProjection();
     },
   };
 }
@@ -303,28 +315,67 @@ async function run(): Promise<void> {
     assert.equal(data.usages.length, 0, "group=FILES 但 scope 不包含 FILES 应返回空");
   }
 
-  /* ---- 10. group=COLLECTION 返回空（无 image_usage 记录） ---- */
+  /* ---- 10. group=COLLECTION 无 ImageUsage 时返回 SELF 自引用 ---- */
+  {
+    const projection: UsageDetailProjectionRow = {
+      groupType: "COLLECTION",
+      primaryUsageType: "SELF",
+      primaryUsageId: "gid://shopify/Collection/789",
+      primaryTitle: "夏季精选",
+      primaryHandle: "summer-picks",
+    };
+    const data = await listCandidateUsages(
+      "shop-1",
+      "candidate-1",
+      CandidateGroupType.COLLECTION,
+      createAllScopeDataAccess(
+        presentCandidate,
+        [createUsageRow({ usageType: ImageUsageType.PRODUCT })],
+        {},
+        projection,
+      ),
+    );
+
+    assert.equal(data.usages.length, 1, "COLLECTION group 应返回 SELF 自引用");
+    assert.equal(data.usages[0].usageType, "COLLECTION");
+    assert.equal(data.usages[0].usageId, "gid://shopify/Collection/789");
+    assert.equal(data.usages[0].title, null, "SELF 自引用不返回 title，优先展示 GID");
+    assert.equal(data.usages[0].handle, null);
+    assert.equal(data.usages[0].positionIndex, null);
+    assert.equal(
+      data.usages[0].shopifyAdminUrl,
+      "https://test-shop.myshopify.com/admin/collections/789",
+    );
+  }
+
+  /* ---- 10b. group=COLLECTION 且无 SELF projection 时仍返回空 ---- */
   {
     const data = await listCandidateUsages(
       "shop-1",
       "candidate-1",
       CandidateGroupType.COLLECTION,
-      createAllScopeDataAccess(presentCandidate, [
-        createUsageRow({ usageType: ImageUsageType.PRODUCT }),
-      ]),
+      createAllScopeDataAccess(presentCandidate, []),
     );
 
-    assert.equal(data.usages.length, 0, "COLLECTION group 无对应 usageType");
+    assert.equal(data.usages.length, 0, "无 SELF projection 时应返回空");
   }
 
   /* ---- 11. buildShopifyAdminUrl ---- */
   {
     assert.equal(
-      buildShopifyAdminUrl("shop.myshopify.com", ImageUsageType.PRODUCT, "gid://shopify/Product/789"),
+      buildShopifyAdminUrl("shop.myshopify.com", "PRODUCT", "gid://shopify/Product/789"),
       "https://shop.myshopify.com/admin/products/789",
     );
     assert.equal(
-      buildShopifyAdminUrl("shop.myshopify.com", ImageUsageType.FILE, "gid://shopify/MediaImage/456"),
+      buildShopifyAdminUrl("shop.myshopify.com", "COLLECTION", "gid://shopify/Collection/456"),
+      "https://shop.myshopify.com/admin/collections/456",
+    );
+    assert.equal(
+      buildShopifyAdminUrl("shop.myshopify.com", "ARTICLE", "gid://shopify/Article/123"),
+      "https://shop.myshopify.com/admin/articles/123",
+    );
+    assert.equal(
+      buildShopifyAdminUrl("shop.myshopify.com", "FILE", "gid://shopify/MediaImage/456"),
       "https://shop.myshopify.com/admin/settings/files",
     );
   }
@@ -340,6 +391,9 @@ async function run(): Promise<void> {
       },
       async getUsages() {
         return [];
+      },
+      async getProjection() {
+        return null;
       },
     };
 

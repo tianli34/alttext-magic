@@ -22,8 +22,8 @@ import type { ScanScopeFlags } from "../shop/shop.types";
 
 /** 单条 usage 详情 */
 export interface UsageDetail {
-  /** 使用类型（PRODUCT / FILE） */
-  usageType: ImageUsageType;
+  /** 使用类型（PRODUCT / FILE / COLLECTION / ARTICLE 等） */
+  usageType: string;
   /** Shopify 资源 GID */
   usageId: string;
   /** 资源标题 */
@@ -61,11 +61,19 @@ export interface UsageDetailShopRow {
 }
 
 export interface UsageDetailUsageRow {
-  usageType: ImageUsageType;
+  usageType: string;
   usageId: string;
   title: string | null;
   handle: string | null;
   positionIndex: number | null;
+}
+
+export interface UsageDetailProjectionRow {
+  groupType: string;
+  primaryUsageType: string;
+  primaryUsageId: string;
+  primaryTitle: string | null;
+  primaryHandle: string | null;
 }
 
 export interface UsageDetailDataAccess {
@@ -77,6 +85,10 @@ export interface UsageDetailDataAccess {
   getShop(shopId: string): Promise<UsageDetailShopRow | null>;
 
   getUsages(altTargetId: string): Promise<UsageDetailUsageRow[]>;
+
+  getProjection(
+    altCandidateId: string,
+  ): Promise<UsageDetailProjectionRow | null>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -121,12 +133,19 @@ function extractNumericId(gid: string): string {
  */
 export function buildShopifyAdminUrl(
   shopDomain: string,
-  usageType: ImageUsageType,
+  usageType: string,
   usageId: string,
 ): string {
-  if (usageType === ImageUsageType.PRODUCT) {
-    const numericId = extractNumericId(usageId);
+  const numericId = extractNumericId(usageId);
+
+  if (usageType === "PRODUCT" || usageId.startsWith("gid://shopify/Product/")) {
     return `https://${shopDomain}/admin/products/${numericId}`;
+  }
+  if (usageId.startsWith("gid://shopify/Collection/")) {
+    return `https://${shopDomain}/admin/collections/${numericId}`;
+  }
+  if (usageId.startsWith("gid://shopify/Article/")) {
+    return `https://${shopDomain}/admin/articles/${numericId}`;
   }
   return `https://${shopDomain}/admin/settings/files`;
 }
@@ -190,6 +209,19 @@ const prismaUsageDetailDataAccess: UsageDetailDataAccess = {
       ],
     });
   },
+
+  async getProjection(altCandidateId) {
+    return prisma.candidateGroupProjection.findFirst({
+      where: { altCandidateId },
+      select: {
+        groupType: true,
+        primaryUsageType: true,
+        primaryUsageId: true,
+        primaryTitle: true,
+        primaryHandle: true,
+      },
+    });
+  },
 };
 
 /* ------------------------------------------------------------------ */
@@ -240,10 +272,10 @@ export async function listCandidateUsages(
   // 5. 查询所有 PRESENT usage
   const usageRows = await dataAccess.getUsages(candidate.altTargetId);
 
-  // 6. 按 effective scope 过滤
+  // 6. 按 effective scope 过滤（仅 ImageUsageType 已知类型参与过滤）
   const scopeFiltered = usageRows.filter((usage) => {
-    const scopeFlag = USAGE_TYPE_TO_SCOPE_FLAG[usage.usageType];
-    return effectiveReadScopeFlags[scopeFlag];
+    const scopeFlag = USAGE_TYPE_TO_SCOPE_FLAG[usage.usageType as ImageUsageType];
+    return scopeFlag ? effectiveReadScopeFlags[scopeFlag] : true;
   });
 
   // 7. 可选 group 过滤
@@ -257,6 +289,23 @@ export async function listCandidateUsages(
       finalUsages = scopeFiltered.filter(
         (usage) => usage.usageType === targetUsageType,
       );
+    }
+  }
+
+  // 7.5. 若最终 usages 为空，查询 projection 补充 SELF 自引用
+  // （COLLECTION / ARTICLE 无 ImageUsage 记录，但自身位置也是"影响范围"）
+  if (finalUsages.length === 0) {
+    const projection = await dataAccess.getProjection(altCandidateId);
+    if (projection && projection.primaryUsageType === "SELF") {
+      finalUsages = [
+        {
+          usageType: projection.groupType,
+          usageId: projection.primaryUsageId,
+          title: null,
+          handle: null,
+          positionIndex: null,
+        },
+      ];
     }
   }
 

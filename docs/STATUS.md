@@ -28,3 +28,4 @@
 - 候选列表: `deriveArticleResults` 跳过无图的文章，避免空文章出现在候选列表
 - 候选列表: 默认选中 tab 由 All 改为 Pending (`normalizeStatusFilter` + `updateFilter`)
 - 候选列表: "影响范围"展开不再按 group 过滤，所有类型 usage 均展示
+- 候选列表: COLLECTION/ARTICLE 无 ImageUsage 时从 projection 注入 SELF 自引用，展开不再显示"暂无可展示的影响范围"

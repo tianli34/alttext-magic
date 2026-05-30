@@ -805,7 +805,7 @@ export default function AppCandidatesPage() {
                                 <s-stack direction="inline" gap="small">
                                   <span className={styles.badge}>{usage.usageType}</span>
                                   <s-link href={usage.shopifyAdminUrl} target="_blank">
-                                    {usage.title ?? usage.handle ?? usage.usageId}
+                                    {usage.usageId}
                                   </s-link>
                                 </s-stack>
                                 {usage.usageType === "PRODUCT" && (
