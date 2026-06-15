@@ -128,7 +128,6 @@ async function testSharedUsages() {
     assertEqual(result.contextMode, AltDraftContextMode.SHARED_NEUTRAL, "contextMode 为 SHARED_NEUTRAL");
     assertEqual(result.contextSnapshot.usageCount, 3, "snapshot 含 usageCount=3");
     assertEqual(result.contextSnapshot.resourceTitle, undefined, "无资源标题");
-    assertEqual(result.contextSnapshot.usageTypes.includes(ImageUsageType.PRODUCT), true, "usageTypes 包含 PRODUCT");
   } finally {
     teardownTest();
   }

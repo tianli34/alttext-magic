@@ -33,14 +33,10 @@ export class ContextBuilderService {
       },
     });
 
-    const usageCountPresent = usages.length;
-    const usageTypesPresent = Array.from(new Set(usages.map(u => u.usageType)));
-    
     const productUsages = usages.filter(u => u.usageType === ImageUsageType.PRODUCT);
-    const fileUsages = usages.filter(u => u.usageType === ImageUsageType.FILE);
 
-    // RESOURCE_SPECIFIC: 恰好1个PRODUCT usage，且无其他 present usage
-    if (productUsages.length === 1 && fileUsages.length === 0) {
+    // RESOURCE_SPECIFIC: 恰好 1 个商品引用
+    if (productUsages.length === 1) {
       return {
         contextMode: AltDraftContextMode.RESOURCE_SPECIFIC,
         contextSnapshot: {
@@ -52,7 +48,7 @@ export class ContextBuilderService {
       };
     }
 
-    // FILE_NEUTRAL: 仅文件库 (无 PRODUCT usage)
+    // FILE_NEUTRAL: 未被任何商品引用
     if (productUsages.length === 0) {
       return {
         contextMode: AltDraftContextMode.FILE_NEUTRAL,
@@ -62,12 +58,11 @@ export class ContextBuilderService {
       };
     }
 
-    // SHARED_NEUTRAL: 跨多个资源共享 (usageCountPresent >= 2)
+    // SHARED_NEUTRAL: 跨多个商品共享
     return {
       contextMode: AltDraftContextMode.SHARED_NEUTRAL,
       contextSnapshot: {
-        usageCount: usageCountPresent,
-        usageTypes: usageTypesPresent,
+        usageCount: productUsages.length,
         filename,
       },
     };

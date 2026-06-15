@@ -166,6 +166,7 @@ export async function getDashboardData(
       lastPublishedAt: null,
       isScanning: false,
       activeScanJobId: null,
+      scanScopeFlags: {},
     };
   }
 
@@ -192,5 +193,6 @@ export async function getDashboardData(
       : null,
     isScanning: activeScanJobId !== null,
     activeScanJobId,
+    scanScopeFlags: scanScopeFlags as Record<string, boolean>,
   };
 }

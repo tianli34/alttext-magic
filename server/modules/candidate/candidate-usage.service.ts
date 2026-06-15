@@ -96,20 +96,17 @@ export interface UsageDetailDataAccess {
 /* ------------------------------------------------------------------ */
 
 /** usageType → scope flag 映射 */
-const USAGE_TYPE_TO_SCOPE_FLAG: Record<ImageUsageType, keyof ScopeFlagState> = {
+const USAGE_TYPE_TO_SCOPE_FLAG: Partial<Record<ImageUsageType, keyof ScopeFlagState>> = {
   PRODUCT: "PRODUCT_MEDIA",
-  FILE: "FILES",
 };
 
-/** CandidateGroupType → usageType 映射（仅 PRODUCT_MEDIA / FILES 有对应 usageType） */
+/** CandidateGroupType → usageType 映射（仅 PRODUCT_MEDIA 有对应 usageType，FILES 无真实 FE usage） */
 function groupToUsageType(
   group: CandidateGroupType,
 ): ImageUsageType | null {
   switch (group) {
     case CandidateGroupType.PRODUCT_MEDIA:
       return ImageUsageType.PRODUCT;
-    case CandidateGroupType.FILES:
-      return ImageUsageType.FILE;
     default:
       return null;
   }

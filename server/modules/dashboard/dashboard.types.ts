@@ -20,5 +20,7 @@ export interface DashboardData {
   isScanning: boolean;
   /** 当前运行中的扫描任务 ID（用于导航到进度页） */
   activeScanJobId: string | null;
+  /** 用户当前配置的扫描范围 */
+  scanScopeFlags: Record<string, boolean>;
 }
 

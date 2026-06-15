@@ -518,7 +518,6 @@ export function deriveFileResults(input: {
 }): DeriveComputationResult {
   const existingByWriteTargetId = buildExistingFileTargetMap(input.existingTargets);
   const targets: DerivedTargetRecord[] = [];
-  const usages: DerivedUsageRecord[] = [];
   const warnings: DeriveWarning[] = [];
 
   for (const row of input.rows) {
@@ -552,25 +551,12 @@ export function deriveFileResults(input: {
         merged.draft,
       ),
     );
-    usages.push({
-      shopId: input.shopId,
-      scanJobId: input.scanJobId,
-      resourceType: "FILES",
-      altPlane: "FILE_ALT",
-      writeTargetId: row.mediaImageId,
-      locale: DEFAULT_LOCALE,
-      usageType: "FILE",
-      usageId: row.mediaImageId,
-      title: null,
-      handle: null,
-      positionIndex: null,
-    });
     warnings.push(...merged.warnings);
   }
 
   return {
     targets: dedupeTargets(targets),
-    usages: dedupeUsages(usages),
+    usages: [],
     warnings,
   };
 }

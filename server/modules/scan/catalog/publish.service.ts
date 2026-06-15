@@ -61,20 +61,6 @@ interface ResultTargetRow {
   currentAltEmpty: boolean;
 }
 
-interface ResultUsageRow {
-  shopId: string;
-  scanJobId: string;
-  resourceType: ScanResourceType;
-  altPlane: AltPlane;
-  writeTargetId: string;
-  locale: string;
-  usageType: ImageUsageType;
-  usageId: string;
-  title: string | null;
-  handle: string | null;
-  positionIndex: number | null;
-}
-
 export interface ImpactedTargetSummary {
   id: string;
   altPlane: AltPlane;
@@ -316,41 +302,6 @@ export async function publishScanResult(
         altTargetIdByWriteTargetId.set(target.writeTargetId, publishedTarget.id);
         impactedTargetIds.add(publishedTarget.id);
         publishedTargetCount += 1;
-      }
-
-      for (const usage of fileUsageRows.filter((row) => successfulSet.has(row.resourceType))) {
-        const altTargetId = altTargetIdByWriteTargetId.get(usage.writeTargetId);
-        if (!altTargetId) {
-          continue;
-        }
-
-        await upsertPublishedUsage(tx, {
-          ...usage,
-          altTargetId,
-          lastPublishedScanJobId: scanJob.id,
-          lastSeenAt: now,
-          lastSeenScanJobId: scanJob.id,
-          presentStatus: "PRESENT",
-        });
-        publishedUsageCount += 1;
-      }
-
-      if (successfulSet.has("FILES")) {
-        const sweptTargetIds = await sweepUsageSlice(tx, {
-          shopId: scanJob.shopId,
-          usageType: "FILE",
-          currentUsageKeys: new Set(
-            fileUsageRows
-              .filter((usage) => usage.resourceType === "FILES")
-              .map((usage) => {
-                const altTargetId = altTargetIdByWriteTargetId.get(usage.writeTargetId);
-                return altTargetId ? buildUsageSliceKey(altTargetId, usage.usageType, usage.usageId) : null;
-              })
-              .filter(isNonNull),
-          ),
-          scanJobId: scanJob.id,
-        });
-        sweptTargetIds.forEach((targetId) => impactedTargetIds.add(targetId));
       }
 
       await recomputeFileAltPresentStatus(tx, {
@@ -657,14 +608,6 @@ function buildTargetSliceKey(
   return [altPlane, writeTargetId, locale].join("::");
 }
 
-function buildUsageSliceKey(
-  altTargetId: string,
-  usageType: ImageUsageType,
-  usageId: string,
-): string {
-  return [altTargetId, usageType, usageId].join("::");
-}
-
 async function upsertPublishedTarget(
   tx: Prisma.TransactionClient,
   input: ResultTargetRow & {
@@ -712,93 +655,6 @@ async function upsertPublishedTarget(
   });
 }
 
-async function upsertPublishedUsage(
-  tx: Prisma.TransactionClient,
-  input: ResultUsageRow & {
-    altTargetId: string;
-    lastPublishedScanJobId: string;
-    lastSeenAt: Date;
-    lastSeenScanJobId: string;
-    presentStatus: PresentStatus;
-  },
-): Promise<void> {
-  await tx.imageUsage.upsert({
-    where: {
-      shopId_altTargetId_usageType_usageId: {
-        shopId: input.shopId,
-        altTargetId: input.altTargetId,
-        usageType: input.usageType,
-        usageId: input.usageId,
-      },
-    },
-    create: {
-      shopId: input.shopId,
-      altTargetId: input.altTargetId,
-      usageType: input.usageType,
-      usageId: input.usageId,
-      title: input.title,
-      handle: input.handle,
-      positionIndex: input.positionIndex,
-      lastPublishedScanJobId: input.lastPublishedScanJobId,
-      lastSeenAt: input.lastSeenAt,
-      lastSeenScanJobId: input.lastSeenScanJobId,
-      presentStatus: input.presentStatus,
-    },
-    update: {
-      title: input.title,
-      handle: input.handle,
-      positionIndex: input.positionIndex,
-      lastPublishedScanJobId: input.lastPublishedScanJobId,
-      lastSeenAt: input.lastSeenAt,
-      lastSeenScanJobId: input.lastSeenScanJobId,
-      presentStatus: input.presentStatus,
-    },
-  });
-}
-
-async function sweepUsageSlice(
-  tx: Prisma.TransactionClient,
-  input: {
-    shopId: string;
-    usageType: ImageUsageType;
-    currentUsageKeys: Set<string>;
-    scanJobId: string;
-  },
-): Promise<string[]> {
-  const existing = await tx.imageUsage.findMany({
-    where: {
-      shopId: input.shopId,
-      usageType: input.usageType,
-    },
-    select: {
-      id: true,
-      altTargetId: true,
-      usageType: true,
-      usageId: true,
-    },
-  });
-
-  const absentRows = existing.filter(
-    (row) => !input.currentUsageKeys.has(buildUsageSliceKey(row.altTargetId, row.usageType, row.usageId)),
-  );
-
-  if (absentRows.length === 0) {
-    return [];
-  }
-
-  await tx.imageUsage.updateMany({
-    where: {
-      id: { in: absentRows.map((row) => row.id) },
-    },
-    data: {
-      presentStatus: "NOT_FOUND",
-      lastPublishedScanJobId: input.scanJobId,
-    },
-  });
-
-  return [...new Set(absentRows.map((row) => row.altTargetId))];
-}
-
 async function recomputeFileAltPresentStatus(
   tx: Prisma.TransactionClient,
   input: {
@@ -813,7 +669,7 @@ async function recomputeFileAltPresentStatus(
   const usages = await tx.imageUsage.findMany({
     where: {
       altTargetId: { in: input.targetIds },
-      usageType: { in: ["PRODUCT", "FILE"] },
+      usageType: "PRODUCT",
     },
     select: {
       altTargetId: true,
@@ -1022,18 +878,14 @@ export async function rebuildTargetProjections(
     }>;
   },
 ): Promise<number> {
-  const totalUsageCount = input.presentUsages.length;
-
   if (input.target.altPlane === "FILE_ALT") {
     const productUsages = input.presentUsages
       .filter((usage) => usage.usageType === "PRODUCT")
       .sort(compareProductUsage);
-    const fileUsages = input.presentUsages
-      .filter((usage) => usage.usageType === "FILE")
-      .sort((left, right) => left.usageId.localeCompare(right.usageId));
+    const productCount = productUsages.length;
     let upsertCount = 0;
 
-    if (productUsages.length > 0) {
+    if (productCount > 0) {
       const primary = productUsages[0];
       await upsertGroupProjection(tx, {
         shopId: input.shopId,
@@ -1042,60 +894,43 @@ export async function rebuildTargetProjections(
         altCandidateId: input.altCandidateId,
         altTargetId: input.target.id,
         primaryUsageType: "PRODUCT",
-        primaryUsageId: primary?.usageId ?? input.target.writeTargetId,
-        primaryTitle: primary?.title ?? input.target.displayTitle,
-        primaryHandle: primary?.handle ?? input.target.displayHandle,
-        primaryPositionIndex: primary?.positionIndex ?? null,
-        additionalUsageCount: productUsages.length - 1,
-        usageCountPresent: totalUsageCount,
+        primaryUsageId: primary.usageId,
+        primaryTitle: primary.title ?? input.target.displayTitle,
+        primaryHandle: primary.handle ?? input.target.displayHandle,
+        primaryPositionIndex: primary.positionIndex ?? null,
+        additionalUsageCount: productCount - 1,
+        usageCountPresent: productCount,
         impactScopeSummary: {
-          productUsageCountPresent: productUsages.length,
-          fileUsageCountPresent: fileUsages.length,
+          productUsageCountPresent: productCount,
         },
       });
       upsertCount += 1;
+      // 有商品引用时，FILES 投影无意义
+      await deleteGroupProjection(tx, input.shopId, input.altCandidateId, "FILES");
     } else {
-      // [DEBUG] 诊断日志：PRODUCT_MEDIA 投影被删除（无 PRODUCT usage）
-      logger.info(
-        {
+      await deleteGroupProjection(tx, input.shopId, input.altCandidateId, "PRODUCT_MEDIA");
+
+      // 无商品引用时，以 SELF 自引用保持 FILES 分组可见
+      if (input.target.presentStatus === "PRESENT") {
+        await upsertGroupProjection(tx, {
           shopId: input.shopId,
           scanJobId: input.scanJobId,
-          altTargetId: input.target.id,
+          groupType: "FILES",
           altCandidateId: input.altCandidateId,
-          writeTargetId: input.target.writeTargetId,
-          presentStatus: input.target.presentStatus,
-          totalUsageCount,
-          productUsageCount: productUsages.length,
-          fileUsageCount: fileUsages.length,
-        },
-        "publish.product-media-projection-deleted",
-      );
-      await deleteGroupProjection(tx, input.shopId, input.altCandidateId, "PRODUCT_MEDIA");
-    }
-
-    if (fileUsages.length > 0) {
-      const primary = fileUsages[0];
-      await upsertGroupProjection(tx, {
-        shopId: input.shopId,
-        scanJobId: input.scanJobId,
-        groupType: "FILES",
-        altCandidateId: input.altCandidateId,
-        altTargetId: input.target.id,
-        primaryUsageType: "FILE",
-        primaryUsageId: primary?.usageId ?? input.target.writeTargetId,
-        primaryTitle: primary?.title ?? input.target.displayTitle,
-        primaryHandle: primary?.handle ?? input.target.displayHandle,
-        primaryPositionIndex: null,
-        additionalUsageCount: fileUsages.length - 1,
-        usageCountPresent: totalUsageCount,
-        impactScopeSummary: {
-          productUsageCountPresent: productUsages.length,
-          fileUsageCountPresent: fileUsages.length,
-        },
-      });
-      upsertCount += 1;
-    } else {
-      await deleteGroupProjection(tx, input.shopId, input.altCandidateId, "FILES");
+          altTargetId: input.target.id,
+          primaryUsageType: "SELF",
+          primaryUsageId: input.target.writeTargetId,
+          primaryTitle: input.target.displayTitle,
+          primaryHandle: input.target.displayHandle,
+          primaryPositionIndex: null,
+          additionalUsageCount: 0,
+          usageCountPresent: 0,
+          impactScopeSummary: {},
+        });
+        upsertCount += 1;
+      } else {
+        await deleteGroupProjection(tx, input.shopId, input.altCandidateId, "FILES");
+      }
     }
 
     return upsertCount;

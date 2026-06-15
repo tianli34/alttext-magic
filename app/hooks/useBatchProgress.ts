@@ -144,13 +144,19 @@ export function useBatchProgress(
     setRescanError(null);
 
     try {
-      // 获取当前 scope flags 从 scanStatus
-      const scopeFlags = scanStatus?.scanJob?.scopeFlags ?? {
-        PRODUCT_MEDIA: true,
-        FILES: true,
-        COLLECTION_IMAGE: true,
-        ARTICLE_IMAGE: true,
-      };
+      // 从设置接口获取用户当前保存的扫描范围
+      let scopeFlags: Record<string, boolean>;
+      try {
+        const settingsRes = await fetch("/api/settings");
+        if (settingsRes.ok) {
+          const settings = await settingsRes.json();
+          scopeFlags = settings.scopes.scanScopeFlags;
+        } else {
+          scopeFlags = { PRODUCT_MEDIA: true, FILES: true, COLLECTION_IMAGE: true, ARTICLE_IMAGE: true };
+        }
+      } catch {
+        scopeFlags = { PRODUCT_MEDIA: true, FILES: true, COLLECTION_IMAGE: true, ARTICLE_IMAGE: true };
+      }
 
       const response = await fetch("/api/scan/start", {
         method: "POST",
@@ -176,7 +182,7 @@ export function useBatchProgress(
       setRescanning(false);
       return null;
     }
-  }, [scanStatus]);
+  }, []);
 // 当 SSE 连接但 scanStatus 未加载时，使用 SSE 数据
 // 当 SSE 未连接（刷新恢复场景）时，使用 scanStatus 数据
 const effectiveProgress = progress ?? scanStatus?.progress ?? null;

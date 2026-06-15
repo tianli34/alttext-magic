@@ -100,9 +100,7 @@ async function run(): Promise<void> {
         "PRODUCT_MEDIA",
         "FILES 应复用已存在 target 的 canonical resourceType，避免双 target",
       );
-      assert.equal(fileResult.usages.length, 1, "FILES 仍应保留自己的 FILE usage");
-      assert.equal(fileResult.usages[0]?.resourceType, "FILES");
-      assert.equal(fileResult.usages[0]?.usageType, "FILE");
+      assert.equal(fileResult.usages.length, 0, "FILES 不再产出 usage（FILE 自指已移除）");
       assert.equal(fileResult.warnings.length, 2, "alt/url 同时冲突时应记录两条告警");
 
       const combinedTargets = new Map<string, string>();
@@ -116,8 +114,8 @@ async function run(): Promise<void> {
       );
       assert.equal(
         productResult.usages.length + fileResult.usages.length,
-        2,
-        "usage 应同时保留 PRODUCT + FILE 两条",
+        1,
+        "usage 仅保留 PRODUCT 一条，FILE 自指已移除",
       );
     }
 
@@ -243,11 +241,8 @@ async function run(): Promise<void> {
       );
       assert.deepEqual(
         persistedUsages,
-        [
-          "FILES::FILE_ALT::gid://shopify/MediaImage/1::FILE::gid://shopify/MediaImage/1",
-          "FILES::FILE_ALT::gid://shopify/MediaImage/1::FILE::gid://shopify/MediaImage/1",
-        ],
-        "重复 derive 应生成相同 usage payload，便于上层 upsert 保持稳定",
+        [],
+        "FILE 自指 usage 已移除，重复 derive 不再产出 usage",
       );
     }
 

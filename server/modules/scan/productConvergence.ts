@@ -238,7 +238,7 @@ export async function convergeProduct(
   const allUsages = await tx.imageUsage.findMany({
     where: {
       altTargetId: { in: impactedTargetIdList },
-      usageType: { in: [ImageUsageType.PRODUCT, ImageUsageType.FILE] }
+      usageType: ImageUsageType.PRODUCT
     },
     select: {
       altTargetId: true,

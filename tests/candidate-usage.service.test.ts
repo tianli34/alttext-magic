@@ -148,7 +148,7 @@ async function run(): Promise<void> {
     );
   }
 
-  /* ---- 2. out-of-scope FILE usage 被过滤 ---- */
+  /* ---- 2. scope 过滤：product-only scope 正常返回 PRODUCT ---- */
   {
     const data = await listCandidateUsages(
       "shop-1",
@@ -156,25 +156,16 @@ async function run(): Promise<void> {
       undefined,
       createProductOnlyDataAccess(
         { ...presentCandidate, currentAlt: "existing alt" },
-        [
-          createUsageRow({ usageType: ImageUsageType.PRODUCT }),
-          createUsageRow({
-            usageType: ImageUsageType.FILE,
-            usageId: "gid://shopify/MediaImage/456",
-            title: null,
-            handle: null,
-            positionIndex: null,
-          }),
-        ],
+        [createUsageRow({ usageType: ImageUsageType.PRODUCT })],
       ),
     );
 
-    assert.equal(data.usages.length, 1, "FILE out-of-scope 应被过滤，只剩 PRODUCT");
+    assert.equal(data.usages.length, 1, "应正常返回 PRODUCT usage");
     assert.equal(data.usages[0].usageType, ImageUsageType.PRODUCT);
     assert.equal(data.usages[0].currentAlt, "existing alt");
   }
 
-  /* ---- 3. 全 scope 时共享文件同时包含 PRODUCT 和 FILE ---- */
+  /* ---- 3. 全 scope 时返回 PRODUCT usage ---- */
   {
     const data = await listCandidateUsages(
       "shop-1",
@@ -182,54 +173,41 @@ async function run(): Promise<void> {
       undefined,
       createAllScopeDataAccess(
         presentCandidate,
-        [
-          createUsageRow({ usageType: ImageUsageType.PRODUCT, positionIndex: 0 }),
-          createUsageRow({
-            usageType: ImageUsageType.FILE,
-            usageId: "gid://shopify/MediaImage/456",
-            title: null,
-            handle: null,
-            positionIndex: null,
-          }),
-        ],
+        [createUsageRow({ usageType: ImageUsageType.PRODUCT, positionIndex: 0 })],
       ),
     );
 
-    assert.equal(data.usages.length, 2, "全 scope 应返回 PRODUCT + FILE");
+    assert.equal(data.usages.length, 1, "仅返回 PRODUCT usage");
     assert.equal(data.usages[0].usageType, ImageUsageType.PRODUCT);
-    assert.equal(data.usages[1].usageType, ImageUsageType.FILE);
-    assert.equal(
-      data.usages[1].shopifyAdminUrl,
-      "https://test-shop.myshopify.com/admin/settings/files",
-    );
   }
 
-  /* ---- 4. group 过滤：group=FILES 只返回 FILE usage ---- */
+  /* ---- 4. group 过滤：group=FILES 无真实 usage 时返回 SELF 自引用 ---- */
   {
+    const projection: UsageDetailProjectionRow = {
+      groupType: "FILES",
+      primaryUsageType: "SELF",
+      primaryUsageId: "gid://shopify/MediaImage/456",
+      primaryTitle: null,
+      primaryHandle: null,
+    };
     const data = await listCandidateUsages(
       "shop-1",
       "candidate-1",
       CandidateGroupType.FILES,
       createAllScopeDataAccess(
         presentCandidate,
-        [
-          createUsageRow({ usageType: ImageUsageType.PRODUCT }),
-          createUsageRow({
-            usageType: ImageUsageType.FILE,
-            usageId: "gid://shopify/MediaImage/456",
-            title: null,
-            handle: null,
-            positionIndex: null,
-          }),
-        ],
+        [createUsageRow({ usageType: ImageUsageType.PRODUCT })],
+        {},
+        projection,
       ),
     );
 
-    assert.equal(data.usages.length, 1, "group=FILES 只返回 FILE usage");
-    assert.equal(data.usages[0].usageType, ImageUsageType.FILE);
+    assert.equal(data.usages.length, 1, "group=FILES 返回 SELF 自引用");
+    assert.equal(data.usages[0].usageType, "FILES");
+    assert.equal(data.usages[0].usageId, "gid://shopify/MediaImage/456");
   }
 
-  /* ---- 5. group 过滤：group=PRODUCT_MEDIA 只返回 PRODUCT usage ---- */
+  /* ---- 5. group 过滤：group=PRODUCT_MEDIA 返回 PRODUCT usage ---- */
   {
     const data = await listCandidateUsages(
       "shop-1",
@@ -237,20 +215,11 @@ async function run(): Promise<void> {
       CandidateGroupType.PRODUCT_MEDIA,
       createAllScopeDataAccess(
         presentCandidate,
-        [
-          createUsageRow({ usageType: ImageUsageType.PRODUCT }),
-          createUsageRow({
-            usageType: ImageUsageType.FILE,
-            usageId: "gid://shopify/MediaImage/456",
-            title: null,
-            handle: null,
-            positionIndex: null,
-          }),
-        ],
+        [createUsageRow({ usageType: ImageUsageType.PRODUCT })],
       ),
     );
 
-    assert.equal(data.usages.length, 1, "group=PRODUCT_MEDIA 只返回 PRODUCT usage");
+    assert.equal(data.usages.length, 1, "group=PRODUCT_MEDIA 返回 PRODUCT usage");
     assert.equal(data.usages[0].usageType, ImageUsageType.PRODUCT);
   }
 
@@ -292,27 +261,16 @@ async function run(): Promise<void> {
     assert.equal(data.usages.length, 0, "无 PRESENT usage 时返回空列表");
   }
 
-  /* ---- 9. group=FILES 但 FILES scope 未开启 ---- */
+  /* ---- 9. group=FILES 无 SELF projection 时返回空 ---- */
   {
     const data = await listCandidateUsages(
       "shop-1",
       "candidate-1",
       CandidateGroupType.FILES,
-      createProductOnlyDataAccess(
-        presentCandidate,
-        [
-          createUsageRow({
-            usageType: ImageUsageType.FILE,
-            usageId: "gid://shopify/MediaImage/456",
-            title: null,
-            handle: null,
-            positionIndex: null,
-          }),
-        ],
-      ),
+      createAllScopeDataAccess(presentCandidate, []),
     );
 
-    assert.equal(data.usages.length, 0, "group=FILES 但 scope 不包含 FILES 应返回空");
+    assert.equal(data.usages.length, 0, "FILES 无 SELF projection 时返回空");
   }
 
   /* ---- 10. group=COLLECTION 无 ImageUsage 时返回 SELF 自引用 ---- */

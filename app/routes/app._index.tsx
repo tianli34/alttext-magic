@@ -33,6 +33,8 @@ interface DashboardData {
   isScanning: boolean;
   /** 当前运行中的扫描任务 ID */
   activeScanJobId: string | null;
+  /** 用户当前配置的扫描范围 */
+  scanScopeFlags: Record<string, boolean>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -193,12 +195,15 @@ function DashboardContent() {
     setRescanning(true);
     setRescanError(null);
 
+    // 使用用户已保存的扫描范围，而非默认全选
+    const scopeFlags = dashboardData?.scanScopeFlags ?? DEFAULT_SCOPE_FLAG_STATE;
+
     try {
       const response = await fetch("/api/scan/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          scopeFlags: DEFAULT_SCOPE_FLAG_STATE,
+          scopeFlags,
           noticeVersion: "1.3",
         }),
       });
@@ -222,7 +227,7 @@ function DashboardContent() {
       setRescanError("网络错误，请稍后重试");
       setRescanning(false);
     }
-  }, [navigate]);
+  }, [navigate, dashboardData]);
   /* ---------------------------------------------------------------- */
   /*  渲染                                                             */
   /* ---------------------------------------------------------------- */

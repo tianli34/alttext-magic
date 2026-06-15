@@ -24,7 +24,7 @@ async function run(): Promise<void> {
   assert.equal(
     resolveFileAltPresentStatus(["NOT_FOUND", "PRESENT"]),
     "PRESENT",
-    "只要 PRODUCT / FILE 任一 usage 仍为 PRESENT，FILE_ALT target 仍应保持 PRESENT",
+    "只要 PRODUCT usage 仍为 PRESENT，FILE_ALT target 仍应保持 PRESENT",
   );
   assert.equal(
     resolveFileAltPresentStatus(["NOT_FOUND", "NOT_FOUND"]),
