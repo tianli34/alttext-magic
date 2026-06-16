@@ -121,6 +121,7 @@ async function markGenerated(
   data: GenerateAltJobData,
   candidate: CandidateWithTarget,
   generatedText: string,
+  rawText: string | undefined,
   modelUsed: string,
   contextMode: Awaited<ReturnType<typeof ContextBuilderService.buildContext>>["contextMode"],
   contextSnapshot: Awaited<ReturnType<typeof ContextBuilderService.buildContext>>["contextSnapshot"],
@@ -147,6 +148,15 @@ async function markGenerated(
     return;
   }
 
+  // 仅开发店铺记录加工状态
+  const isDevShop = data.shopId === CHINESE_SHOP_ID;
+  const processingMeta = isDevShop
+    ? {
+        rawText: rawText ?? null,
+        processingStatus: rawText !== generatedText ? "PROCESSED" : "RAW",
+      }
+    : {};
+
   await prisma.altDraft.upsert({
     where: { altCandidateId: candidate.id },
     create: {
@@ -154,6 +164,7 @@ async function markGenerated(
       altCandidateId: candidate.id,
       batchId: data.batchId,
       generatedText,
+      ...processingMeta,
       modelUsed,
       contextMode,
       contextSnapshot: toInputJsonObject(contextSnapshot),
@@ -162,6 +173,7 @@ async function markGenerated(
     update: {
       batchId: data.batchId,
       generatedText,
+      ...processingMeta,
       modelUsed,
       contextMode,
       contextSnapshot: toInputJsonObject(contextSnapshot),
@@ -335,6 +347,7 @@ await markGenerated(
   data,
   candidate,
   generatedText,
+  raw.altText,
   raw.modelUsed,
   contextMode,
   contextSnapshot,

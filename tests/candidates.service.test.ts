@@ -51,6 +51,7 @@ function createRow(
     decorativeActive: false,
     currentAlt: null,
     draftAlt: null,
+    draftCreatedAt: null,
     ...overrides,
   };
 }

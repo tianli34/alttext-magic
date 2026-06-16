@@ -26,22 +26,28 @@ export function buildPrompt(
         "请根据提供的图片及上下文信息，生成准确、简洁、对搜索引擎友好的 Alt Text。",
         "规则：",
         "- 用中文撰写 Alt Text",
+        "- 纯文本输出，不含引号、前缀或解释",
         "- 简洁、具体、描述性",
         "- 不超过 75 个汉字",
         "- 不要以'图片'、'照片'、'图像'开头",
         "- 不要关键词堆砌或使用'产品图片'等泛泛描述",
+        "- 包含产品名称、颜色、材质等关键信息（如已知）",
       ].join("\n")
     : [
         "You are an accessibility expert writing alt text for e-commerce images.",
         "Your output MUST follow these rules:",
         "- Write in English.",
+        "- Plain text output, no quotes, prefixes, or explanations.",
         "- Be concise, specific, and descriptive.",
         "- Keep it under 125 characters.",
         "- Do NOT start with 'image of', 'photo of', or 'picture of'.",
         "- Do NOT use keyword stuffing or generic descriptions like 'product image'.",
+        "- Include product name, color, material if known.",
       ].join("\n");
 
   // 2. User Prompt: 核心输入与上下文注入
+  const contextJson = JSON.stringify(contextSnapshot, null, 2);
+
   let userPrompt = locale === "zh-CN"
     ? `待描述图片：${imageUrl}\n\n`
     : `Image to describe: ${imageUrl}\n\n`;
@@ -82,6 +88,11 @@ export function buildPrompt(
         ? `说明：为无障碍目的准确描述图片内容。`
         : `Instruction: Describe the image content accurately for accessibility purposes.`;
   }
+
+  // 3. 上下文数据 JSON 块（所有 Provider 共享）
+  userPrompt += locale === "zh-CN"
+    ? `\n\n上下文数据：\n${contextJson}`
+    : `\n\nContext data:\n${contextJson}`;
 
   return { systemPrompt, userPrompt };
 }

@@ -11,6 +11,8 @@ import {
   type WritebackConfirmItem,
 } from "../components/review/WritebackConfirmModal";
 import { ProgressBar } from "../components/common/ProgressBar";
+import { formatRelativeTime } from "../lib/format";
+import { useTimezone } from "../lib/timezone";
 import {
   useWritebackSSE,
   type WritebackProgressData,
@@ -51,6 +53,7 @@ interface ReviewListItem {
     editedText: string | null;
     modelUsed: string;
     createdAt: string;
+    processingStatus: string | null;
   } | null;
   displayText: string;
   isSharedFile: boolean;
@@ -205,6 +208,7 @@ async function readErrorMessage(response: Response, fallback: string): Promise<s
 }
 
 export default function AppReviewPage() {
+  const timezone = useTimezone();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedAltPlane = normalizeAltPlane(searchParams.get("altPlane"));
   const selectedStatus = normalizeStatus(searchParams.get("status"));
@@ -774,6 +778,29 @@ export default function AppReviewPage() {
                             <div className={styles.readonlyText}>
                               <s-text tone="neutral">AI 草稿</s-text>
                               <p>{item.draft?.aiGeneratedText || "无 AI 草稿"}</p>
+                              {item.draft?.processingStatus && (
+                                <span style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  padding: "0 0.5rem",
+                                  height: "1.5rem",
+                                  border: "1px solid",
+                                  borderRadius: "999px",
+                                  fontSize: "0.75rem",
+                                  lineHeight: "1.2",
+                                  marginLeft: "0.5rem",
+                                  color: item.draft.processingStatus === "RAW" ? "#174ea6" : "#b8860b",
+                                  background: item.draft.processingStatus === "RAW" ? "#e8f0fe" : "#fff8e1",
+                                  borderColor: item.draft.processingStatus === "RAW" ? "#aecbfa" : "#ffe082",
+                                }}>
+                                  {item.draft.processingStatus === "RAW" ? "原始输出" : "已加工"}
+                                </span>
+                              )}
+                              {item.draft?.createdAt && (
+                                <span style={{ fontSize: "0.8125rem", color: "var(--text-subdued)" }}>
+                                  生成于 {formatRelativeTime(item.draft.createdAt, timezone)}
+                                </span>
+                              )}
                             </div>
 
                             <label className={styles.editorField}>

@@ -98,6 +98,7 @@ export interface CandidateListRow {
   decorativeActive: boolean;
   currentAlt: string | null;
   draftAlt: string | null;
+  draftCreatedAt: Date | null;
 }
 
 export interface CandidateListDataAccess {
@@ -253,6 +254,7 @@ export function buildCandidateListQuery(
       alt_target.current_alt_empty AS "currentAltEmpty",
       COALESCE(decorative_mark.is_active, false) AS "decorativeActive",
       alt_target.current_alt_text AS "currentAlt",
+      alt_draft.created_at AS "draftCreatedAt",
       COALESCE(
         alt_draft.final_text,
         alt_draft.edited_text,
@@ -308,6 +310,7 @@ function normalizeRows(
       status: deriveStatus(row),
       currentAlt: row.currentAlt,
       draftAlt: row.draftAlt,
+      draftCreatedAt: row.draftCreatedAt?.toISOString() ?? null,
       impactScopeSummary: row.impactScopeSummary,
     })),
     nextCursor: hasMore ? pageRows[pageRows.length - 1]?.id ?? null : null,

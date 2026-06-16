@@ -3,6 +3,7 @@
  * Purpose: Billing 计费页面 —— 展示当前计划、余额、计划选择、超额包购买和购买记录。
  */
 import { useState, useCallback } from 'react';
+import { useTimezone } from '../lib/timezone';
 import { useBillingSummary } from '../hooks/useBillingSummary';
 import { useChangePlan } from '../hooks/useChangePlan';
 import { usePurchasePack } from '../hooks/usePurchasePack';
@@ -17,16 +18,19 @@ import type { BillingInterval, PlanKey } from '../components/billing/types';
 /*  日期格式化                                                          */
 /* ------------------------------------------------------------------ */
 
-function formatDate(isoString: string): string {
+function formatDateTime(isoString: string, timezone?: string): string {
   try {
-    const date = new Date(isoString);
-    return date.toLocaleDateString('zh-CN', {
+    const options: Intl.DateTimeFormatOptions = {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-    });
+    };
+    if (timezone) {
+      options.timeZone = timezone;
+    }
+    return new Intl.DateTimeFormat('zh-CN', options).format(new Date(isoString));
   } catch {
     return isoString;
   }
@@ -37,6 +41,7 @@ function formatDate(isoString: string): string {
 /* ------------------------------------------------------------------ */
 
 export default function AppBillingPage() {
+  const timezone = useTimezone();
   const { data, loading, error, refresh } = useBillingSummary();
   const { changing, changeError, changePlan } = useChangePlan();
   const { purchasing, purchaseError, purchasePack } = usePurchasePack();
@@ -312,7 +317,7 @@ export default function AppBillingPage() {
                 <span>{purchase.amount}</span>
                 <span>${purchase.price.toFixed(2)}</span>
                 <span style={{ color: 'var(--p-color-text-secondary, #6d7175)' }}>
-                  {formatDate(purchase.createdAt)}
+                  {formatDateTime(purchase.createdAt, timezone)}
                 </span>
               </div>
             ))}

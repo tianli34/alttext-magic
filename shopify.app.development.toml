@@ -29,6 +29,10 @@ topics = [
   "collections/delete",
 ]
 
+[[webhooks.subscriptions]]
+uri = "/webhooks/shop/update"
+topics = ["shop/update"]
+
 [build]
 automatically_update_urls_on_dev = true
 dev_store_url = "magic-ai-test-01.myshopify.com"

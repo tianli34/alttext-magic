@@ -5,10 +5,14 @@
  * 计费与额度初始化已迁移至 bootstrapShopBilling 服务。
  */
 import { randomUUID } from "node:crypto";
+import type { Session } from "@shopify/shopify-api";
 import prisma from "../../db/prisma.server";
 import { encryptToken } from "../../crypto/token-encryption";
 import { createLogger } from "../../utils/logger";
 import { DEFAULT_SCAN_SCOPE_FLAGS } from "./scope.service";
+import { executeShopifyGraphql } from "../writeback/mutations/mutation-utils";
+import { SHOP_TIMEZONE_QUERY } from "../../shopify/queries/shop.query";
+import type { ShopTimezoneResponse } from "../../shopify/queries/shop.query";
 import type {
   PersistOfflineShopSessionInput,
   ShopifySessionSnapshot,
@@ -105,4 +109,45 @@ export async function persistOfflineShopSession({
   );
 
   return { shopId };
+}
+
+/**
+ * 通过 Shopify Admin API 获取店铺时区并持久化到 shops 表。
+ * 安装时调用一次即可，后续如需刷新可单独调用。
+ */
+export async function fetchAndSaveShopTimezone(
+  session: Session,
+): Promise<string | null> {
+  const shopDomain = session.shop;
+  let timezone: string | null = null;
+
+  try {
+    const result = await executeShopifyGraphql<ShopTimezoneResponse>({
+      session,
+      query: SHOP_TIMEZONE_QUERY,
+      variables: {},
+      cost: 1,
+    });
+
+    timezone = result.data?.shop?.ianaTimezone ?? null;
+
+    if (timezone) {
+      await prisma.shop.update({
+        where: { shopDomain },
+        data: { timezone },
+      });
+
+      logger.info(
+        { shop: shopDomain, timezone },
+        "Fetched and saved shop timezone",
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { shop: shopDomain, err },
+      "Failed to fetch shop timezone, will retry on next request",
+    );
+  }
+
+  return timezone;
 }

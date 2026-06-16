@@ -75,6 +75,7 @@ export interface ReviewDraftField {
   editedText: string | null;
   modelUsed: string;
   createdAt: Date;
+  processingStatus: string | null;
 }
 
 export interface ReviewListItem {
@@ -120,6 +121,7 @@ export interface ReviewRawRow {
   editedText: string | null;
   modelUsed: string | null;
   draftCreatedAt: Date | null;
+  processingStatus: string | null;
 }
 
 export interface ReviewListDataAccess {
@@ -214,6 +216,7 @@ export function mapRowToItem(row: ReviewRawRow): ReviewListItem {
           editedText: row.editedText,
           modelUsed: row.modelUsed ?? "",
           createdAt: row.draftCreatedAt!,
+          processingStatus: row.processingStatus ?? null,
         }
       : null,
     displayText,
@@ -272,6 +275,7 @@ const prismaDataAccess: ReviewListDataAccess = {
             editedText: true,
             modelUsed: true,
             createdAt: true,
+            processingStatus: true,
           },
         },
       },
@@ -300,6 +304,7 @@ const prismaDataAccess: ReviewListDataAccess = {
         editedText: c.draft?.editedText ?? null,
         modelUsed: c.draft?.modelUsed ?? null,
         draftCreatedAt: c.draft?.createdAt ?? null,
+        processingStatus: c.draft?.processingStatus ?? null,
       } satisfies ReviewRawRow;
     });
   },

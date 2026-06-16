@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import styles from "../components/history/HistoryPage.module.css";
+import { useTimezone } from "../lib/timezone";
 
 type AltPlane = "FILE_ALT" | "COLLECTION_IMAGE_ALT" | "ARTICLE_IMAGE_ALT";
 type AltPlaneFilter = "" | AltPlane;
@@ -77,17 +78,22 @@ function formatUsage(item: HistoryItem): string {
   return `${title}${position}`;
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
+function formatDateTime(value: string, timezone?: string): string {
+  const options: Intl.DateTimeFormatOptions = {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(value));
+  };
+  if (timezone) {
+    options.timeZone = timezone;
+  }
+  return new Intl.DateTimeFormat("zh-CN", options).format(new Date(value));
 }
 
 export default function AppHistoryPage() {
+  const timezone = useTimezone();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedAltPlane = normalizeAltPlane(searchParams.get("altPlane"));
   const selectedPage = normalizePage(searchParams.get("page"));
@@ -244,7 +250,7 @@ export default function AppHistoryPage() {
                       <td className={styles.textCell}>{item.oldAltText || "(无)"}</td>
                       <td className={styles.textCell}>{item.newAltText}</td>
                       <td>{item.modelUsed}</td>
-                      <td>{formatDate(item.writtenAt)}</td>
+                      <td>{formatDateTime(item.writtenAt, timezone)}</td>
                     </tr>
                   ))}
                 </tbody>

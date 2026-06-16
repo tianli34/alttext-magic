@@ -46,6 +46,7 @@ function createRow(
     editedText: null,
     modelUsed: "gpt-4o",
     draftCreatedAt: new Date("2026-05-01T00:00:00Z"),
+    processingStatus: null,
     ...overrides,
   };
 }

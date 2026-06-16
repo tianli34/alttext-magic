@@ -5,6 +5,7 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { TimezoneProvider } from "../lib/timezone";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -12,12 +13,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const shop = await prisma.shop.findUnique({
     where: { shopDomain },
-    select: { id: true },
+    select: { id: true, timezone: true },
   });
 
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
     shopId: shop?.id ?? "",
+    timezone: shop?.timezone ?? "Asia/Shanghai",
     helpFaqUrl: process.env.HELP_FAQ_URL || null,
     supportEmail: process.env.SUPPORT_EMAIL || null,
     docsUrl: process.env.DOCS_URL || null,
@@ -25,7 +27,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function App() {
-  const { apiKey, shopId, helpFaqUrl, supportEmail, docsUrl } =
+  const { apiKey, shopId, timezone, helpFaqUrl, supportEmail, docsUrl } =
     useLoaderData<typeof loader>();
 
   return (
@@ -56,7 +58,9 @@ export default function App() {
           </s-link>
         )}
       </s-app-nav>
-      <Outlet />
+      <TimezoneProvider timezone={timezone}>
+        <Outlet />
+      </TimezoneProvider>
     </AppProvider>
   );
 }

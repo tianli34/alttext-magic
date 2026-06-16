@@ -250,6 +250,7 @@ model Session {
   emailVerified       Boolean?
   refreshToken        String?
   refreshTokenExpires DateTime?
+  updatedAt           DateTime  @default(now()) @updatedAt
 
   // ---------- Indexes ----------
   @@index([shop])
@@ -274,6 +275,7 @@ model Shop {
   lastPublishedScopeFlags Json?     @map("last_published_scope_flags")
   lastPublishedScanJobId  String?   @map("last_published_scan_job_id")
   lastPublishedAt         DateTime? @map("last_published_at")
+  timezone                String?   @map("timezone")
   installedAt             DateTime  @default(now()) @map("installed_at")
   uninstalledAt           DateTime? @map("uninstalled_at")
   createdAt               DateTime  @default(now()) @map("created_at")
@@ -1015,6 +1017,8 @@ model AltDraft {
   contextMode     AltDraftContextMode @map("context_mode")
   contextSnapshot Json                @map("context_snapshot")
   generatedText   String              @map("generated_text")
+  rawText         String?             @map("raw_text")
+  processingStatus String?            @map("processing_status")
   editedText      String?             @map("edited_text")
   finalText       String?             @map("final_text")
   createdAt       DateTime            @default(now()) @map("created_at")

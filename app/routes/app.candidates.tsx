@@ -12,6 +12,8 @@ import genStyles from "../components/generation/GenerationFlow.module.css";
 import { useGenerationFlow } from "../hooks/useGenerationFlow";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 import { GenerationFlow } from "../components/generation/GenerationFlow";
+import { formatRelativeTime } from "../lib/format";
+import { useTimezone } from "../lib/timezone";
 
 type GroupType = "PRODUCT_MEDIA" | "FILES" | "COLLECTION" | "ARTICLE";
 type CandidateStatus =
@@ -65,6 +67,7 @@ interface CandidateItem {
   status: CandidateStatus;
   currentAlt: string | null;
   draftAlt: string | null;
+  draftCreatedAt: string | null;
   impactScopeSummary: unknown;
 }
 
@@ -207,6 +210,7 @@ function mergeUniqueItems(
 }
 
 export default function AppCandidatesPage() {
+  const timezone = useTimezone();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedGroup = isGroupType(searchParams.get("group"))
     ? searchParams.get("group") as GroupType
@@ -507,21 +511,30 @@ export default function AppCandidatesPage() {
     void flow.startPreflight(candidateIds);
   }, [selectedCount, selectedIds, flow]);
 
-  /* ---- 生成完成后刷新列表 ---- */
+  /* ---- 生成完成后刷新列表及分组计数 ---- */
   const handleCloseSummary = useCallback(() => {
     flow.closeSummary();
     clearSelection();
-    // 重新加载候选列表以反映最新状态
+    // 重新加载候选列表 + 分组计数以反映最新状态
     const controller = new AbortController();
 
     async function reload() {
       try {
         const query = buildCandidateQuery(selectedGroup, selectedStatus);
-        const response = await fetch(`/api/candidates?${query}`, { signal: controller.signal });
-        if (!response.ok) return;
-        const data = await response.json() as CandidateListResponse;
-        setItems(data.items);
-        setNextCursor(data.nextCursor);
+        const [candidateResponse, dashboardResponse] = await Promise.all([
+          fetch(`/api/candidates?${query}`, { signal: controller.signal }),
+          fetch("/api/dashboard", { signal: controller.signal }),
+        ]);
+
+        if (candidateResponse.ok) {
+          const data = await candidateResponse.json() as CandidateListResponse;
+          setItems(data.items);
+          setNextCursor(data.nextCursor);
+        }
+        if (dashboardResponse.ok) {
+          const dashboard = await dashboardResponse.json() as DashboardResponse;
+          setGroups(dashboard.groups);
+        }
       } catch {
         // 刷新失败不影响用户体验
       }
@@ -708,9 +721,16 @@ export default function AppCandidatesPage() {
                         </s-stack>
 
                         {item.draftAlt && (
-                          <s-text tone="neutral">
-                            {item.draftAlt}
-                          </s-text>
+                          <>
+                            <s-text tone="neutral">
+                              {item.draftAlt}
+                            </s-text>
+                            {item.draftCreatedAt && (
+                              <span style={{ fontSize: "0.8125rem", color: "var(--text-subdued)" }}>
+                                生成于 {formatRelativeTime(item.draftCreatedAt, timezone)}
+                              </span>
+                            )}
+                          </>
                         )}
 
                         <button

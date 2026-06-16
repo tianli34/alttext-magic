@@ -5,6 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import type { AIProvider, GenerateAltRequest, GenerateAltResult, ModelCallRecord } from "../ai.types.js";
 import { AIGenerationError } from "../ai.types.js";
 import { createLogger } from "../../utils/logger.js";
+import { buildPrompt } from "../prompt-engine.server.js";
 
 const log = createLogger({ module: "gemini-provider" });
 
@@ -84,9 +85,12 @@ export class GeminiProvider implements AIProvider {
     }
 
     // 2. 构建 prompt
-    const prompt = req.locale === "zh-CN"
-      ? "根据图片及上下文信息，输出简洁、描述性的 Alt Text（纯文本，无引号）。"
-      : "Based on the image and context, output a concise, descriptive Alt Text (plain text, no quotes).";
+    const { systemPrompt, userPrompt } = buildPrompt(
+      req.imageUrl,
+      req.contextSnapshot,
+      req.contextMode,
+      req.locale,
+    );
 
     // 3. 调用 Gemini API（含超时保护）
     try {
@@ -100,8 +104,11 @@ export class GeminiProvider implements AIProvider {
                 data: base64Data,
               },
             },
-            { text: prompt },
+            { text: userPrompt },
           ],
+          config: {
+            systemInstruction: systemPrompt,
+          },
         }),
         new Promise<never>((_, reject) =>
           setTimeout(() => {

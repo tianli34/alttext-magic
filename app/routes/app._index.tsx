@@ -14,6 +14,7 @@ import { GroupStatsCard, type GroupStats } from "../components/dashboard/GroupSt
 import { QuotaSummary } from "../components/dashboard/QuotaSummary";
 import dashboardGridStyles from "../components/dashboard/DashboardGrid.module.css";
 import { formatRelativeTime } from "../lib/format";
+import { useTimezone } from "../lib/timezone";
 import { DEFAULT_SCOPE_FLAG_STATE } from "../lib/scope-utils";
 
 /* ------------------------------------------------------------------ */
@@ -66,6 +67,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 /* ------------------------------------------------------------------ */
 
 export default function AppDashboardPage() {
+  const timezone = useTimezone();
   const loaderData = useLoaderData<typeof loader>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -351,7 +353,7 @@ function DashboardContent() {
           <s-stack direction="inline" gap="small">
             <s-text tone="neutral">上次数据更新：</s-text>
             <s-text>
-              {formatRelativeTime(lastPublishedAt)}
+              {formatRelativeTime(lastPublishedAt, timezone)}
             </s-text>
           </s-stack>
 

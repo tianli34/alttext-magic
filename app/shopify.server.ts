@@ -6,7 +6,7 @@ import {
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
-import { persistOfflineShopSession } from "../server/modules/shop/shop.service";
+import { persistOfflineShopSession, fetchAndSaveShopTimezone } from "../server/modules/shop/shop.service";
 import { bootstrapShopBilling } from "../server/modules/billing/bootstrap-shop-billing.server";
 
 const shopify = shopifyApp({
@@ -25,7 +25,9 @@ const shopify = shopifyApp({
     afterAuth: async ({ session }) => {
       // 1. 持久化店铺安装记录
       const { shopId } = await persistOfflineShopSession({ session });
-      // 2. 初始化计费订阅与安装欢迎额度（幂等）
+      // 2. 获取店铺时区（非关键，失败不影响安装）
+      await fetchAndSaveShopTimezone(session);
+      // 3. 初始化计费订阅与安装欢迎额度（幂等）
       await bootstrapShopBilling(shopId);
     },
   },
