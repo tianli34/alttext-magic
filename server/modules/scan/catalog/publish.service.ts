@@ -269,14 +269,12 @@ export async function publishScanResult(
       }
     }
 
-    // 2. 处理 FILES 类型的资源
-    const fileUsageRows = resultUsages.filter((usage) =>
-      usage.resourceType === "FILES",
+    // 2. 处理 FILES 类型的资源（FILES 无 usage，直接基于 resultTargets）
+    const fileTargetRows = resultTargets.filter(
+      (target) => target.resourceType === "FILES",
     );
     const fileWriteTargetIds = new Set(
-      fileUsageRows
-        .filter((usage) => successfulSet.has(usage.resourceType))
-        .map((usage) => usage.writeTargetId),
+      fileTargetRows.map((t) => t.writeTargetId),
     );
 
     if (fileWriteTargetIds.size > 0) {
@@ -304,10 +302,6 @@ export async function publishScanResult(
         publishedTargetCount += 1;
       }
 
-      await recomputeFileAltPresentStatus(tx, {
-        scanJobId: scanJob.id,
-        targetIds: [...impactedTargetIds],
-      });
     }
 
     // 3. 处理 COLLECTION_IMAGE 类型的资源（通过 convergeCollection 共享收敛规则）
