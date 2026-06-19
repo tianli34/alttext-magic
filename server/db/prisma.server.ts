@@ -23,9 +23,9 @@ const pool =
     connectionTimeoutMillis: 5_000,          // 获取连接超时 5s（而不是无限等待）
   });
 
-// 新建连接时自动设置会话时区，确保 now() 返回北京时间
+// 新建连接时将会话时区设为 UTC，确保 @default(now()) 存储正确的时间戳
 pool.on("connect", (client) => {
-  client.query(`SET timezone TO 'Asia/Shanghai'`);
+  client.query(`SET timezone TO 'UTC'`);
 });
 
 const adapter = new PrismaPg(pool);

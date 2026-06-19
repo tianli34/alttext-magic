@@ -27,7 +27,7 @@ import type { ContextSnapshot } from "../../server/ai/ai.types";
 
 const logger = createLogger({ module: "generate-alt-processor" });
 
-const CHINESE_SHOP_ID = "cmnidr9hh0000bsttv2rx99xq";
+const CHINESE_SHOP_ID = "fd6e7082-a067-4cc3-9d76-a081c0a3afb9";
 
 export const generateAltConcurrency = env.GENERATE_ALT_CONCURRENCY;
 

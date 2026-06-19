@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import styles from "../components/history/HistoryPage.module.css";
 import { useTimezone } from "../lib/timezone";
+import { formatDateTime } from "../lib/format";
 
 type AltPlane = "FILE_ALT" | "COLLECTION_IMAGE_ALT" | "ARTICLE_IMAGE_ALT";
 type AltPlaneFilter = "" | AltPlane;
@@ -76,20 +77,6 @@ function formatUsage(item: HistoryItem): string {
   const title = usage.title ?? usage.handle ?? usage.id;
   const position = usage.positionIndex === null ? "" : ` · 位置 ${usage.positionIndex}`;
   return `${title}${position}`;
-}
-
-function formatDateTime(value: string, timezone?: string): string {
-  const options: Intl.DateTimeFormatOptions = {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  };
-  if (timezone) {
-    options.timeZone = timezone;
-  }
-  return new Intl.DateTimeFormat("zh-CN", options).format(new Date(value));
 }
 
 export default function AppHistoryPage() {

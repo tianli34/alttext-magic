@@ -5,17 +5,18 @@
 
 import { createContext, useContext } from "react";
 
-const TimezoneContext = createContext<string>("Asia/Shanghai");
+const TimezoneContext = createContext<string>("UTC");
 
 export function TimezoneProvider({
   timezone,
   children,
 }: {
-  timezone: string;
+  timezone: string | null;
   children: React.ReactNode;
 }) {
+  const resolved = timezone ?? "UTC";
   return (
-    <TimezoneContext.Provider value={timezone}>
+    <TimezoneContext.Provider value={resolved}>
       {children}
     </TimezoneContext.Provider>
   );

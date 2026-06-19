@@ -19,7 +19,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
     shopId: shop?.id ?? "",
-    timezone: shop?.timezone ?? "Asia/Shanghai",
+    timezone: shop?.timezone ?? "UTC",
     helpFaqUrl: process.env.HELP_FAQ_URL || null,
     supportEmail: process.env.SUPPORT_EMAIL || null,
     docsUrl: process.env.DOCS_URL || null,
@@ -37,7 +37,7 @@ export default function App() {
         <s-link href="/app/candidates">Candidates</s-link>
         <s-link href="/app/review">Review</s-link>
         <s-link href="/app/history">History</s-link>
-        {shopId === "cmnidr9hh0000bsttv2rx99xq" && (
+        {shopId === "fd6e7082-a067-4cc3-9d76-a081c0a3afb9" && (
           <s-link href="/app/ai-stats">AI 调用统计</s-link>
         )}
         <s-link href="/app/billing">Billing</s-link>

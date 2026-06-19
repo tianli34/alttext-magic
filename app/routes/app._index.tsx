@@ -120,6 +120,7 @@ export default function AppDashboardPage() {
 /* ------------------------------------------------------------------ */
 
 function DashboardContent() {
+  const timezone = useTimezone();
   const navigate = useNavigate();
   /** Dashboard API 数据 */
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);

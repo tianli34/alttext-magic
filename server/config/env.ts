@@ -6,7 +6,7 @@ dotenv.config();
 
 // 读取 TZ 并立即设置 Node.js 运行时时区
 // 必须在任何 Date 操作之前生效
-const rawTz = process.env.TZ || "Asia/Shanghai";
+const rawTz = process.env.TZ || "UTC";
 process.env.TZ = rawTz;
 
 /**
@@ -144,8 +144,8 @@ const envSchema = z.object({
   AI_8th_ENDPOINT: z.string().url().optional(),
 
   // ── Timezone ───────────────────────────────────────────
-  // 项目级时区（默认北京时间），影响 Node.js Date 序列化与 pino 日志时间戳
-  TZ: z.string().default("Asia/Shanghai"),
+  // Node.js 运行时时区，影响 Date 序列化与 pino 日志时间戳。服务端应使用 UTC。
+  TZ: z.string().default("UTC"),
 
   // ── Generation Worker ───────────────────────────────────
   GENERATE_ALT_CONCURRENCY: z.coerce

@@ -16,10 +16,10 @@ const YEAR = 365 * DAY;
  * 如 "3 小时前"、"2 天前"；超过一年则返回日期字符串。
  *
  * @param dateStr ISO 8601 日期字符串，null 时返回占位文本
- * @param timezone IANA 时区，仅影响超过一年的回退日期显示
+ * @param timezone IANA 时区（如 "Asia/Shanghai"）
  * @returns 格式化后的中文相对时间
  */
-export function formatRelativeTime(dateStr: string | null, timezone?: string): string {
+export function formatRelativeTime(dateStr: string | null, timezone: string): string {
   if (!dateStr) {
     return "暂无数据";
   }
@@ -59,50 +59,36 @@ export function formatRelativeTime(dateStr: string | null, timezone?: string): s
  * 将 ISO 日期字符串格式化为可读日期。
  *
  * @param dateStr ISO 8601 日期字符串
- * @param timezone IANA 时区（如 "Asia/Shanghai"），不传则使用浏览器本地时区
+ * @param timezone IANA 时区（如 "Asia/Shanghai"）
  * @returns 格式化后的日期字符串（YYYY-MM-DD）
  */
-export function formatDate(dateStr: string, timezone?: string): string {
-  if (timezone) {
-    return new Intl.DateTimeFormat("zh-CN", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    })
-      .format(new Date(dateStr))
-      .replace(/\//g, "-");
-  }
-
-  const date = new Date(dateStr);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
+export function formatDate(dateStr: string, timezone: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(new Date(dateStr))
+    .replace(/\//g, "-");
 }
 
 /**
  * 将 ISO 日期字符串格式化为可读日期时间。
  *
  * @param dateStr ISO 8601 日期字符串
- * @param timezone IANA 时区，不传则使用浏览器本地时区
+ * @param timezone IANA 时区（如 "Asia/Shanghai"）
  * @returns 格式化后的日期时间字符串（YYYY-MM-DD HH:mm）
  */
-export function formatDateTime(dateStr: string, timezone?: string): string {
-  const options: Intl.DateTimeFormatOptions = {
+export function formatDateTime(dateStr: string, timezone: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: timezone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  };
-
-  if (timezone) {
-    options.timeZone = timezone;
-  }
-
-  return new Intl.DateTimeFormat("zh-CN", options)
+  })
     .format(new Date(dateStr))
     .replace(/\//g, "-");
 }

@@ -4,6 +4,7 @@
  */
 import { useState, useCallback } from 'react';
 import { useTimezone } from '../lib/timezone';
+import { formatDateTime } from '../lib/format';
 import { useBillingSummary } from '../hooks/useBillingSummary';
 import { useChangePlan } from '../hooks/useChangePlan';
 import { usePurchasePack } from '../hooks/usePurchasePack';
@@ -13,32 +14,6 @@ import { PlanCard } from '../components/billing/PlanCard';
 import { OveragePackCard } from '../components/billing/OveragePackCard';
 import planGridStyles from '../components/billing/BillingGrid.module.css';
 import type { BillingInterval, PlanKey } from '../components/billing/types';
-
-/* ------------------------------------------------------------------ */
-/*  日期格式化                                                          */
-/* ------------------------------------------------------------------ */
-
-function formatDateTime(isoString: string, timezone?: string): string {
-  try {
-    const options: Intl.DateTimeFormatOptions = {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    };
-    if (timezone) {
-      options.timeZone = timezone;
-    }
-    return new Intl.DateTimeFormat('zh-CN', options).format(new Date(isoString));
-  } catch {
-    return isoString;
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/*  主组件                                                              */
-/* ------------------------------------------------------------------ */
 
 export default function AppBillingPage() {
   const timezone = useTimezone();
