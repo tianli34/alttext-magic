@@ -4,11 +4,12 @@
  *          展示实时扫描进度、task 粒度状态、异常提示和重新扫描按钮。
  *          整合 SSE 实时推送 + scan/status 刷新恢复。
  */
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useBatchProgress } from "../../hooks/useBatchProgress";
 import { ProgressBar } from "../common/ProgressBar";
 import { StatusBadge } from "../common/StatusBadge";
 import type { ScanTaskStatus } from "../../hooks/useScanStatus";
+import { buildAppPath } from "../../lib/app-navigation";
 
 interface ScanProgressPageProps {
   /** 扫描任务 ID */
@@ -27,6 +28,7 @@ const RESOURCE_LABELS: Record<string, string> = {
  * 扫描进度页面。
  */
 export function ScanProgressPage({ scanJobId }: ScanProgressPageProps) {
+  const location = useLocation();
   const navigate = useNavigate();
 
   const {
@@ -200,7 +202,7 @@ export function ScanProgressPage({ scanJobId }: ScanProgressPageProps) {
           {isTerminal && (
             <s-stack direction="inline" gap="base">
               <div
-                onClick={() => navigate("/app")}
+                onClick={() => navigate(buildAppPath("/app", location.search))}
                 style={{ display: "inline-block", cursor: "pointer" }}
               >
                 <s-button
@@ -214,7 +216,7 @@ export function ScanProgressPage({ scanJobId }: ScanProgressPageProps) {
                 onClick={rescanning ? undefined : async () => {
                   const newScanJobId = await handleRescan();
                   if (newScanJobId) {
-                    navigate(`/app/scan-progress?scanJobId=${newScanJobId}`);
+                    navigate(buildAppPath(`/app/scan-progress?scanJobId=${newScanJobId}`, location.search));
                   }
                 }}
                 style={{ display: "inline-block", cursor: rescanning ? "not-allowed" : "pointer" }}

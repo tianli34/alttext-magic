@@ -10,6 +10,7 @@
  */
 import { useSearchParams, useLocation } from "react-router";
 import { ScanProgressPage } from "../components/dashboard/ScanStatusBanner";
+import { buildAppPath } from "../lib/app-navigation";
 
 export default function ScanProgressRoute() {
   const [searchParams] = useSearchParams();
@@ -32,7 +33,7 @@ export default function ScanProgressRoute() {
             </s-box>
             <div
               onClick={() =>
-                window.location.assign(`/app${location.search}`)
+                window.location.assign(buildAppPath("/app", location.search))
               }
               style={{ display: "inline-block", cursor: "pointer" }}
             >

@@ -19,6 +19,15 @@ import { env } from "../../server/config/env";
 
 const logger = createLogger({ module: "api.billing.purchase-callback" });
 
+function buildBillingRedirectUrl(requestUrl: URL, params: Record<string, string>): string {
+  const searchParams = new URLSearchParams(requestUrl.search);
+  Object.entries(params).forEach(([key, value]) => {
+    searchParams.set(key, value);
+  });
+
+  return `/app/billing?${searchParams.toString()}`;
+}
+
 // ============================================================================
 // Loader（GET 请求）
 // ============================================================================
@@ -39,10 +48,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // 2. 校验 purchaseId 参数
   if (!purchaseId) {
     logger.warn({ shopDomain }, "purchase callback 缺少 purchaseId 参数");
+    const billingUrl = buildBillingRedirectUrl(url, { pack: "missing" });
+
     return new Response(null, {
       status: 302,
       headers: {
-        Location: `${env.SHOPIFY_APP_URL}/app/billing?pack=missing`,
+        Location: `${env.SHOPIFY_APP_URL}${billingUrl}`,
       },
     });
   }
@@ -58,7 +69,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     // 4. 重定向到计费页面
     const packParam = result.fulfilled ? "success" : "already-granted";
-    const billingUrl = `/app/billing?pack=${packParam}`;
+    const billingUrl = buildBillingRedirectUrl(url, { pack: packParam });
 
     return new Response(null, {
       status: 302,
@@ -73,7 +84,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
 
     // 发放失败时仍重定向到计费页面，但标记失败
-    const billingUrl = `/app/billing?pack=failed`;
+    const billingUrl = buildBillingRedirectUrl(url, { pack: "failed" });
 
     return new Response(null, {
       status: 302,

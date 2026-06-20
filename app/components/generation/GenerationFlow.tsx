@@ -4,8 +4,9 @@
  *          包含预检确认 Modal、进度展示 Modal、完成汇总 Modal。
  *          由外部传入 useGenerationFlow 返回值驱动渲染。
  */
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import styles from "./GenerationFlow.module.css";
+import { buildAppPath } from "../../lib/app-navigation";
 import type {
   GenerationFlowPhase,
   PreflightResult,
@@ -142,17 +143,18 @@ function ConfirmModal({
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
+  const location = useLocation();
   const navigate = useNavigate();
   const enough = preflightResult?.enough ?? false;
   const currentPlan = preflightResult?.currentPlan ?? "FREE";
   const isMaxPlan = currentPlan === "MAX";
 
   const handleUpgrade = () => {
-    navigate("/app/billing");
+    navigate(buildAppPath("/app/billing", location.search));
   };
 
   const handleBuyPack = () => {
-    navigate("/app/billing");
+    navigate(buildAppPath("/app/billing", location.search));
   };
 
   return (

@@ -17,6 +17,15 @@ import { env } from "../../server/config/env";
 
 const logger = createLogger({ module: "api.billing.callback" });
 
+function buildBillingRedirectUrl(requestUrl: URL, params: Record<string, string>): string {
+  const searchParams = new URLSearchParams(requestUrl.search);
+  Object.entries(params).forEach(([key, value]) => {
+    searchParams.set(key, value);
+  });
+
+  return `/app/billing?${searchParams.toString()}`;
+}
+
 // ============================================================================
 // Loader（GET 请求）
 // ============================================================================
@@ -51,7 +60,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
 
     // 3. 重定向到计费页面（嵌入式应用需要通过 App Bridge 重定向）
-    const billingUrl = `/app/billing?sync=success&plan=${result.planCode}&changed=${result.changed}`;
+    const billingUrl = buildBillingRedirectUrl(url, {
+      sync: "success",
+      plan: result.planCode,
+      changed: String(result.changed),
+    });
 
     // 如果是 Shopify 嵌入式应用，需要返回 HTML 使用 redirect
     // 对于嵌入式应用，直接返回 302 重定向到 app tunnel
@@ -68,7 +81,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
 
     // 同步失败时仍重定向到计费页面，但标记失败
-    const billingUrl = `/app/billing?sync=failed`;
+    const billingUrl = buildBillingRedirectUrl(url, { sync: "failed" });
 
     return new Response(null, {
       status: 302,

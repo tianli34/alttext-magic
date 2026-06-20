@@ -4,8 +4,9 @@
  *          从 /api/billing/summary 获取真实数据，展示当前计划与各分组余额。
  *          异常时降级为占位 UI，不影响 Dashboard 主功能。
  */
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useBillingSummary } from "../../hooks/useBillingSummary";
+import { buildAppPath } from "../../lib/app-navigation";
 
 /* ------------------------------------------------------------------ */
 /*  余额行组件                                                          */
@@ -105,6 +106,7 @@ function QuotaSummaryFallback({ message }: { message?: string }) {
 
 export function QuotaSummary() {
   const { data, loading, error } = useBillingSummary();
+  const location = useLocation();
   const navigate = useNavigate();
 
   /* ---- 加载中 → 显示骨架占位 ---- */
@@ -218,7 +220,7 @@ export function QuotaSummary() {
 
         {/* 跳转 Billing 页面入口 */}
         <div
-          onClick={() => navigate("/app/billing")}
+          onClick={() => navigate(buildAppPath("/app/billing", location.search))}
           style={{ display: "inline-block", cursor: "pointer" }}
         >
           <s-button variant="secondary" accessibilityLabel="查看计费详情">

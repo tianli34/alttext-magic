@@ -16,6 +16,7 @@ import dashboardGridStyles from "../components/dashboard/DashboardGrid.module.cs
 import { formatRelativeTime } from "../lib/format";
 import { useTimezone } from "../lib/timezone";
 import { DEFAULT_SCOPE_FLAG_STATE } from "../lib/scope-utils";
+import { buildAppPath } from "../lib/app-navigation";
 
 /* ------------------------------------------------------------------ */
 /*  类型定义                                                           */
@@ -121,6 +122,7 @@ export default function AppDashboardPage() {
 
 function DashboardContent() {
   const timezone = useTimezone();
+  const location = useLocation();
   const navigate = useNavigate();
   /** Dashboard API 数据 */
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
@@ -221,7 +223,7 @@ function DashboardContent() {
       const result = await response.json() as { scanJobId?: string };
       if (result.scanJobId) {
         // 拿到 scanJobId → 导航到扫描进度页
-        navigate(`/app/scan-progress?scanJobId=${result.scanJobId}`);
+        navigate(buildAppPath(`/app/scan-progress?scanJobId=${result.scanJobId}`, location.search));
       } else {
         // 兜底：无 scanJobId 时刷新 dashboard 数据
         setRefreshKey((prev) => prev + 1);
@@ -230,7 +232,7 @@ function DashboardContent() {
       setRescanError("网络错误，请稍后重试");
       setRescanning(false);
     }
-  }, [navigate, dashboardData]);
+  }, [navigate, dashboardData, location.search]);
   /* ---------------------------------------------------------------- */
   /*  渲染                                                             */
   /* ---------------------------------------------------------------- */
@@ -306,7 +308,7 @@ function DashboardContent() {
                 {activeScanJobId && (
                   <div
                     onClick={() =>
-                      navigate(`/app/scan-progress?scanJobId=${activeScanJobId}`)
+                      navigate(buildAppPath(`/app/scan-progress?scanJobId=${activeScanJobId}`, location.search))
                     }
                     style={{ display: "inline-block", cursor: "pointer", marginLeft: "0.5rem" }}
                   >

@@ -4,6 +4,8 @@
  *          展示单个分组（Product Media / Files / Collection / Article）
  *          的 total / hasAlt / missing / decorative 四项指标。
  */
+import { useLocation } from "react-router";
+import { buildAppPath } from "../../lib/app-navigation";
 
 /** 分组类型中文标签映射 */
 const GROUP_TYPE_LABELS: Record<string, string> = {
@@ -44,11 +46,13 @@ interface GroupStatsCardProps {
  * - hasAlt / missing / decorative 三项指标
  */
 export function GroupStatsCard({ stats }: GroupStatsCardProps) {
+  const location = useLocation();
   const label = GROUP_TYPE_LABELS[stats.groupType] ?? stats.groupType;
   const icon = GROUP_TYPE_ICONS[stats.groupType] ?? "📊";
-  const missingHref = `/app/candidates?group=${encodeURIComponent(
-    stats.groupType,
-  )}&status=PENDING`;
+  const missingHref = buildAppPath(
+    `/app/candidates?group=${encodeURIComponent(stats.groupType)}&status=PENDING`,
+    location.search,
+  );
 
   // 计算 hasAlt 百分比（用于进度条）
   const hasAltPercent =

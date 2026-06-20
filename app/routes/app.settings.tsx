@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
+import { useLocation } from "react-router";
 import type { ScopeFlagState } from "../lib/scope-utils";
 import { SCOPE_FLAG_ORDER } from "../lib/scope-utils";
+import { buildAppPath } from "../lib/app-navigation";
 
 interface ScopeSettings {
   scanScopeFlags: ScopeFlagState;
@@ -42,6 +44,7 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
 };
 
 export default function AppSettingsPage() {
+  const location = useLocation();
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -254,7 +257,7 @@ export default function AppSettingsPage() {
 
             <s-stack direction="inline" gap="small">
               <a
-                href="/app/billing"
+                href={buildAppPath("/app/billing", location.search)}
                 style={{
                   color: "var(--p-color-text-link)",
                   textDecoration: "underline",

@@ -4,8 +4,9 @@
  *          展示 Phase 6 已生成草稿，支持筛选、分页、编辑保存、装饰性切换与批量写回入口。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import styles from "../components/review/ReviewListPage.module.css";
+import { buildAppPath } from "../lib/app-navigation";
 import {
   WritebackConfirmModal,
   type WritebackConfirmItem,
@@ -209,6 +210,7 @@ async function readErrorMessage(response: Response, fallback: string): Promise<s
 
 export default function AppReviewPage() {
   const timezone = useTimezone();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedAltPlane = normalizeAltPlane(searchParams.get("altPlane"));
   const selectedStatus = normalizeStatus(searchParams.get("status"));
@@ -947,7 +949,7 @@ export default function AppReviewPage() {
                   <button
                     type="button"
                     className={styles.secondaryButton}
-                    onClick={() => window.location.assign("/app/history")}
+                    onClick={() => window.location.assign(buildAppPath("/app/history", location.search))}
                   >
                     查看写回历史
                   </button>

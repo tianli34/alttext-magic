@@ -17,6 +17,7 @@ import {
   DEFAULT_SCOPE_FLAG_STATE,
   listEnabledScopeFlags,
 } from "../lib/scope-utils";
+import { buildAppPath } from "../lib/app-navigation";
 import { SCAN_NOTICE_VERSION } from "../../shared/constants";
 
 /** Bootstrap 数据类型（前端需要的子集） */
@@ -121,16 +122,10 @@ export default function OnboardingPage() {
       // 提取 scanJobId → 导航到扫描进度页
       const result = await response.json() as { scanJobId?: string };
       if (result.scanJobId) {
-        navigate({
-          pathname: "/app/scan-progress",
-          search: `?scanJobId=${result.scanJobId}`,
-        });
+        navigate(buildAppPath(`/app/scan-progress?scanJobId=${result.scanJobId}`, location.search));
       } else {
         // 兜底：无 scanJobId 时回到 dashboard
-        navigate({
-          pathname: "/app",
-          search: location.search,
-        });
+        navigate(buildAppPath("/app", location.search));
       }
     } catch {
       setError("网络错误，请稍后重试");
