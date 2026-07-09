@@ -1,0 +1,32 @@
+╭─ info ───────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  Using shopify.app.development.toml for default values:                      │
+│                                                                              │
+│    • Org:             Magic AI Lab                                           │
+│    • App:             AltText Magic                                          │
+│    • Dev store:       magic-ai-test-01.myshopify.com                         │
+│    • Update URLs:     Yes                                                    │
+│                                                                              │
+│   You can pass `--reset` to your command to reset your app configuration.    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+╭─ error ──────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  Could not start Cloudflare tunnel: Failed to create new quic connection     │
+│  error="failed to dial to edge with quic: timeout: no recent network         │
+│  activity"                                                                   │
+│                                                                              │
+│  Could not start Cloudflare tunnel: Failed to create new quic connection     │
+│  error="failed to dial to edge with quic: timeout: no recent network         │
+│  activity"                                                                   │
+│  2026-06-20T23:29:27Z INF Retrying connection in up to 16s                   │
+│                                                                              │
+│                                                                              │
+│  You can run the command again, or try networking with Shopify via           │
+│  `--use-localhost` or `--tunnel-url <custom tunnel>` . See documentation     │
+│  for details. [1]                                                            │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+[1] https://shopify.dev/docs/apps/build/cli-for-apps/networking-options
+

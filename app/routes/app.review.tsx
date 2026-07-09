@@ -11,19 +11,22 @@ import {
   WritebackConfirmModal,
   type WritebackConfirmItem,
 } from "../components/review/WritebackConfirmModal";
-import { ProgressBar } from "../components/common/ProgressBar";
+import {
+  WritebackProgressModal,
+  WritebackSummaryModal,
+} from "../components/review/WritebackModals";
 import { formatRelativeTime } from "../lib/format";
 import { useTimezone } from "../lib/timezone";
 import {
   useWritebackSSE,
   type WritebackProgressData,
-  type WritebackBatchStatus,
 } from "../hooks/useWritebackSSE";
 
 type AltPlane = "FILE_ALT" | "COLLECTION_IMAGE_ALT" | "ARTICLE_IMAGE_ALT";
 type ReviewStatus = "GENERATED" | "WRITEBACK_FAILED_RETRYABLE";
 type StatusFilter = "" | ReviewStatus;
 type AltPlaneFilter = "" | AltPlane;
+type GroupTypeFilter = "" | "PRODUCT_MEDIA" | "FILES";
 
 interface PrimaryUsage {
   type: string;
@@ -102,12 +105,22 @@ interface WritebackBatchDetail extends WritebackProgressData {
   isTerminal: boolean;
 }
 
-const ALT_PLANE_OPTIONS: Array<{ value: AltPlaneFilter; label: string }> = [
-  { value: "", label: "全部类型" },
-  { value: "FILE_ALT", label: "文件" },
-  { value: "COLLECTION_IMAGE_ALT", label: "集合" },
-  { value: "ARTICLE_IMAGE_ALT", label: "文章" },
+interface CategoryOption {
+  key: string;
+  label: string;
+  altPlane: AltPlaneFilter;
+  groupType: GroupTypeFilter;
+}
+
+const CATEGORY_OPTIONS: CategoryOption[] = [
+  { key: "", label: "全部类型", altPlane: "", groupType: "" },
+  { key: "PRODUCT_MEDIA", label: "商品", altPlane: "FILE_ALT", groupType: "PRODUCT_MEDIA" },
+  { key: "FILES", label: "文件", altPlane: "FILE_ALT", groupType: "FILES" },
+  { key: "COLLECTION_IMAGE_ALT", label: "合集", altPlane: "COLLECTION_IMAGE_ALT", groupType: "" },
+  { key: "ARTICLE_IMAGE_ALT", label: "文章", altPlane: "ARTICLE_IMAGE_ALT", groupType: "" },
 ];
+
+const CATEGORY_KEY_TO_OPTION = new Map(CATEGORY_OPTIONS.map((o) => [o.key, o]));
 
 const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "", label: "全部状态" },
@@ -115,35 +128,23 @@ const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "WRITEBACK_FAILED_RETRYABLE", label: "写回失败" },
 ];
 
-const ALT_PLANE_LABELS: Record<AltPlane, string> = {
-  FILE_ALT: "FILE_ALT",
-  COLLECTION_IMAGE_ALT: "COLLECTION_IMAGE_ALT",
-  ARTICLE_IMAGE_ALT: "ARTICLE_IMAGE_ALT",
-};
+function getPlaneLabel(altPlane: AltPlane, primaryUsageType: string | null | undefined): string {
+  if (altPlane === "FILE_ALT") {
+    return primaryUsageType === "PRODUCT" ? "商品" : "文件";
+  }
+  if (altPlane === "COLLECTION_IMAGE_ALT") return "合集";
+  if (altPlane === "ARTICLE_IMAGE_ALT") return "文章";
+  return altPlane;
+}
 
 const STATUS_LABELS: Record<ReviewStatus, string> = {
   GENERATED: "GENERATED",
   WRITEBACK_FAILED_RETRYABLE: "写回失败",
 };
 
-const BATCH_STATUS_LABELS: Record<WritebackBatchStatus, string> = {
-  PENDING: "等待中",
-  RUNNING: "写回中",
-  SUCCESS: "写回完成",
-  PARTIAL_SUCCESS: "部分失败",
-  FAILED: "写回失败",
-};
-
-function normalizeAltPlane(value: string | null): AltPlaneFilter {
-  if (
-    value === "FILE_ALT" ||
-    value === "COLLECTION_IMAGE_ALT" ||
-    value === "ARTICLE_IMAGE_ALT"
-  ) {
-    return value;
-  }
-
-  return "";
+function normalizeCategoryParam(altPlane: string | null, groupType: string | null): string {
+  const key = groupType || altPlane || "";
+  return CATEGORY_KEY_TO_OPTION.has(key) ? key : "";
 }
 
 function normalizeStatus(value: string | null): StatusFilter {
@@ -182,18 +183,6 @@ function getPrimaryUsageMeta(primaryUsage: PrimaryUsage | null): string {
   return parts.join(" · ");
 }
 
-function isTerminalBatch(status: WritebackBatchStatus): boolean {
-  return status === "SUCCESS" || status === "PARTIAL_SUCCESS" || status === "FAILED";
-}
-
-function formatDuration(durationMs: number | null): string {
-  if (durationMs === null) return "处理中";
-  const seconds = Math.max(Math.round(durationMs / 1000), 0);
-  if (seconds < 60) return `${seconds} 秒`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes} 分 ${seconds % 60} 秒`;
-}
-
 function truncateText(value: string | null, maxLength = 140): string {
   if (!value) return "未知错误";
   return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
@@ -212,7 +201,10 @@ export default function AppReviewPage() {
   const timezone = useTimezone();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const selectedAltPlane = normalizeAltPlane(searchParams.get("altPlane"));
+  const selectedCategory = normalizeCategoryParam(
+    searchParams.get("altPlane"),
+    searchParams.get("groupType"),
+  );
   const selectedStatus = normalizeStatus(searchParams.get("status"));
   const selectedPage = normalizePage(searchParams.get("page"));
   const selectedBatchId = searchParams.get("batchId");
@@ -237,6 +229,7 @@ export default function AppReviewPage() {
   );
   const [batchDetail, setBatchDetail] = useState<WritebackBatchDetail | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
+  const [summaryDismissed, setSummaryDismissed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: "critical" | "success" } | null>(null);
 
@@ -246,14 +239,17 @@ export default function AppReviewPage() {
   }, []);
 
   const setFilter = useCallback(
-    (next: { altPlane?: AltPlaneFilter; status?: StatusFilter; page?: number }) => {
+    (next: { category?: string; status?: StatusFilter; page?: number }) => {
       const params = new URLSearchParams(searchParams);
-      const altPlane = next.altPlane ?? selectedAltPlane;
+      const category = next.category ?? selectedCategory;
       const status = next.status ?? selectedStatus;
       const page = next.page ?? 1;
 
-      if (altPlane) params.set("altPlane", altPlane);
+      const option = CATEGORY_KEY_TO_OPTION.get(category);
+      if (option && option.altPlane) params.set("altPlane", option.altPlane);
       else params.delete("altPlane");
+      if (option && option.groupType) params.set("groupType", option.groupType);
+      else params.delete("groupType");
 
       if (status) params.set("status", status);
       else params.delete("status");
@@ -264,7 +260,7 @@ export default function AppReviewPage() {
       setSelectedIds(new Set());
       setSearchParams(params);
     },
-    [searchParams, selectedAltPlane, selectedStatus, setSearchParams],
+    [searchParams, selectedCategory, selectedStatus, setSearchParams],
   );
 
   const setBatchParam = useCallback(
@@ -282,7 +278,9 @@ export default function AppReviewPage() {
       const params = new URLSearchParams();
       params.set("page", String(selectedPage));
       params.set("pageSize", String(pageSize));
-      if (selectedAltPlane) params.set("altPlane", selectedAltPlane);
+      const option = CATEGORY_KEY_TO_OPTION.get(selectedCategory);
+      if (option && option.altPlane) params.set("altPlane", option.altPlane);
+      if (option && option.groupType) params.set("groupType", option.groupType);
       if (selectedStatus) params.set("status", selectedStatus);
 
       const response = await fetch(`/api/candidates/review?${params.toString()}`, { signal });
@@ -292,7 +290,7 @@ export default function AppReviewPage() {
 
       return (await response.json()) as ReviewListResponse;
     },
-    [selectedAltPlane, selectedPage, selectedStatus],
+    [selectedCategory, selectedPage, selectedStatus],
   );
 
   useEffect(() => {
@@ -359,6 +357,28 @@ export default function AppReviewPage() {
     [showToast],
   );
 
+  const refreshReviewList = useCallback(async () => {
+    try {
+      const newData = await fetchReviewItems(new AbortController().signal);
+      setItems(newData.items);
+      setMeta(newData.meta);
+      setDraftValues(
+        Object.fromEntries(
+          newData.items.map((item) => [item.candidate.id, item.displayText]),
+        ),
+      );
+      setDecorativeIds(
+        new Set(
+          newData.items
+            .filter((item) => item.candidate.isDecorative)
+            .map((item) => item.candidate.id),
+        ),
+      );
+    } catch {
+      // 静默失败，用户可手动刷新
+    }
+  }, [fetchReviewItems]);
+
   const handleWritebackComplete = useCallback(
     (data: WritebackProgressData) => {
       setBatchDetail((current) =>
@@ -374,8 +394,9 @@ export default function AppReviewPage() {
             },
       );
       void loadBatchDetail(data.batchId);
+      void refreshReviewList();
     },
-    [loadBatchDetail],
+    [loadBatchDetail, refreshReviewList],
   );
 
   const writebackSSE = useWritebackSSE(
@@ -397,10 +418,17 @@ export default function AppReviewPage() {
 
     const controller = new AbortController();
     setActiveBatchId(selectedBatchId);
+    setSummaryDismissed(false);
     void loadBatchDetail(selectedBatchId, controller.signal);
 
     return () => controller.abort();
   }, [loadBatchDetail, selectedBatchId]);
+
+  useEffect(() => {
+    if (batchDetail?.isTerminal) {
+      setSummaryDismissed(false);
+    }
+  }, [batchDetail?.batchId, batchDetail?.isTerminal]);
 
   const allSelected = items.length > 0 && items.every((item) => selectedIds.has(item.candidate.id));
 
@@ -644,14 +672,14 @@ export default function AppReviewPage() {
             <div className={styles.field}>
               <s-text tone="neutral">图片类型</s-text>
               <div className={styles.segmented} role="tablist" aria-label="图片类型筛选">
-                {ALT_PLANE_OPTIONS.map((option) => (
+                {CATEGORY_OPTIONS.map((option) => (
                   <button
-                    key={option.value || "ALL"}
+                    key={option.key || "ALL"}
                     type="button"
                     className={`${styles.segmentButton} ${
-                      selectedAltPlane === option.value ? styles.segmentButtonActive : ""
+                      selectedCategory === option.key ? styles.segmentButtonActive : ""
                     }`}
-                    onClick={() => setFilter({ altPlane: option.value })}
+                    onClick={() => setFilter({ category: option.key })}
                   >
                     {option.label}
                   </button>
@@ -744,8 +772,8 @@ export default function AppReviewPage() {
 
                         <div className={styles.content}>
                           <div className={styles.meta}>
-                            <span className={`${styles.badge} ${styles[`plane_${item.candidate.altPlane}`]}`}>
-                              {ALT_PLANE_LABELS[item.candidate.altPlane]}
+                            <span className={`${styles.badge} ${styles[`plane_${item.target.primaryUsage?.type === "PRODUCT" ? "PRODUCT_MEDIA" : item.candidate.altPlane}`]}`}>
+                              {getPlaneLabel(item.candidate.altPlane, item.target.primaryUsage?.type)}
                             </span>
                             <span className={`${styles.badge} ${styles[`status_${item.candidate.status}`]}`}>
                               {STATUS_LABELS[item.candidate.status]}
@@ -871,103 +899,35 @@ export default function AppReviewPage() {
           )}
         </s-section>
 
-        {effectiveProgress && (
-          <s-section heading="写回进度">
-            <div className={styles.progressPanel}>
-              <s-stack direction="block" gap="base">
-                <div className={styles.progressHeader}>
-                  <s-heading>
-                    {BATCH_STATUS_LABELS[effectiveProgress.status] ?? effectiveProgress.status}
-                  </s-heading>
-                  <s-text tone="neutral">
-                    {writebackSSE.connected ? "实时连接中" : batchLoading ? "正在恢复状态" : "等待进度更新"}
-                  </s-text>
-                </div>
-                <ProgressBar
-                  percent={writebackPercent}
-                  animated={!isTerminalBatch(effectiveProgress.status)}
-                  size="large"
-                />
-                <div className={styles.progressStats}>
-                  <span>已完成 {(
-                    effectiveProgress.success +
-                    effectiveProgress.fail +
-                    effectiveProgress.skip
-                  ).toLocaleString("zh-CN")}/{effectiveProgress.total.toLocaleString("zh-CN")}</span>
-                  <span>成功 {effectiveProgress.success.toLocaleString("zh-CN")}</span>
-                  <span>跳过 {effectiveProgress.skip.toLocaleString("zh-CN")}</span>
-                  <span>失败 {effectiveProgress.fail.toLocaleString("zh-CN")}</span>
-                  <span>待处理 {effectiveProgress.pending.toLocaleString("zh-CN")}</span>
-                </div>
-                {writebackSSE.error && (
-                  <s-text tone="caution">{writebackSSE.error}</s-text>
-                )}
-              </s-stack>
-            </div>
-          </s-section>
+{effectiveProgress && !batchDetail?.isTerminal && (
+          <WritebackProgressModal
+            progress={effectiveProgress}
+            connected={writebackSSE.connected}
+            percent={writebackPercent}
+            error={writebackSSE.error}
+          />
         )}
 
-        {batchDetail?.isTerminal && (
-          <s-section heading="写回汇总">
-            <div className={`${styles.summaryPanel} ${
-              batchDetail.fail > 0 ? styles.summaryPanelCaution : styles.summaryPanelSuccess
-            }`}>
-              <s-stack direction="block" gap="base">
-                <s-heading>
-                  {batchDetail.fail > 0 ? "写回已结束，存在失败项" : "写回已全部完成"}
-                </s-heading>
-                <div className={styles.summaryStats}>
-                  <div><strong>{batchDetail.total}</strong><span>总数</span></div>
-                  <div><strong>{batchDetail.success}</strong><span>成功</span></div>
-                  <div><strong>{batchDetail.skip}</strong><span>跳过</span></div>
-                  <div><strong>{batchDetail.fail}</strong><span>失败</span></div>
-                </div>
-                <s-text tone="neutral">
-                  耗时 {formatDuration(batchDetail.durationMs)}
-                </s-text>
-                {batchDetail.typeStats.length > 0 && (
-                  <div className={styles.typeStats}>
-                    {batchDetail.typeStats.map((stat) => (
-                      <s-text key={stat.altPlane} tone="neutral">
-                        {ALT_PLANE_LABELS[stat.altPlane]}：成功 {stat.success}，跳过 {stat.skip}，失败 {stat.fail}
-                      </s-text>
-                    ))}
-                  </div>
-                )}
-                <div className={styles.summaryActions}>
-                  {batchDetail.fail > 0 && (
-                    <button
-                      type="button"
-                      className={styles.secondaryButton}
-                      onClick={() => {
-                        document.getElementById("writeback-failures")?.scrollIntoView({ behavior: "smooth" });
-                      }}
-                    >
-                      查看失败项
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className={styles.secondaryButton}
-                    onClick={() => window.location.assign(buildAppPath("/app/history", location.search))}
-                  >
-                    查看写回历史
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.secondaryButton}
-                    onClick={() => {
-                      setActiveBatchId(null);
-                      setBatchDetail(null);
-                      setBatchParam(null);
-                    }}
-                  >
-                    返回审阅列表
-                  </button>
-                </div>
-              </s-stack>
-            </div>
-          </s-section>
+        {batchDetail?.isTerminal && !summaryDismissed && (
+          <WritebackSummaryModal
+            batchDetail={batchDetail}
+            onViewFailures={() => {
+              setSummaryDismissed(true);
+              window.setTimeout(() => {
+                document.getElementById("writeback-failures")?.scrollIntoView({ behavior: "smooth" });
+              }, 100);
+            }}
+            onViewHistory={() => {
+              window.location.assign(buildAppPath("/app/history", location.search));
+            }}
+            onClose={() => {
+              setActiveBatchId(null);
+              setBatchDetail(null);
+              setBatchParam(null);
+              setSummaryDismissed(false);
+              void refreshReviewList();
+            }}
+          />
         )}
 
         {failedItems.length > 0 && (
@@ -995,8 +955,8 @@ export default function AppReviewPage() {
                     )}
                     <div className={styles.failureContent}>
                       <div className={styles.meta}>
-                        <span className={`${styles.badge} ${styles[`plane_${item.candidate.altPlane}`]}`}>
-                          {ALT_PLANE_LABELS[item.candidate.altPlane]}
+                        <span className={`${styles.badge} ${styles[`plane_${item.target.primaryUsage?.type === "PRODUCT" ? "PRODUCT_MEDIA" : item.candidate.altPlane}`]}`}>
+                          {getPlaneLabel(item.candidate.altPlane, item.target.primaryUsage?.type)}
                         </span>
                         <span className={`${styles.badge} ${styles.status_WRITEBACK_FAILED_RETRYABLE}`}>
                           写回失败

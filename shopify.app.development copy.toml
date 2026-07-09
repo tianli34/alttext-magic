@@ -1,0 +1,39 @@
+name = "AltText Magic"
+client_id = "2fcc74fe0b7cefebb6f344feddfc0233"
+application_url = "https://builders-mountains-invited-voting.trycloudflare.com"
+embedded = true
+
+[access_scopes]
+scopes = "read_products,write_products,read_files,write_files,read_content,write_content"
+
+[auth]
+redirect_urls = ["https://builders-mountains-invited-voting.trycloudflare.com/auth/callback"]
+
+[webhooks]
+api_version = "2026-04"
+
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/webhooks"
+
+[[webhooks.subscriptions]]
+uri = "/webhooks"
+topics = [
+  "app/uninstalled",
+  "bulk_operations/finish",
+  "products/create",
+  "products/update",
+  "products/delete",
+  "collections/create",
+  "collections/update",
+  "collections/delete",
+]
+
+[[webhooks.subscriptions]]
+uri = "/webhooks/shop/update"
+topics = ["shop/update"]
+
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = "magic-ai-test-01.myshopify.com"

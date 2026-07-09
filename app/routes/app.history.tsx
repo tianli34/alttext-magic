@@ -9,7 +9,7 @@ import { useTimezone } from "../lib/timezone";
 import { formatDateTime } from "../lib/format";
 
 type AltPlane = "FILE_ALT" | "COLLECTION_IMAGE_ALT" | "ARTICLE_IMAGE_ALT";
-type AltPlaneFilter = "" | AltPlane;
+type HistoryCategoryFilter = "" | "PRODUCT" | AltPlane;
 
 interface HistoryItem {
   id: string;
@@ -41,21 +41,27 @@ interface HistoryResponse {
   };
 }
 
-const ALT_PLANE_OPTIONS: Array<{ value: AltPlaneFilter; label: string }> = [
+const HISTORY_CATEGORY_OPTIONS: Array<{ value: HistoryCategoryFilter; label: string }> = [
   { value: "", label: "全部类型" },
+  { value: "PRODUCT", label: "商品" },
   { value: "FILE_ALT", label: "文件" },
-  { value: "COLLECTION_IMAGE_ALT", label: "集合封面" },
-  { value: "ARTICLE_IMAGE_ALT", label: "文章封面" },
+  { value: "COLLECTION_IMAGE_ALT", label: "合集" },
+  { value: "ARTICLE_IMAGE_ALT", label: "文章" },
 ];
 
-const ALT_PLANE_LABELS: Record<AltPlane, string> = {
-  FILE_ALT: "文件",
-  COLLECTION_IMAGE_ALT: "集合封面",
-  ARTICLE_IMAGE_ALT: "文章封面",
-};
+function getHistoryPlaneLabel(item: HistoryItem): string {
+  const altPlane = item.altPlane;
+  if (altPlane === "FILE_ALT") {
+    return item.altTarget.primaryUsage?.type === "PRODUCT" ? "商品" : "文件";
+  }
+  if (altPlane === "COLLECTION_IMAGE_ALT") return "合集";
+  if (altPlane === "ARTICLE_IMAGE_ALT") return "文章";
+  return altPlane;
+}
 
-function normalizeAltPlane(value: string | null): AltPlaneFilter {
+function normalizeHistoryCategory(value: string | null): HistoryCategoryFilter {
   if (
+    value === "PRODUCT" ||
     value === "FILE_ALT" ||
     value === "COLLECTION_IMAGE_ALT" ||
     value === "ARTICLE_IMAGE_ALT"
@@ -82,7 +88,7 @@ function formatUsage(item: HistoryItem): string {
 export default function AppHistoryPage() {
   const timezone = useTimezone();
   const [searchParams, setSearchParams] = useSearchParams();
-  const selectedAltPlane = normalizeAltPlane(searchParams.get("altPlane"));
+  const selectedCategory = normalizeHistoryCategory(searchParams.get("category"));
   const selectedPage = normalizePage(searchParams.get("page"));
   const pageSize = 20;
 
@@ -97,20 +103,20 @@ export default function AppHistoryPage() {
   const [error, setError] = useState<string | null>(null);
 
   const setFilter = useCallback(
-    (next: { altPlane?: AltPlaneFilter; page?: number }) => {
+    (next: { category?: HistoryCategoryFilter; page?: number }) => {
       const params = new URLSearchParams(searchParams);
-      const altPlane = next.altPlane ?? selectedAltPlane;
+      const category = next.category ?? selectedCategory;
       const page = next.page ?? 1;
 
-      if (altPlane) params.set("altPlane", altPlane);
-      else params.delete("altPlane");
+      if (category) params.set("category", category);
+      else params.delete("category");
 
       if (page > 1) params.set("page", String(page));
       else params.delete("page");
 
       setSearchParams(params);
     },
-    [searchParams, selectedAltPlane, setSearchParams],
+    [searchParams, selectedCategory, setSearchParams],
   );
 
   useEffect(() => {
@@ -124,7 +130,10 @@ export default function AppHistoryPage() {
         const params = new URLSearchParams();
         params.set("page", String(selectedPage));
         params.set("pageSize", String(pageSize));
-        if (selectedAltPlane) params.set("altPlane", selectedAltPlane);
+        // 历史 API 只按 altPlane 筛选，"商品"需客户端过滤
+        if (selectedCategory && selectedCategory !== "PRODUCT") {
+          params.set("altPlane", selectedCategory);
+        }
 
         const response = await fetch(`/api/history?${params.toString()}`, {
           signal: controller.signal,
@@ -134,8 +143,18 @@ export default function AppHistoryPage() {
         }
 
         const data = (await response.json()) as HistoryResponse;
-        setItems(data.items);
-        setMeta(data.meta);
+        let filteredItems = data.items;
+        if (selectedCategory === "PRODUCT") {
+          filteredItems = data.items.filter(
+            (item) => item.altTarget.primaryUsage?.type === "PRODUCT",
+          );
+        }
+        setItems(filteredItems);
+        setMeta((prev) => ({
+          ...prev,
+          total: filteredItems.length,
+          totalPages: Math.max(Math.ceil(filteredItems.length / pageSize), 1),
+        }));
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setError(err instanceof Error ? err.message : "历史记录加载失败");
@@ -147,7 +166,7 @@ export default function AppHistoryPage() {
     void load();
 
     return () => controller.abort();
-  }, [selectedAltPlane, selectedPage]);
+  }, [selectedCategory, selectedPage]);
 
   const pageInfo = useMemo(
     () => `${meta.page.toLocaleString("zh-CN")} / ${meta.totalPages.toLocaleString("zh-CN")}`,
@@ -162,12 +181,12 @@ export default function AppHistoryPage() {
             <s-text tone="neutral">图片类型</s-text>
             <select
               className={styles.select}
-              value={selectedAltPlane}
+              value={selectedCategory}
               onChange={(event) =>
-                setFilter({ altPlane: event.currentTarget.value as AltPlaneFilter })
+                setFilter({ category: event.currentTarget.value as HistoryCategoryFilter })
               }
             >
-              {ALT_PLANE_OPTIONS.map((option) => (
+              {HISTORY_CATEGORY_OPTIONS.map((option) => (
                 <option key={option.value || "ALL"} value={option.value}>
                   {option.label}
                 </option>
@@ -231,7 +250,7 @@ export default function AppHistoryPage() {
                       <td className={styles.textCell}>{formatUsage(item)}</td>
                       <td>
                         <span className={styles.badge}>
-                          {ALT_PLANE_LABELS[item.altPlane]}
+                          {getHistoryPlaneLabel(item)}
                         </span>
                       </td>
                       <td className={styles.textCell}>{item.oldAltText || "(无)"}</td>

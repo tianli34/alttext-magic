@@ -37,9 +37,9 @@ export interface WritebackConfirmModalProps {
 // ============================================================================
 
 const ALT_PLANE_LABELS: Record<AltPlane, string> = {
-  FILE_ALT: "文件图片",
-  COLLECTION_IMAGE_ALT: "集合封面",
-  ARTICLE_IMAGE_ALT: "文章封面",
+  FILE_ALT: "商品/文件",
+  COLLECTION_IMAGE_ALT: "合集",
+  ARTICLE_IMAGE_ALT: "文章",
 };
 
 // ============================================================================

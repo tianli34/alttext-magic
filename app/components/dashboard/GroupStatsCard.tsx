@@ -9,10 +9,10 @@ import { buildAppPath } from "../../lib/app-navigation";
 
 /** 分组类型中文标签映射 */
 const GROUP_TYPE_LABELS: Record<string, string> = {
-  PRODUCT_MEDIA: "商品图片",
-  FILES: "文件图片",
-  COLLECTION: "合集图片",
-  ARTICLE: "文章图片",
+  PRODUCT_MEDIA: "商品",
+  FILES: "文件",
+  COLLECTION: "合集",
+  ARTICLE: "文章",
 };
 
 /** 分组图标映射 */

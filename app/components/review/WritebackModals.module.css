@@ -1,0 +1,127 @@
+/* ============================================================================
+ * WritebackModals.module.css
+ * Purpose: 写回进度弹窗 & 写回汇总弹窗样式
+ * ============================================================================ */
+
+/* ---- Modal 遮罩层 ---- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* ---- Modal 容器 ---- */
+.modal {
+  position: relative;
+  width: min(32rem, 92vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 1.5rem;
+  border: 1px solid var(--p-color-border, #8a8a8a);
+  border-radius: 0.75rem;
+  background: var(--p-color-bg-surface, #ffffff);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+
+/* ---- 进度头部 ---- */
+.progressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+/* ---- 进度统计 ---- */
+.progressStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.progressStats span {
+  color: var(--p-color-text-secondary, #6d7175);
+}
+
+/* ---- 汇总统计卡片 ---- */
+.summaryStats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.statCard {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.875rem;
+  border: 1px solid var(--p-color-border-secondary, #c9cccf);
+  border-radius: 0.5rem;
+  background: var(--p-color-bg-surface-secondary, #f6f6f7);
+  text-align: center;
+}
+
+.statCardSuccess {
+  border-color: var(--p-color-border-success, #95c9b4);
+  background: var(--p-color-bg-fill-success-secondary, #f1f8f5);
+}
+
+.statCardCaution {
+  border-color: var(--p-color-border-caution, #e1b878);
+  background: var(--p-color-bg-fill-caution-secondary, #fff8db);
+}
+
+.statCardCritical {
+  border-color: var(--p-color-border-critical, #eb9082);
+  background: var(--p-color-bg-fill-critical-secondary, #fff4f4);
+}
+
+.statNumber {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.statNumberSuccess {
+  color: var(--p-color-text-success, #108043);
+}
+
+.statNumberCaution {
+  color: var(--p-color-text-caution, #916a00);
+}
+
+.statNumberCritical {
+  color: var(--p-color-text-critical, #8e1f0b);
+}
+
+.statLabel {
+  font-size: 0.8125rem;
+  color: var(--p-color-text-secondary, #6d7175);
+}
+
+/* ---- 按类型明细 ---- */
+.typeStats {
+  display: grid;
+  gap: 0.25rem;
+}
+
+/* ---- 操作按钮区域 ---- */
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 700px) {
+  .modal {
+    width: 96vw;
+    padding: 1rem;
+  }
+
+  .summaryStats {
+    grid-template-columns: 1fr 1fr;
+  }
+}

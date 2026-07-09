@@ -1,0 +1,132 @@
+6989:          definitions: {
+7004:                  $ref: "#/definitions/positiveInteger"
+7071:                  $ref: "#/definitions/positiveInteger"
+7078:                  $ref: "#/definitions/positiveIntegerDefault0"
+7103:                  $ref: "#/definitions/schemaArray"
+7111:                  $ref: "#/definitions/positiveInteger"
+7118:                  $ref: "#/definitions/positiveIntegerDefault0"
+7129:                  $ref: "#/definitions/positiveInteger"
+7136:                  $ref: "#/definitions/positiveIntegerDefault0"
+7143:                  $ref: "#/definitions/stringArray"
+7158:            definitions: {
+7187:                    $ref: "#/definitions/stringArray"
+7200:                  $ref: "#/definitions/simpleTypes"
+7205:                    $ref: "#/definitions/simpleTypes"
+7234:                  $ref: "#/definitions/schemaArray"
+7241:                  $ref: "#/definitions/schemaArray"
+7248:                  $ref: "#/definitions/schemaArray"
+7271:          definitions: {
+7283:                { $ref: "#/definitions/nonNegativeInteger" },
+7353:            maxLength: { $ref: "#/definitions/nonNegativeInteger" },
+7354:            minLength: { $ref: "#/definitions/nonNegativeIntegerDefault0" },
+7363:                { $ref: "#/definitions/schemaArray" }
+7367:            maxItems: { $ref: "#/definitions/nonNegativeInteger" },
+7368:            minItems: { $ref: "#/definitions/nonNegativeIntegerDefault0" },
+7374:            maxProperties: { $ref: "#/definitions/nonNegativeInteger" },
+7375:            minProperties: { $ref: "#/definitions/nonNegativeIntegerDefault0" },
+7376:            required: { $ref: "#/definitions/stringArray" },
+7378:            definitions: {
+7399:                  { $ref: "#/definitions/stringArray" }
+7413:                { $ref: "#/definitions/simpleTypes" },
+7416:                  items: { $ref: "#/definitions/simpleTypes" },
+7428:            allOf: { $ref: "#/definitions/schemaArray" },
+7429:            anyOf: { $ref: "#/definitions/schemaArray" },
+7430:            oneOf: { $ref: "#/definitions/schemaArray" },
+7459:      definitions: l10n5.t("Not used for validation. Place subschemas here that you wish to reference inline with $ref."),
+8173:          seen.has(next) || (seen.add(next), handle(next), collectEntries(next.additionalItems, next.additionalProperties, next.not, next.contains, next.propertyNames, next.if, next.then, next.else, next.unevaluatedItems, next.unevaluatedProperties), collectMapEntries(next.definitions, next.$defs, next.properties, next.patternProperties, next.dependencies, next.dependentSchemas), collectArrayEntries(next.anyOf, next.allOf, next.oneOf, next.prefixItems), collectEntryOrArrayEntries(next.items)), next = toWalk.pop();
+15934:  // We do this because it's technically the same grammar (with minor redefinitions)
+18735:      let definitions = {
+18751:        return (0, utils_1.isError)(json) ? definitions : exports.FETCHED_METAFIELD_CATEGORIES.reduce((definitions2, group) => {
+18753:            definitions2[group] = json[group].map((definition) => ({
+18765:          return definitions2;
+18766:        }, definitions);
+18768:        return definitions;
+24801:          description: "This check exists to prevent bloat in themes by surfacing variable definitions that are not used.",
+29573:        name: "Missing schema definitions in theme app extensions app blocks should be avoided",
+29575:          description: "Report missing schema definitions in theme app extensions app blocks",
+44924:        for (let [category, definitions] of Object.entries(metafieldDefinitionMap)) {
+44926:          for (let definition of definitions)
+58974:      DuplicateDeclarations: new Rule("duplicateProperties", l10n12.t("Do not use duplicate style definitions"), Ignore),
+89050:// ../../node_modules/.pnpm/@shopify+theme-language-server-common@2.20.0/node_modules/@shopify/theme-language-server-common/dist/definitions/providers/SchemaTranslationStringDefinitionProvider.js
+89052:  "../../node_modules/.pnpm/@shopify+theme-language-server-common@2.20.0/node_modules/@shopify/theme-language-server-common/dist/definitions/providers/SchemaTranslationStringDefinitionProvider.js"(exports) {
+89061:      async definitions(params, node, ancestors) {
+89096:// ../../node_modules/.pnpm/@shopify+theme-language-server-common@2.20.0/node_modules/@shopify/theme-language-server-common/dist/definitions/providers/TranslationStringDefinitionProvider.js
+89098:  "../../node_modules/.pnpm/@shopify+theme-language-server-common@2.20.0/node_modules/@shopify/theme-language-server-common/dist/definitions/providers/TranslationStringDefinitionProvider.js"(exports) {
+89107:      async definitions(params, node, ancestors) {
+89137:// ../../node_modules/.pnpm/@shopify+theme-language-server-common@2.20.0/node_modules/@shopify/theme-language-server-common/dist/definitions/DefinitionProvider.js
+89139:  "../../node_modules/.pnpm/@shopify+theme-language-server-common@2.20.0/node_modules/@shopify/theme-language-server-common/dist/definitions/DefinitionProvider.js"(exports) {
+89151:      async definitions(params) {
+89155:        let { textDocument } = sourceCode, [node, ancestors] = (0, theme_check_common_1.findCurrentNode)(sourceCode.ast, textDocument.offsetAt(params.position)), results = await Promise.all(this.providers.map((provider) => provider.definitions(params, node, ancestors))).then((res) => res.flat());
+96481:      let definitionsProvider = new DefinitionProvider_1.DefinitionProvider(documentManager, getDefaultLocaleSourceCode, getDefaultSchemaLocaleSourceCode), jsonLanguageService = new JSONLanguageService_1.JSONLanguageService(documentManager, jsonValidationSet, getSchemaTranslationsForURI, getModeForURI, getThemeBlockNames, getThemeBlockSchema, findThemeRootURI), completionsProvider = new completions_1.CompletionsProvider({
+96617:      }), connection.onDefinition(async (params) => hasUnsupportedDocument(params) ? [] : definitionsProvider.definitions(params)), connection.onCodeAction(async (params) => codeActionsProvider.codeActions(params)), connection.onExecuteCommand(async (params) => {
+106480:        var seenKeys = /* @__PURE__ */ new Set(), definitions = [];
+106481:        return ast.definitions.forEach(function(fragmentDefinition) {
+106486:this in the docs: http://dev.apollodata.com/core/fragments.html#unique-names`) : sourceKeySet || fragmentSourceMap.set(fragmentName, sourceKeySet = /* @__PURE__ */ new Set()), sourceKeySet.add(sourceKey), seenKeys.has(sourceKey) || (seenKeys.add(sourceKey), definitions.push(fragmentDefinition));
+106488:            definitions.push(fragmentDefinition);
+106489:        }), tslib.__assign(tslib.__assign({}, ast), { definitions });
+106492:        var workSet = new Set(doc.definitions);
+106623:        definitions: [operationDefinition, ...fragments]
+106628:    }), accumulator))(documentNode.definitions, {}), collectAllFragmentReferences = (node, allFragments) => {
+106640:      let graphqlDocument = graphql_tag.default(graphqlString), documentNodeAsString = generateDocumentNodeString(graphqlDocument, mapDocumentNode), allFragments = collectAllFragmentDefinitions(graphqlDocument), lines = graphqlDocument.definitions.reduce((accumulator, definition) => {
+107768:       * (e.g. "schema.json#/definitions/person/name" => ["definitions", "person", "name"])
+107791:       * @param base - The base path (e.g. "schema.json#/definitions/person")
+110505:          let keys = Object.keys(obj).sort((a3, b) => a3 === "definitions" ? -1 : b === "definitions" ? 1 : a3.length - b.length);
+110566:          let aDefinitionsIndex = a3.pathFromRoot.lastIndexOf("/definitions"), bDefinitionsIndex = b.pathFromRoot.lastIndexOf("/definitions");
+193778:  definitions: [
+193855:  definitions: [
+193910:  definitions: [
+193987:  definitions: [
+194054:  definitions: [
+194141:  definitions: [
+194308:  definitions: [
+194410:  definitions: [
+194494:  definitions: [
+194572:// ../cli-kit/dist/cli/api/graphql/admin/generated/metafield_definitions_by_owner_type.js
+194576:  definitions: [
+194645:  definitions: [
+194714:  definitions: [
+194760:  definitions: [
+194802:  definitions: [
+195201:  recordEvent("theme-api:fetch-metafield-definitions");
+199774:    promises.push(metafieldDefinitionsByOwnerType(ownerType, session).catch((_3) => (failedFetchByOwnerType.push(ownerType), [])).then((definitions) => ({
+199775:      [handle]: definitions
+199783:      body: "Failed to fetch metafield definitions.",
+199786:        "Ensure you have the permission to fetch metafield definitions."
+199799:  await writeMetafieldDefinitionsToFile(path3, result), failedFetchByOwnerType.length > 0 && outputDebug(`Failed to fetch metafield definitions for the following owner types: ${failedFetchByOwnerType.join(", ")}`), silent || renderSuccess({ body: "Metafield definitions have been successfully downloaded." });
+200916:MetafieldsPull.summary = "Download metafields definitions from your shop into a local file.";
+213035:  definitions: [
+213210:  definitions: [
+213253:  definitions: [
+213416:  definitions: [
+213870:  definitions: [
+213928:  definitions: [
+213994:  definitions: [
+214086:  definitions: [
+214139:  definitions: [
+214255:  definitions: [
+214382:  definitions: [
+214439:  definitions: [
+214579:  definitions: [
+214679:  definitions: [
+214818:  definitions: [
+214883:  definitions: [
+214984:  definitions: [
+215098:  definitions: [
+215206:  definitions: [
+215275:  definitions: [
+215373:  definitions: [
+215427:  definitions: [
+215481:  definitions: [
+215517:  definitions: [
+215613:  definitions: [
+215642:  definitions: [
+215717:  definitions: [
+215782:  definitions: [
+215883:  definitions: [
+218716:  definitions: [
+218766:  definitions: [
+225592:  definitions: [
+225686:  definitions: [
+225834:  definitions: [
+226057:  if ((0, import_graphql12.parse)(graphqlOperation).definitions.filter((def) => def.kind === "OperationDefinition").length !== 1)
+226063:  let operation = (0, import_graphql12.parse)(graphqlOperation).definitions.find((def) => def.kind === "OperationDefinition");

@@ -97,10 +97,10 @@ interface UsageState {
 }
 
 const GROUP_LABELS: Record<GroupType, string> = {
-  PRODUCT_MEDIA: "商品图片",
-  FILES: "文件图片",
-  COLLECTION: "合集图片",
-  ARTICLE: "文章图片",
+  PRODUCT_MEDIA: "商品",
+  FILES: "文件",
+  COLLECTION: "合集",
+  ARTICLE: "文章",
 };
 
 const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
@@ -167,12 +167,8 @@ function getStatusToneClass(status: CandidateStatus): string {
   return "";
 }
 
-function formatPosition(positionIndex: number | null, usageCount: number): string {
-  if (positionIndex !== null) {
-    return `Image ${positionIndex} of ${usageCount}`;
-  }
-
-  return usageCount > 0 ? `${usageCount} usages` : "位置未知";
+function formatPosition(positionIndex: number, usageCount: number): string {
+  return `Image ${positionIndex} of ${usageCount}`;
 }
 
 function formatUsagePosition(positionIndex: number | null): string {
@@ -513,8 +509,17 @@ export default function AppCandidatesPage() {
 
   /* ---- 生成完成后刷新列表及分组计数 ---- */
   const handleCloseSummary = useCallback(() => {
+    const summary = flow.summary;
     flow.closeSummary();
     clearSelection();
+
+    // 100% 成功（无失败）→ 跳转到 Generated 分类
+    if (summary && summary.failed === 0) {
+      updateFilter({ status: "GENERATED" });
+      return;
+    }
+
+    // 否则（存在失败）→ 仅关闭汇总并重新加载以反映最新状态
     // 重新加载候选列表 + 分组计数以反映最新状态
     const controller = new AbortController();
 
@@ -541,7 +546,7 @@ export default function AppCandidatesPage() {
     }
 
     void reload();
-  }, [flow, clearSelection, selectedGroup, selectedStatus]);
+  }, [flow, clearSelection, selectedGroup, selectedStatus, updateFilter]);
 
   // 判断是否所有可选项都已选中
   const allSelectableSelected = selectableItems.length > 0 &&
@@ -709,12 +714,14 @@ export default function AppCandidatesPage() {
                         </s-heading>
 
                         <s-stack direction="inline" gap="base">
-                          <s-text tone="neutral">
-                            {formatPosition(
-                              item.primaryUsage.positionIndex,
-                              item.usageCountPresent,
-                            )}
-                          </s-text>
+                          {item.primaryUsage.positionIndex !== null && (
+                            <s-text tone="neutral">
+                              {formatPosition(
+                                item.primaryUsage.positionIndex,
+                                item.usageCountPresent,
+                              )}
+                            </s-text>
+                          )}
                           <s-text tone="neutral">
                             总使用数 {item.usageCountPresent.toLocaleString("zh-CN")}
                           </s-text>
@@ -739,7 +746,7 @@ export default function AppCandidatesPage() {
                           onClick={() => void toggleUsages(item)}
                         >
                           {item.additionalUsageCount > 0
-                            ? `+${item.additionalUsageCount.toLocaleString("zh-CN")} more usages`
+                            ? `+${item.additionalUsageCount.toLocaleString("zh-CN")} more ${item.additionalUsageCount === 1 ? "usage" : "usages"}`
                             : "查看影响范围"}
                         </button>
                       </s-stack>

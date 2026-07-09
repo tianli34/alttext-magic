@@ -1,0 +1,275 @@
+2026-06-21T02:39:42.286Z: Running command app dev
+2026-06-21T02:39:42.306Z: Running system process:
+  · Command: C:\nvm4w\nodejs\node.exe C:\Users\LiSama!\AppData\Roaming\npm\node_modules\@shopify\cli\bin\run.js notifications list --ignore-errors
+  · Working directory: E:/alttext-magic
+
+2026-06-21T02:39:42.329Z: Notifications to show: 0
+2026-06-21T02:39:42.369Z: Reading cached app information for directory E:/alttext-magic...
+2026-06-21T02:39:42.371Z: Reading the content of file at shopify.app.development.toml...
+2026-06-21T02:39:42.382Z: Reading the content of file at shopify.app.development.toml...
+2026-06-21T02:39:42.386Z: Ensuring that the user is authenticated with the App Management API with the following scopes:
+[]
+
+2026-06-21T02:39:42.386Z: Getting session store...
+2026-06-21T02:39:42.389Z: Getting current session ID...
+2026-06-21T02:39:42.390Z: Validating existing session against the scopes:
+[
+  "openid",
+  "https://api.shopify.com/auth/shop.admin.graphql",
+  "https://api.shopify.com/auth/shop.admin.themes",
+  "https://api.shopify.com/auth/partners.collaborator-relationships.readonly",
+  "https://api.shopify.com/auth/shop.storefront-renderer.devtools",
+  "https://api.shopify.com/auth/partners.app.cli.access",
+  "https://api.shopify.com/auth/destinations.readonly",
+  "https://api.shopify.com/auth/organization.store-management",
+  "https://api.shopify.com/auth/organization.on-demand-user-access",
+  "https://api.shopify.com/auth/organization.apps.manage"
+]
+For applications:
+{
+  "appManagementApi": {
+    "scopes": []
+  },
+  "businessPlatformApi": {
+    "scopes": []
+  }
+}
+
+2026-06-21T02:39:42.391Z: - Token validation -> It's expired: false
+2026-06-21T02:39:42.398Z: Sending "BusinessPlatform" GraphQL request:
+  query UserInfo {
+  currentUserAccount {
+    uuid
+    email
+    organizations(first: 2) {
+      nodes {
+        name
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}
+
+With request headers:
+ - User-Agent: Shopify CLI; v=3.88.1
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+
+to https://destinations.shopifysvc.com/destinations/api/2020-07/graphql
+2026-06-21T02:39:42.452Z: Sending "App Management" GraphQL request:
+  query ActiveAppReleaseFromApiKey($apiKey: String!) {
+  app: appByKey(key: $apiKey) {
+    ...AppVersionInfo
+    __typename
+  }
+}
+
+fragment ReleasedAppModule on AppModule {
+  uuid
+  userIdentifier
+  handle
+  config
+  target
+  specification {
+    identifier
+    externalIdentifier
+    name
+    managementExperience
+  }
+}
+
+fragment AppVersionInfo on App {
+  id
+  key
+  organizationId
+  activeRoot {
+    clientCredentials {
+      secrets {
+        key
+      }
+    }
+    grantedShopifyApprovalScopes
+  }
+  activeRelease {
+    id
+    version {
+      name
+      appModules {
+        ...ReleasedAppModule
+      }
+    }
+  }
+}
+
+With variables:
+{
+  "apiKey": "*****"
+}
+
+With request headers:
+ - User-Agent: Shopify CLI; v=3.88.1
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+
+to https://app.shopify.com/app_management/unstable/graphql.json
+2026-06-21T02:39:43.581Z: Request to https://app.shopify.com/app_management/unstable/graphql.json completed in 1127 ms
+With response headers:
+ - content-type: application/json; charset=utf-8
+ - server-timing: processing;dur=202, verdict_flag_enabled;desc="count=3";dur=0.078, _y;desc="30d0a453-1e20-417d-a727-342c37fbc49d", _s;desc="e5fe6188-be92-456b-b33b-3e9b8717b59c"
+ - x-request-id: abc371ff-ae0e-4cc2-b113-3beb53bd0632-1782009583
+    
+2026-06-21T02:39:43.597Z: Sending "BusinessPlatform" GraphQL request:
+  query FindOrganizations($organizationId: OrganizationID!) {
+  currentUserAccount {
+    organization(id: $organizationId) {
+      id
+      name
+      __typename
+    }
+    __typename
+  }
+}
+
+With variables:
+{
+  "organizationId": "Z2lkOi8vb3JnYW5pemF0aW9uL09yZ2FuaXphdGlvbi8yMDA4OTMyMTQ="
+}
+
+With request headers:
+ - User-Agent: Shopify CLI; v=3.88.1
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+
+to https://destinations.shopifysvc.com/destinations/api/2020-07/graphql
+2026-06-21T02:39:43.643Z: Sending "App Management" GraphQL request:
+  query fetchSpecifications($organizationId: ID!) {
+  specifications(organizationId: $organizationId) {
+    name
+    identifier
+    externalIdentifier
+    features
+    uidStrategy {
+      appModuleLimit
+      isClientProvided
+      __typename
+    }
+    validationSchema {
+      jsonSchema
+      __typename
+    }
+    __typename
+  }
+}
+
+With variables:
+{
+  "organizationId": "gid://shopify/Organization/200893214"
+}
+
+With request headers:
+ - User-Agent: Shopify CLI; v=3.88.1
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+
+to https://app.shopify.com/app_management/unstable/graphql.json
+2026-06-21T02:39:45.090Z: Request to https://app.shopify.com/app_management/unstable/graphql.json completed in 1446 ms
+With response headers:
+ - content-type: application/json; charset=utf-8
+ - server-timing: processing;dur=535, verdict_flag_enabled;desc="count=8";dur=0.399, _y;desc="32980ca5-579d-4e9a-886a-da291246cc38", _s;desc="66c8655f-0881-48b5-b83e-12bdc2fee305"
+ - x-request-id: 8550b836-812d-4760-a1f3-d416558fcbd6-1782009584
+    
+2026-06-21T02:39:45.120Z: The following extension specifications were defined locally but not found in the remote specifications: tax_calculation
+2026-06-21T02:39:45.120Z: The following extension specifications were found in the remote specifications but not defined locally: admin_app, app_link, app_nav_item, bulk_action, checkout_script_tag, flow_action_definition, flow_trigger_definition, flow_trigger_discovery_webhook, manage_marketplaces, marketing_action, marketing_activity_extension, merchandising_create_publication, merchandising_fulfillment_variant_details, ping_message_callback, pos_link, product_configuration_link, resource_publication_settings, retail_cart_promotion, retail_product_recommendation, subscription_link
+2026-06-21T02:39:45.125Z: Reading the content of file at shopify.app.alttext-magic.toml...
+2026-06-21T02:39:45.125Z: Reading the content of file at shopify.app.development copy.toml...
+2026-06-21T02:39:45.129Z: Reading the content of file at .gitignore...
+╭─ error ──────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  App configuration is not valid                                              │
+│  Validation errors in shopify.app.development.toml:                          │
+│                                                                              │
+│  • [definitions]: Required                                                   │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+2026-06-21T02:39:46.109Z: Running system process:
+  · Command: npm prefix
+  · Working directory: E:/alttext-magic
+
+2026-06-21T02:39:46.554Z: Obtaining the dependency manager in directory E:\alttext-magic...
+2026-06-21T02:39:47.755Z: Request to https://monorail-edge.shopifysvc.com/v1/produce completed in 803 ms
+With response headers:
+ - x-request-id: 6c83b7d7-4bf8-4525-92ca-0badd976891f
+    
+2026-06-21T02:39:47.756Z: Analytics event sent: {
+  "command": "app dev",
+  "time_start": 1782009582288,
+  "time_end": 1782009585979,
+  "total_time": 3691,
+  "success": false,
+  "cli_version": "3.88.1",
+  "ruby_version": "",
+  "node_version": "22.18.0",
+  "is_employee": false,
+  "uname": "windows amd64",
+  "env_ci": false,
+  "env_plugin_installed_any_custom": false,
+  "env_plugin_installed_shopify": "[\"@shopify/cli\"]",
+  "env_shell": "powershell",
+  "env_device_id": "a22f37e593d4e07a6a0224daa39c2cedb71ebb95",
+  "env_cloud": "localhost",
+  "env_package_manager": "pnpm",
+  "env_is_global": true,
+  "env_auth_method": "device_auth",
+  "env_is_wsl": false,
+  "env_build_repository": "Shopify/cli",
+  "cmd_app_warning_api_key_deprecation_displayed": false,
+  "cmd_app_all_configs_any": true,
+  "cmd_app_all_configs_clients": "{\"shopify.app.alttext-magic.toml\":\"2fcc74fe0b7cefebb6f344feddfc0233\",\"shopify.app.development copy.toml\":\"2fcc74fe0b7cefebb6f344feddfc0233\",\"shopify.app.development.toml\":\"2fcc74fe0b7cefebb6f344feddfc0233\"}",
+  "cmd_app_linked_config_used": true,
+  "cmd_app_linked_config_name": "shopify.app.development.toml",
+  "cmd_app_linked_config_git_tracked": true,
+  "cmd_app_linked_config_source": "cached",
+  "cmd_app_linked_config_uses_cli_managed_urls": true,
+  "cmd_all_timing_network_ms": 2574,
+  "cmd_all_timing_prompts_ms": 0,
+  "cmd_all_launcher": "unknown",
+  "cmd_all_topic": "app",
+  "cmd_all_plugin": "@shopify/app",
+  "cmd_all_verbose": true,
+  "cmd_all_path_override": true,
+  "cmd_all_path_override_hash": "cf021806940d8c063e16b985107a2d8ab186fff8",
+  "cmd_app_dependency_installation_skipped": false,
+  "cmd_app_reset_used": false,
+  "cmd_dev_tunnel_type": "auto",
+  "cmd_all_last_graphql_request_id": "8550b836-812d-4760-a1f3-d416558fcbd6-1782009584",
+  "cmd_all_timing_active_ms": 1116,
+  "cmd_all_exit": "expected_error",
+  "user_id": "0da04abe-a3fe-4ed4-bea2-c9398cc97627",
+  "request_ids": [
+    "abc371ff-ae0e-4cc2-b113-3beb53bd0632-1782009583",
+    "8550b836-812d-4760-a1f3-d416558fcbd6-1782009584"
+  ],
+  "args": "--verbose",
+  "error_message": "App configuration is not valid\nValidation errors in shopify.app.development.toml:\n\n• [definitions]: Required\n",
+  "env_plugin_installed_all": "[\"@shopify/cli\"]",
+  "env_shopify_variables": "{}",
+  "metadata": "{\"extraPublic\":{},\"extraSensitive\":{}}"
+}
+2026-06-21T02:39:47.785Z: Reporting handled error to Bugsnag: App configuration is not valid
+Validation errors in shopify.app.development.toml:
+
+• [definitions]: Required
+
+2026-06-21T02:39:47.877Z: Running system process:
+  · Command: npm prefix
+  · Working directory: E:/alttext-magic
+
+2026-06-21T02:39:48.233Z: Obtaining the dependency manager in directory E:\alttext-magic...

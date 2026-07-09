@@ -9,7 +9,7 @@
  *   pageSize : 每页条数（默认 20，上限 50）
  *   sortBy   : createdAt（默认）| altPlane
  */
-import { AltCandidateStatus, AltPlane } from "@prisma/client";
+import { AltCandidateStatus, AltPlane, CandidateGroupType } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { z, ZodError } from "zod";
 import prisma from "../db.server";
@@ -33,6 +33,7 @@ const querySchema = z.object({
     .enum(REVIEW_VISIBLE_STATUSES as unknown as [string, ...string[]])
     .optional(),
   altPlane: z.nativeEnum(AltPlane).optional(),
+  groupType: z.nativeEnum(CandidateGroupType).optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).optional(),
   sortBy: z
@@ -63,6 +64,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     parsed = querySchema.parse({
       status: url.searchParams.get("status") ?? undefined,
       altPlane: url.searchParams.get("altPlane") ?? undefined,
+      groupType: url.searchParams.get("groupType") ?? undefined,
       page: url.searchParams.get("page") ?? undefined,
       pageSize: url.searchParams.get("pageSize") ?? undefined,
       sortBy: url.searchParams.get("sortBy") ?? undefined,
@@ -95,6 +97,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const data = await listReviewCandidates(shop.id, {
     status: parsed.status as ReviewVisibleStatus | undefined,
     altPlane: parsed.altPlane,
+    groupType: parsed.groupType,
     page: normalizePage(parsed.page),
     pageSize: normalizePageSize(parsed.pageSize),
     sortBy: (parsed.sortBy ?? "createdAt") as ReviewSortField,

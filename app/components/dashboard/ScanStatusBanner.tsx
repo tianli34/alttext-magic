@@ -18,10 +18,10 @@ interface ScanProgressPageProps {
 
 /** 资源类型中文标签 */
 const RESOURCE_LABELS: Record<string, string> = {
-  PRODUCT_MEDIA: "商品图片",
-  FILES: "文件图片",
-  COLLECTION_IMAGE: "合集图片",
-  ARTICLE_IMAGE: "文章图片",
+  PRODUCT_MEDIA: "商品",
+  FILES: "文件",
+  COLLECTION_IMAGE: "合集",
+  ARTICLE_IMAGE: "文章",
 };
 
 /**

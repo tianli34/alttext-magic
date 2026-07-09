@@ -16,10 +16,10 @@ import { useScanStatus, type ScanStatusData } from "./useScanStatus";
 
 /** 资源类型中文标签映射 */
 const RESOURCE_TYPE_LABELS: Record<string, string> = {
-  PRODUCT_MEDIA: "商品图片",
+  PRODUCT_MEDIA: "商品",
   FILES: "文件",
-  COLLECTION_IMAGE: "合集图片",
-  ARTICLE_IMAGE: "文章图片",
+  COLLECTION_IMAGE: "合集",
+  ARTICLE_IMAGE: "文章",
 };
 
 /** 进度阶段中文标签映射 */

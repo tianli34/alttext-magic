@@ -1,0 +1,20 @@
+201694:      /(.*)(node_modules\/|server-assets-manifest:|server-entry-module:)(react-dom|@remix-run|@shopify\/hydrogen|react-router|react-router-dom)\/(.*)/g
+201920:    execSync2("npx react-router --version", {
+201928:  options.watch ? exec3("npx react-router typegen --watch", {
+201930:  }) : execSync2("npx react-router typegen", {
+204544:  return !!name.includes("react-router");
+204675:    "react-router",
+204676:    "react-router-dom",
+204677:    "@react-router/dev",
+204678:    "@react-router/fs-routes"
+204947:// ../../node_modules/.pnpm/@shopify+cli-hydrogen@11.1.5_@graphql-codegen+cli@5.0.4_@parcel+watcher@2.5.1_@types+no_1dab9937c446c9bfba7229e66e4ca808/node_modules/@shopify/cli-hydrogen/dist/lib/react-router-version-check.js
+204950:  "react-router",
+204951:  "react-router-dom",
+204952:  "@react-router/dev",
+204953:  "@react-router/fs-routes"
+204982:`), devPackages = ["@react-router/dev", "@react-router/fs-routes"], regularMismatches = mismatches.filter(
+206296:            await execAsync("npx react-router typegen", {
+206301:              "Failed to generate React Router types. You may need to run `npx react-router typegen` manually."
+206362:            await execAsync("npx react-router typegen", {
+206367:              "Failed to generate React Router types after route generation. You may need to run `npx react-router typegen` manually."
+227436:    url: "https://github.com/Shopify/shopify-app-template-react-router",

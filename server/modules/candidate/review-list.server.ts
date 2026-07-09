@@ -8,6 +8,7 @@
 import {
   AltCandidateStatus,
   AltPlane,
+  CandidateGroupType,
   JobItemStatus,
   type CandidateGroupPrimaryUsageType,
   type Prisma,
@@ -37,6 +38,8 @@ export interface ReviewListQuery {
   status?: ReviewVisibleStatus;
   /** 筛选 altPlane */
   altPlane?: AltPlane;
+  /** 筛选分组类型（与 altPlane 配合使用，例如 FILE_ALT + PRODUCT_MEDIA 表示商品图片） */
+  groupType?: CandidateGroupType;
   /** 页码（从 1 开始） */
   page: number;
   /** 每页条数 */
@@ -163,8 +166,17 @@ export function buildReviewWhere(
     },
   };
 
-  if (query.altPlane) {
-    where.altTarget = { altPlane: query.altPlane };
+  if (query.altPlane || query.groupType) {
+    const altTargetWhere: Prisma.AltTargetWhereInput = {};
+    if (query.altPlane) {
+      altTargetWhere.altPlane = query.altPlane;
+    }
+    if (query.groupType) {
+      altTargetWhere.groupProjections = {
+        some: { groupType: query.groupType },
+      };
+    }
+    where.altTarget = altTargetWhere;
   }
 
   return where;
