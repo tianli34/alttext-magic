@@ -24,9 +24,13 @@ export async function processWebhookEvent(webhookEventId) {
         logger.warn({ webhookEventId }, "webhook.process.event_not_found");
         return;
     }
+    const jobLogger = logger.withContext({
+        shop_domain: event.shopDomain,
+        job_item_id: event.id,
+    });
     // 已处理或已合并的事件跳过
     if (event.status === "PROCESSED" || event.coalescedIntoEventId) {
-        logger.info({ webhookEventId, status: event.status }, "webhook.process.skipped");
+        jobLogger.info({ webhookEventId, status: event.status }, "webhook.process.skipped");
         return;
     }
     // 标记为处理中
@@ -40,7 +44,7 @@ export async function processWebhookEvent(webhookEventId) {
         },
     });
     try {
-        await dispatchByTopic(event);
+        await dispatchByTopic(event, jobLogger);
         await prisma.webhookEvent.update({
             where: { id: webhookEventId },
             data: {
@@ -48,7 +52,7 @@ export async function processWebhookEvent(webhookEventId) {
                 processedAt: new Date(),
             },
         });
-        logger.info({ webhookEventId, topic: event.topic }, "webhook.process.completed");
+        jobLogger.info({ webhookEventId, topic: event.topic }, "webhook.process.completed");
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -59,7 +63,7 @@ export async function processWebhookEvent(webhookEventId) {
                 errorMessage: message,
             },
         });
-        logger.error({ webhookEventId, topic: event.topic, err: error }, "webhook.process.failed");
+        jobLogger.error({ webhookEventId, topic: event.topic, err: error, error_code: "WEBHOOK_PROCESS_FAILED", error_message: message }, "webhook.process.failed");
         throw error;
     }
 }
@@ -67,9 +71,9 @@ export async function processWebhookEvent(webhookEventId) {
  * 根据 topic 分发到对应业务处理器。
  * TODO: 接入各业务模块（scan-continuous / gdpr / scope-update 等）
  */
-async function dispatchByTopic(event) {
+async function dispatchByTopic(event, log) {
     const normalizedTopic = event.topic.toUpperCase().replace(/\//g, "_");
-    logger.info({
+    log.info({
         webhookEventId: event.id,
         topic: event.topic,
         shopDomain: event.shopDomain,
@@ -83,7 +87,7 @@ async function dispatchByTopic(event) {
     }
     // APP_SUBSCRIPTIONS_UPDATE: 订阅状态变化 → 调用统一订阅同步服务
     if (normalizedTopic === "APP_SUBSCRIPTIONS_UPDATE") {
-        logger.info({ webhookEventId: event.id, shopDomain: event.shopDomain }, "webhook.process.billing-sync");
+        log.info({ webhookEventId: event.id, shopDomain: event.shopDomain }, "webhook.process.billing-sync");
         await syncSubscriptionFromShopify(event.shopDomain);
         return;
     }

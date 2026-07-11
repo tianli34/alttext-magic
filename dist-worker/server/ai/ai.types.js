@@ -5,9 +5,11 @@
 // ----------------------------------------------------------------
 export class AIGenerationError extends Error {
     cause;
-    constructor(message, cause) {
+    modelCalls;
+    constructor(message, cause, modelCalls) {
         super(message);
         this.cause = cause;
+        this.modelCalls = modelCalls;
         this.name = "AIGenerationError";
     }
 }

@@ -14,7 +14,7 @@ export function getGenerateAltQueue() {
 }
 export async function enqueueGenerateAltJob(data) {
     await getGenerateAltQueue().add("generate_alt", data, {
-        jobId: `${data.batchId}:${data.candidateId}`,
+        jobId: `${data.batchId}_${data.candidateId}`,
         attempts: 3,
         backoff: { type: "exponential", delay: 30_000 },
         removeOnComplete: { count: 1_000 },

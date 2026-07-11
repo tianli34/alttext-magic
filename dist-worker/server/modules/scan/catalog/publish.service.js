@@ -5,6 +5,9 @@
 import { Prisma, } from "@prisma/client";
 import prisma from "../../../db/prisma.server";
 import { createLogger } from "../../../utils/logger";
+import { recordMetric } from "../../../../shared/logger/metrics";
+import { convergeProduct } from "../productConvergence";
+import { convergeCollection } from "../collectionConvergence";
 const logger = createLogger({ module: "publish-service" });
 const DEFAULT_LOCALE = "default";
 const FILE_ALT_RESOURCE_TYPES = new Set([
@@ -120,11 +123,48 @@ export async function publishScanResult(input) {
         const impactedTargetIds = new Set();
         let publishedTargetCount = 0;
         let publishedUsageCount = 0;
+        let candidateCount = 0;
+        let projectionCount = 0;
         const successfulSet = new Set(successfulResourceTypes);
-        const fileUsageRows = resultUsages.filter((usage) => FILE_ALT_RESOURCE_TYPES.has(usage.resourceType));
-        const fileWriteTargetIds = new Set(fileUsageRows
-            .filter((usage) => successfulSet.has(usage.resourceType))
-            .map((usage) => usage.writeTargetId));
+        // 1. 处理 PRODUCT_MEDIA 类型的资源
+        if (successfulSet.has("PRODUCT_MEDIA")) {
+            const productMediaUsages = resultUsages.filter((usage) => usage.resourceType === "PRODUCT_MEDIA");
+            const usagesByProductId = new Map();
+            for (const usage of productMediaUsages) {
+                const list = usagesByProductId.get(usage.usageId) || [];
+                list.push(usage);
+                usagesByProductId.set(usage.usageId, list);
+            }
+            for (const [productId, groupUsages] of usagesByProductId.entries()) {
+                const mediaImages = groupUsages.map((u) => {
+                    const target = resultTargetMap.get(buildTargetSliceKey("FILE_ALT", u.writeTargetId, DEFAULT_LOCALE));
+                    return {
+                        id: u.writeTargetId,
+                        alt: target?.currentAltText ?? null,
+                        url: target?.previewUrl ?? "",
+                        positionIndex: u.positionIndex ?? undefined,
+                    };
+                });
+                const firstUsage = groupUsages[0];
+                const productTitle = firstUsage?.title;
+                const productHandle = firstUsage?.handle;
+                const convergeResult = await convergeProduct(tx, {
+                    shopId: scanJob.shopId,
+                    productId,
+                    mediaImages,
+                    productTitle,
+                    productHandle,
+                    scanJobId: scanJob.id,
+                });
+                publishedTargetCount += convergeResult.publishedTargetCount;
+                publishedUsageCount += convergeResult.publishedUsageCount;
+                candidateCount += convergeResult.candidateCount;
+                projectionCount += convergeResult.projectionCount;
+            }
+        }
+        // 2. 处理 FILES 类型的资源（FILES 无 usage，直接基于 resultTargets）
+        const fileTargetRows = resultTargets.filter((target) => target.resourceType === "FILES");
+        const fileWriteTargetIds = new Set(fileTargetRows.map((t) => t.writeTargetId));
         if (fileWriteTargetIds.size > 0) {
             const fileTargetsToPublish = dedupeTargets([...fileWriteTargetIds]
                 .map((writeTargetId) => resultTargetMap.get(buildTargetSliceKey("FILE_ALT", writeTargetId, DEFAULT_LOCALE)))
@@ -141,67 +181,56 @@ export async function publishScanResult(input) {
                 impactedTargetIds.add(publishedTarget.id);
                 publishedTargetCount += 1;
             }
-            for (const usage of fileUsageRows.filter((row) => successfulSet.has(row.resourceType))) {
-                const altTargetId = altTargetIdByWriteTargetId.get(usage.writeTargetId);
-                if (!altTargetId) {
-                    continue;
-                }
-                await upsertPublishedUsage(tx, {
-                    ...usage,
-                    altTargetId,
-                    lastPublishedScanJobId: scanJob.id,
-                    lastSeenAt: now,
-                    lastSeenScanJobId: scanJob.id,
-                    presentStatus: "PRESENT",
-                });
-                publishedUsageCount += 1;
-            }
-            if (successfulSet.has("PRODUCT_MEDIA")) {
-                const sweptTargetIds = await sweepUsageSlice(tx, {
-                    shopId: scanJob.shopId,
-                    usageType: "PRODUCT",
-                    currentUsageKeys: new Set(fileUsageRows
-                        .filter((usage) => usage.resourceType === "PRODUCT_MEDIA")
-                        .map((usage) => {
-                        const altTargetId = altTargetIdByWriteTargetId.get(usage.writeTargetId);
-                        return altTargetId ? buildUsageSliceKey(altTargetId, usage.usageType, usage.usageId) : null;
-                    })
-                        .filter(isNonNull)),
-                    scanJobId: scanJob.id,
-                });
-                sweptTargetIds.forEach((targetId) => impactedTargetIds.add(targetId));
-            }
-            if (successfulSet.has("FILES")) {
-                const sweptTargetIds = await sweepUsageSlice(tx, {
-                    shopId: scanJob.shopId,
-                    usageType: "FILE",
-                    currentUsageKeys: new Set(fileUsageRows
-                        .filter((usage) => usage.resourceType === "FILES")
-                        .map((usage) => {
-                        const altTargetId = altTargetIdByWriteTargetId.get(usage.writeTargetId);
-                        return altTargetId ? buildUsageSliceKey(altTargetId, usage.usageType, usage.usageId) : null;
-                    })
-                        .filter(isNonNull)),
-                    scanJobId: scanJob.id,
-                });
-                sweptTargetIds.forEach((targetId) => impactedTargetIds.add(targetId));
-            }
-            await recomputeFileAltPresentStatus(tx, {
-                scanJobId: scanJob.id,
-                targetIds: [...impactedTargetIds],
-            });
         }
+        // 3. 处理 COLLECTION_IMAGE 类型的资源（通过 convergeCollection 共享收敛规则）
         if (successfulSet.has("COLLECTION_IMAGE")) {
-            const impacted = await publishSingleTargetSlice(tx, {
-                shopId: scanJob.shopId,
-                scanJobId: scanJob.id,
-                altPlane: "COLLECTION_IMAGE_ALT",
-                resultTargets: resultTargets.filter((target) => target.resourceType === "COLLECTION_IMAGE"),
-                now,
+            const collectionTargets = resultTargets.filter((target) => target.resourceType === "COLLECTION_IMAGE");
+            // 3a. 构建本次扫描结果中包含的 collectionId 集合
+            const scannedCollectionIds = new Set(collectionTargets.map((t) => t.writeTargetId));
+            // 3b. 对本次扫描到的每个 Collection 执行 upsert 收敛
+            for (const target of collectionTargets) {
+                const convergeResult = await convergeCollection(tx, {
+                    shopId: scanJob.shopId,
+                    collectionId: target.writeTargetId,
+                    image: target.previewUrl
+                        ? { url: target.previewUrl, alt: target.currentAltText }
+                        : null,
+                    collectionTitle: target.displayTitle,
+                    collectionHandle: target.displayHandle,
+                    scanJobId: scanJob.id,
+                });
+                if (convergeResult.upserted) {
+                    publishedTargetCount += 1;
+                }
+            }
+            // 3c. 找出数据库中已有但本次扫描未返回的 Collection，标记为 NOT_FOUND (不存在)
+            const existingCollectionTargets = await tx.altTarget.findMany({
+                where: {
+                    shopId: scanJob.shopId,
+                    altPlane: "COLLECTION_IMAGE_ALT",
+                    presentStatus: "PRESENT",
+                },
+                select: {
+                    writeTargetId: true,
+                    displayTitle: true,
+                    displayHandle: true,
+                },
             });
-            impacted.forEach((targetId) => impactedTargetIds.add(targetId));
-            publishedTargetCount += impacted.length;
+            for (const existing of existingCollectionTargets) {
+                if (!scannedCollectionIds.has(existing.writeTargetId)) {
+                    // 系列已不存在于最新扫描结果，执行 sweep (陈旧记录清理)
+                    await convergeCollection(tx, {
+                        shopId: scanJob.shopId,
+                        collectionId: existing.writeTargetId,
+                        image: null,
+                        collectionTitle: existing.displayTitle,
+                        collectionHandle: existing.displayHandle,
+                        scanJobId: scanJob.id,
+                    });
+                }
+            }
         }
+        // 4. 处理 ARTICLE_IMAGE 类型的资源
         if (successfulSet.has("ARTICLE_IMAGE")) {
             const impacted = await publishSingleTargetSlice(tx, {
                 shopId: scanJob.shopId,
@@ -213,6 +242,8 @@ export async function publishScanResult(input) {
             impacted.forEach((targetId) => impactedTargetIds.add(targetId));
             publishedTargetCount += impacted.length;
         }
+        // 5. 对 ARTICLE_IMAGE 和 FILES 类型的受影响 targets 进行 candidate/projection 更新计算
+        //    注：PRODUCT_MEDIA 由 convergeProduct 内聚管理，COLLECTION_IMAGE 由 convergeCollection 内聚管理
         const impactedTargets = impactedTargetIds.size
             ? await tx.altTarget.findMany({
                 where: {
@@ -246,7 +277,6 @@ export async function publishScanResult(input) {
             })
             : [];
         const candidateByTargetId = new Map();
-        let candidateCount = 0;
         for (const target of impactedTargets) {
             const nextCandidate = computeNextCandidateState({
                 target,
@@ -296,20 +326,18 @@ export async function publishScanResult(input) {
                 orderBy: [{ usageType: "asc" }, { positionIndex: "asc" }, { usageId: "asc" }],
             })
             : [];
-        // [DEBUG] 诊断日志：追踪 presentUsages 中 PRODUCT 类型数量
-        const productPresentUsages = presentUsages.filter((u) => u.usageType === "PRODUCT");
+        // [DEBUG] 诊断日志：追踪 presentUsages 中 PRODUCT/FILE 类型数量
         if (presentUsages.length > 0) {
             logger.info({
                 shopId: scanJob.shopId,
                 scanJobId: scanJob.id,
                 impactedTargetCount: impactedTargetIds.size,
                 totalPresentUsages: presentUsages.length,
-                productPresentUsageCount: productPresentUsages.length,
+                productPresentUsageCount: presentUsages.filter((u) => u.usageType === "PRODUCT").length,
                 filePresentUsageCount: presentUsages.filter((u) => u.usageType === "FILE").length,
             }, "publish.present-usages-debug");
         }
         const usagesByTargetId = groupPresentUsagesByTargetId(presentUsages);
-        let projectionCount = 0;
         for (const target of impactedTargets) {
             const altCandidateId = candidateByTargetId.get(target.id);
             if (!altCandidateId) {
@@ -360,6 +388,14 @@ export async function publishScanResult(input) {
         successfulResourceTypes,
         ...counts,
     }, "publish-scan.success");
+    // ── 指标埋点：扫描完成 ──
+    const missingAltCount = resultTargets.filter((t) => t.currentAltEmpty).length;
+    recordMetric("scan.rows_total", resultTargets.length, {
+        shop_domain: await resolveShopDomain(input.shopId),
+    });
+    recordMetric("scan.rows_missing_alt", missingAltCount, {
+        shop_domain: await resolveShopDomain(input.shopId),
+    });
     return {
         skipped: false,
         ...counts,
@@ -393,9 +429,6 @@ function dedupeTargets(targets) {
 }
 function buildTargetSliceKey(altPlane, writeTargetId, locale) {
     return [altPlane, writeTargetId, locale].join("::");
-}
-function buildUsageSliceKey(altTargetId, usageType, usageId) {
-    return [altTargetId, usageType, usageId].join("::");
 }
 async function upsertPublishedTarget(tx, input) {
     return tx.altTarget.upsert({
@@ -436,68 +469,6 @@ async function upsertPublishedTarget(tx, input) {
         },
     });
 }
-async function upsertPublishedUsage(tx, input) {
-    await tx.imageUsage.upsert({
-        where: {
-            shopId_altTargetId_usageType_usageId: {
-                shopId: input.shopId,
-                altTargetId: input.altTargetId,
-                usageType: input.usageType,
-                usageId: input.usageId,
-            },
-        },
-        create: {
-            shopId: input.shopId,
-            altTargetId: input.altTargetId,
-            usageType: input.usageType,
-            usageId: input.usageId,
-            title: input.title,
-            handle: input.handle,
-            positionIndex: input.positionIndex,
-            lastPublishedScanJobId: input.lastPublishedScanJobId,
-            lastSeenAt: input.lastSeenAt,
-            lastSeenScanJobId: input.lastSeenScanJobId,
-            presentStatus: input.presentStatus,
-        },
-        update: {
-            title: input.title,
-            handle: input.handle,
-            positionIndex: input.positionIndex,
-            lastPublishedScanJobId: input.lastPublishedScanJobId,
-            lastSeenAt: input.lastSeenAt,
-            lastSeenScanJobId: input.lastSeenScanJobId,
-            presentStatus: input.presentStatus,
-        },
-    });
-}
-async function sweepUsageSlice(tx, input) {
-    const existing = await tx.imageUsage.findMany({
-        where: {
-            shopId: input.shopId,
-            usageType: input.usageType,
-        },
-        select: {
-            id: true,
-            altTargetId: true,
-            usageType: true,
-            usageId: true,
-        },
-    });
-    const absentRows = existing.filter((row) => !input.currentUsageKeys.has(buildUsageSliceKey(row.altTargetId, row.usageType, row.usageId)));
-    if (absentRows.length === 0) {
-        return [];
-    }
-    await tx.imageUsage.updateMany({
-        where: {
-            id: { in: absentRows.map((row) => row.id) },
-        },
-        data: {
-            presentStatus: "NOT_FOUND",
-            lastPublishedScanJobId: input.scanJobId,
-        },
-    });
-    return [...new Set(absentRows.map((row) => row.altTargetId))];
-}
 async function recomputeFileAltPresentStatus(tx, input) {
     if (input.targetIds.length === 0) {
         return;
@@ -505,7 +476,7 @@ async function recomputeFileAltPresentStatus(tx, input) {
     const usages = await tx.imageUsage.findMany({
         where: {
             altTargetId: { in: input.targetIds },
-            usageType: { in: ["PRODUCT", "FILE"] },
+            usageType: "PRODUCT",
         },
         select: {
             altTargetId: true,
@@ -633,17 +604,14 @@ function groupPresentUsagesByTargetId(usages) {
     }
     return result;
 }
-async function rebuildTargetProjections(tx, input) {
-    const totalUsageCount = input.presentUsages.length;
+export async function rebuildTargetProjections(tx, input) {
     if (input.target.altPlane === "FILE_ALT") {
         const productUsages = input.presentUsages
             .filter((usage) => usage.usageType === "PRODUCT")
             .sort(compareProductUsage);
-        const fileUsages = input.presentUsages
-            .filter((usage) => usage.usageType === "FILE")
-            .sort((left, right) => left.usageId.localeCompare(right.usageId));
+        const productCount = productUsages.length;
         let upsertCount = 0;
-        if (productUsages.length > 0) {
+        if (productCount > 0) {
             const primary = productUsages[0];
             await upsertGroupProjection(tx, {
                 shopId: input.shopId,
@@ -652,58 +620,44 @@ async function rebuildTargetProjections(tx, input) {
                 altCandidateId: input.altCandidateId,
                 altTargetId: input.target.id,
                 primaryUsageType: "PRODUCT",
-                primaryUsageId: primary?.usageId ?? input.target.writeTargetId,
-                primaryTitle: primary?.title ?? input.target.displayTitle,
-                primaryHandle: primary?.handle ?? input.target.displayHandle,
-                primaryPositionIndex: primary?.positionIndex ?? null,
-                additionalUsageCount: productUsages.length - 1,
-                usageCountPresent: totalUsageCount,
+                primaryUsageId: primary.usageId,
+                primaryTitle: primary.title ?? input.target.displayTitle,
+                primaryHandle: primary.handle ?? input.target.displayHandle,
+                primaryPositionIndex: primary.positionIndex ?? null,
+                additionalUsageCount: productCount - 1,
+                usageCountPresent: productCount,
                 impactScopeSummary: {
-                    productUsageCountPresent: productUsages.length,
-                    fileUsageCountPresent: fileUsages.length,
+                    productUsageCountPresent: productCount,
                 },
             });
             upsertCount += 1;
-        }
-        else {
-            // [DEBUG] 诊断日志：PRODUCT_MEDIA 投影被删除（无 PRODUCT usage）
-            logger.info({
-                shopId: input.shopId,
-                scanJobId: input.scanJobId,
-                altTargetId: input.target.id,
-                altCandidateId: input.altCandidateId,
-                writeTargetId: input.target.writeTargetId,
-                presentStatus: input.target.presentStatus,
-                totalUsageCount,
-                productUsageCount: productUsages.length,
-                fileUsageCount: fileUsages.length,
-            }, "publish.product-media-projection-deleted");
-            await deleteGroupProjection(tx, input.shopId, input.altCandidateId, "PRODUCT_MEDIA");
-        }
-        if (fileUsages.length > 0) {
-            const primary = fileUsages[0];
-            await upsertGroupProjection(tx, {
-                shopId: input.shopId,
-                scanJobId: input.scanJobId,
-                groupType: "FILES",
-                altCandidateId: input.altCandidateId,
-                altTargetId: input.target.id,
-                primaryUsageType: "FILE",
-                primaryUsageId: primary?.usageId ?? input.target.writeTargetId,
-                primaryTitle: primary?.title ?? input.target.displayTitle,
-                primaryHandle: primary?.handle ?? input.target.displayHandle,
-                primaryPositionIndex: null,
-                additionalUsageCount: fileUsages.length - 1,
-                usageCountPresent: totalUsageCount,
-                impactScopeSummary: {
-                    productUsageCountPresent: productUsages.length,
-                    fileUsageCountPresent: fileUsages.length,
-                },
-            });
-            upsertCount += 1;
-        }
-        else {
+            // 有商品引用时，FILES 投影无意义
             await deleteGroupProjection(tx, input.shopId, input.altCandidateId, "FILES");
+        }
+        else {
+            await deleteGroupProjection(tx, input.shopId, input.altCandidateId, "PRODUCT_MEDIA");
+            // 无商品引用时，以 SELF 自引用保持 FILES 分组可见
+            if (input.target.presentStatus === "PRESENT") {
+                await upsertGroupProjection(tx, {
+                    shopId: input.shopId,
+                    scanJobId: input.scanJobId,
+                    groupType: "FILES",
+                    altCandidateId: input.altCandidateId,
+                    altTargetId: input.target.id,
+                    primaryUsageType: "SELF",
+                    primaryUsageId: input.target.writeTargetId,
+                    primaryTitle: input.target.displayTitle,
+                    primaryHandle: input.target.displayHandle,
+                    primaryPositionIndex: null,
+                    additionalUsageCount: 0,
+                    usageCountPresent: 0,
+                    impactScopeSummary: {},
+                });
+                upsertCount += 1;
+            }
+            else {
+                await deleteGroupProjection(tx, input.shopId, input.altCandidateId, "FILES");
+            }
         }
         return upsertCount;
     }
@@ -817,4 +771,11 @@ function isNonNull(value) {
 }
 function normalizeJsonForPrisma(value) {
     return value === null ? Prisma.JsonNull : value;
+}
+async function resolveShopDomain(shopId) {
+    const shop = await prisma.shop.findUnique({
+        where: { id: shopId },
+        select: { shopDomain: true },
+    });
+    return shop?.shopDomain ?? "unknown";
 }

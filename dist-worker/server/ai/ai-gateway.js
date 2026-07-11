@@ -6,10 +6,51 @@ import { createLogger } from "../utils/logger.js";
 import { AIGenerationError } from "./ai.types.js";
 import { FakeAIProvider } from "./providers/fake.provider.js";
 import { FallbackProvider } from "./providers/fallback.provider.js";
+import { GeminiProvider } from "./providers/gemini.provider.js";
 import { OpenAICompatibleProvider } from "./providers/openai.provider.js";
 const log = createLogger({ module: "ai-gateway" });
 // 调用超时（毫秒）
-const TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = 30_000 * 3;
+const MODEL_CONFIGS = [
+    { providerKey: "AI_PRIMARY_PROVIDER", modelKey: "AI_PRIMARY_MODEL", apiKeyKey: "AI_PRIMARY_API_KEY", endpointKey: "AI_PRIMARY_ENDPOINT", label: "primary" },
+    { providerKey: "AI_2nd_PROVIDER", modelKey: "AI_2nd_MODEL", apiKeyKey: "AI_2nd_API_KEY", endpointKey: "AI_2nd_ENDPOINT", label: "2nd" },
+    { providerKey: "AI_3rd_PROVIDER", modelKey: "AI_3rd_MODEL", apiKeyKey: "AI_3rd_API_KEY", endpointKey: "AI_3rd_ENDPOINT", label: "3rd" },
+    { providerKey: "AI_4th_PROVIDER", modelKey: "AI_4th_MODEL", apiKeyKey: "AI_4th_API_KEY", endpointKey: "AI_4th_ENDPOINT", label: "4th" },
+    { providerKey: "AI_5th_PROVIDER", modelKey: "AI_5th_MODEL", apiKeyKey: "AI_5th_API_KEY", endpointKey: "AI_5th_ENDPOINT", label: "5th" },
+    { providerKey: "AI_6th_PROVIDER", modelKey: "AI_6th_MODEL", apiKeyKey: "AI_6th_API_KEY", endpointKey: "AI_6th_ENDPOINT", label: "6th" },
+    { providerKey: "AI_7th_PROVIDER", modelKey: "AI_7th_MODEL", apiKeyKey: "AI_7th_API_KEY", endpointKey: "AI_7th_ENDPOINT", label: "7th" },
+    { providerKey: "AI_8th_PROVIDER", modelKey: "AI_8th_MODEL", apiKeyKey: "AI_8th_API_KEY", endpointKey: "AI_8th_ENDPOINT", label: "8th" },
+];
+/** 根据 MODEL_CONFIGS 动态构建所有已配置（apiKey 非空）的 Provider 条目 */
+function buildModelProviders() {
+    // 使用 (env as any) 理由见 MODEL_CONFIGS 上方注释
+    const e = env;
+    return MODEL_CONFIGS
+        .filter((cfg) => e[cfg.apiKeyKey])
+        .map((cfg) => {
+        const providerName = e[cfg.providerKey];
+        const model = e[cfg.modelKey];
+        const apiKey = e[cfg.apiKeyKey];
+        const endpoint = e[cfg.endpointKey];
+        if (providerName === "google") {
+            return {
+                provider: new GeminiProvider({ apiKey, model, endpoint, timeoutMs: TIMEOUT_MS, label: cfg.label }),
+                name: `google/${model}`,
+            };
+        }
+        return {
+            provider: new OpenAICompatibleProvider({
+                providerName,
+                model,
+                apiKey,
+                endpoint,
+                timeoutMs: TIMEOUT_MS,
+                label: cfg.label,
+            }),
+            name: `${providerName}/${model}`,
+        };
+    });
+}
 // ----------------------------------------------------------------
 // Provider 工厂
 // ----------------------------------------------------------------
@@ -19,28 +60,15 @@ function buildProvider() {
         log.info({ event: "ai.gateway.init", mode: "fake" }, "使用 FakeAIProvider");
         return new FakeAIProvider();
     }
-    // 真实模式：主 + 副 fallback
-    const primary = new OpenAICompatibleProvider({
-        providerName: env.AI_PRIMARY_PROVIDER,
-        model: env.AI_PRIMARY_MODEL,
-        apiKey: env.AI_PRIMARY_API_KEY,
-        endpoint: env.AI_PRIMARY_ENDPOINT,
-        timeoutMs: TIMEOUT_MS,
-    });
-    const secondary = new OpenAICompatibleProvider({
-        providerName: env.AI_FALLBACK_PROVIDER,
-        model: env.AI_FALLBACK_MODEL,
-        apiKey: env.AI_FALLBACK_API_KEY,
-        endpoint: env.AI_FALLBACK_ENDPOINT,
-        timeoutMs: TIMEOUT_MS,
-    });
+    // 真实模式：动态收集所有已配置的模型，构建多级降级链
+    const providers = buildModelProviders();
     log.info({
         event: "ai.gateway.init",
         mode: "real",
-        primary: `${env.AI_PRIMARY_PROVIDER}/${env.AI_PRIMARY_MODEL}`,
-        fallback: `${env.AI_FALLBACK_PROVIDER}/${env.AI_FALLBACK_MODEL}`,
-    }, "使用主/副双模型 Provider");
-    return new FallbackProvider(primary, secondary, env.AI_PRIMARY_PROVIDER, env.AI_FALLBACK_PROVIDER);
+        providerCount: providers.length,
+        models: providers.map((p) => p.name),
+    }, `使用 ${providers.length} 个模型的多级降级 Provider`);
+    return new FallbackProvider(providers);
 }
 // ----------------------------------------------------------------
 // AIGatewayService — 单例门面

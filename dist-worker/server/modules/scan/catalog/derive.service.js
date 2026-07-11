@@ -280,7 +280,7 @@ export function deriveProductMediaResults(input) {
             usages.push({
                 shopId: input.shopId,
                 scanJobId: input.scanJobId,
-                resourceType: canonicalResourceType,
+                resourceType: "PRODUCT_MEDIA",
                 altPlane: "FILE_ALT",
                 writeTargetId: mediaImageId,
                 locale: DEFAULT_LOCALE,
@@ -302,7 +302,6 @@ export function deriveProductMediaResults(input) {
 export function deriveFileResults(input) {
     const existingByWriteTargetId = buildExistingFileTargetMap(input.existingTargets);
     const targets = [];
-    const usages = [];
     const warnings = [];
     for (const row of input.rows) {
         const existing = existingByWriteTargetId.get(row.mediaImageId) ?? null;
@@ -326,24 +325,11 @@ export function deriveFileResults(input) {
             },
         });
         targets.push(toTargetRecord(input.shopId, input.scanJobId, canonicalResourceType, "FILE_ALT", merged.draft));
-        usages.push({
-            shopId: input.shopId,
-            scanJobId: input.scanJobId,
-            resourceType: canonicalResourceType,
-            altPlane: "FILE_ALT",
-            writeTargetId: row.mediaImageId,
-            locale: DEFAULT_LOCALE,
-            usageType: "FILE",
-            usageId: row.mediaImageId,
-            title: null,
-            handle: null,
-            positionIndex: null,
-        });
         warnings.push(...merged.warnings);
     }
     return {
         targets: dedupeTargets(targets),
-        usages: dedupeUsages(usages),
+        usages: [],
         warnings,
     };
 }
@@ -362,7 +348,9 @@ export function deriveCollectionResults(input) {
 }
 export function deriveArticleResults(input) {
     return {
-        targets: dedupeTargets(input.rows.map((row) => toTargetRecord(input.shopId, input.scanJobId, "ARTICLE_IMAGE", "ARTICLE_IMAGE_ALT", {
+        targets: dedupeTargets(input.rows
+            .filter((row) => row.imageUrl !== null)
+            .map((row) => toTargetRecord(input.shopId, input.scanJobId, "ARTICLE_IMAGE", "ARTICLE_IMAGE_ALT", {
             writeTargetId: row.articleId,
             previewUrl: row.imageUrl,
             currentAltText: row.imageAltText,

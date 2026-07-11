@@ -31,6 +31,8 @@ interface GenerationFlowProps {
   summary: GenerationSummary | null;
   /** 错误信息 */
   error: string | null;
+  /** Preflight 预检进行中 */
+  preflightLoading: boolean;
   /** SSE 是否已连接 */
   connected: boolean;
   /** 进度百分比 0-100 */
@@ -44,16 +46,6 @@ interface GenerationFlowProps {
 }
 
 // ============================================================================
-// 辅助常量
-// ============================================================================
-
-const BUCKET_TYPE_LABELS: Record<string, string> = {
-  MONTHLY_INCLUDED: "包含额度",
-  WELCOME: "欢迎额度",
-  OVERAGE_PACK: "超额包",
-};
-
-// ============================================================================
 // 主组件
 // ============================================================================
 
@@ -64,6 +56,7 @@ export function GenerationFlow({
   progress,
   summary,
   error,
+  preflightLoading,
   connected,
   percent,
   onConfirmAndStart,
@@ -80,6 +73,7 @@ export function GenerationFlow({
         preflightResult={preflightResult}
         totalCount={totalCount}
         error={error}
+        preflightLoading={preflightLoading}
         onConfirm={onConfirmAndStart}
         onCancel={onCancel}
       />
@@ -132,6 +126,7 @@ interface ConfirmModalProps {
   preflightResult: PreflightResult | null;
   totalCount: number;
   error: string | null;
+  preflightLoading: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -140,6 +135,7 @@ function ConfirmModal({
   preflightResult,
   totalCount,
   error,
+  preflightLoading,
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
@@ -168,65 +164,16 @@ function ConfirmModal({
             预计消耗 <strong>{totalCount}</strong> 额度。
           </s-text>
 
-          {/* 余额明细 */}
-          {preflightResult && (
-            <s-box padding="base" borderRadius="base" background="subdued">
-              <s-stack direction="block" gap="small">
-                <s-heading>额度余额</s-heading>
-                <div>
-                  <div className={styles.balanceRow}>
-                    <span className={styles.balanceLabel}>包含额度</span>
-                    <span className={styles.balanceValue}>
-                      {preflightResult.includedRemaining}
-                    </span>
-                  </div>
-                  <div className={styles.balanceRow}>
-                    <span className={styles.balanceLabel}>欢迎额度</span>
-                    <span className={styles.balanceValue}>
-                      {preflightResult.welcomeRemaining}
-                    </span>
-                  </div>
-                  {preflightResult.overagePackRemaining > 0 && (
-                    <div className={styles.balanceRow}>
-                      <span className={styles.balanceLabel}>超额包</span>
-                      <span className={styles.balanceValue}>
-                        {preflightResult.overagePackRemaining}
-                      </span>
-                    </div>
-                  )}
-                  <div className={styles.balanceDivider} />
-                  <div className={styles.balanceRow}>
-                    <span className={styles.balanceLabel}>总剩余额度</span>
-                    <span
-                      className={
-                        enough
-                          ? styles.balanceValueSuccess
-                          : styles.balanceValueCritical
-                      }
-                    >
-                      {preflightResult.totalRemaining}
-                    </span>
-                  </div>
-                </div>
+          {/* 预检进行中提示 */}
+          {preflightLoading && (
+            <s-text tone="neutral">正在检查额度…</s-text>
+          )}
 
-                {/* 预计消费分配 */}
-                {preflightResult.allocation.length > 0 && (
-                  <>
-                    <s-text tone="neutral">预计消费顺序</s-text>
-                    <div className={styles.allocationList}>
-                      {preflightResult.allocation.map((entry) => (
-                        <div key={entry.bucketType} className={styles.allocationRow}>
-                          <span>
-                            {BUCKET_TYPE_LABELS[entry.bucketType] ?? entry.bucketType}
-                          </span>
-                          <span>-{entry.amount}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </s-stack>
-            </s-box>
+          {/* 当前额度 */}
+          {preflightResult && (
+            <s-text>
+              当前额度：<strong>{preflightResult.totalRemaining}</strong>
+            </s-text>
           )}
 
           {/* 额度不足警告与引导 */}
@@ -273,13 +220,16 @@ function ConfirmModal({
                 取消
               </s-button>
             </div>
-            {enough && (
+            {(preflightResult === null || enough) && (
               <div
                 onClick={onConfirm}
                 style={{ display: "inline-block", cursor: "pointer" }}
               >
-                <s-button variant="primary" accessibilityLabel="确认并生成">
-                  Confirm & Generate
+                <s-button
+                  variant="primary"
+                  accessibilityLabel="生成"
+                >
+                  Generate
                 </s-button>
               </div>
             )}

@@ -504,7 +504,7 @@ export default function AppCandidatesPage() {
   const handleGenerateClick = useCallback(() => {
     if (selectedCount === 0) return;
     const candidateIds = Array.from(selectedIds);
-    void flow.startPreflight(candidateIds);
+    void flow.openConfirm(candidateIds);
   }, [selectedCount, selectedIds, flow]);
 
   /* ---- 生成完成后刷新列表及分组计数 ---- */
@@ -872,6 +872,7 @@ export default function AppCandidatesPage() {
       progress={flow.progress}
       summary={flow.summary}
       error={flow.error}
+      preflightLoading={flow.preflightLoading}
       connected={flow.connected}
       percent={flow.percent}
       onConfirmAndStart={flow.confirmAndStart}

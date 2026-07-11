@@ -70,6 +70,7 @@ export function useGenerationSSE(
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const prevBatchIdRef = useRef<string | null | undefined>(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onCompletedRef = useRef(onCompleted);
@@ -184,6 +185,15 @@ export function useGenerationSSE(
 
   // batchId 变化时重连
   useEffect(() => {
+    // 仅当 batchId 真正切换（含回到 null）时清空上一轮进度快照，
+    // 避免新一轮生成开始时短暂显示上次的进度结果。
+    if (prevBatchIdRef.current !== batchId) {
+      prevBatchIdRef.current = batchId;
+      setProgress(null);
+      setConnected(false);
+      setError(null);
+    }
+
     void connect();
 
     return () => {

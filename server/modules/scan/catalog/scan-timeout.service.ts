@@ -15,6 +15,7 @@ import {
 import { queueConnection } from "../../../queues/connection";
 import { releaseLockByType } from "../../lock/operation-lock.service";
 import { RUNNING_SCAN_STALE_TIMEOUT_MS } from "../scan.constants";
+import { finalizeScanJobIfTerminal } from "./scan-task.service";
 
 const logger = createLogger({ module: "scan-timeout-service" });
 
@@ -151,49 +152,39 @@ async function markRunningScanJobTimedOut(
   scanJobId: string,
   finishedAt: Date,
 ): Promise<TimedOutScanJob | null> {
-  return prisma.$transaction(async (tx) => {
-    const scanJob = await tx.scanJob.findUnique({
-      where: { id: scanJobId },
-      select: {
-        id: true,
-        shopId: true,
-        status: true,
-        scanTasks: {
-          select: {
-            id: true,
-            resourceType: true,
-            status: true,
-          },
+  const scanJob = await prisma.scanJob.findUnique({
+    where: { id: scanJobId },
+    select: {
+      id: true,
+      shopId: true,
+      status: true,
+      scanTasks: {
+        select: {
+          id: true,
+          resourceType: true,
+          status: true,
         },
       },
-    });
+    },
+  });
 
-    if (!scanJob || scanJob.status !== "RUNNING") {
-      return null;
-    }
+  if (!scanJob || scanJob.status !== "RUNNING") {
+    return null;
+  }
 
-    const failedResourceTypes = scanJob.scanTasks
-      .filter((task) => task.status !== "SUCCESS")
-      .map((task) => task.resourceType);
+  const failedResourceTypes = scanJob.scanTasks
+    .filter((task) => task.status !== "SUCCESS")
+    .map((task) => task.resourceType);
 
-    const updateResult = await tx.scanJob.updateMany({
-      where: {
-        id: scanJobId,
-        status: "RUNNING",
-      },
-      data: {
-        status: "FAILED",
-        publishStatus: "NOT_PUBLISHED",
-        failedResourceTypes,
-        error: SCAN_TIMEOUT_ERROR,
-        finishedAt,
-      },
-    });
+  // 没有任何失败项则不视为超时（正常情况下不应发生）。
+  if (failedResourceTypes.length === 0) {
+    return null;
+  }
 
-    if (updateResult.count === 0) {
-      return null;
-    }
-
+  // 先把仍处于运行中的 attempt / task 收敛为 FAILED，并补记 job 错误，
+  // 再交由 finalizeScanJobIfTerminal 统一计算终态——
+  // 部分 resource type 成功时应标记为 PARTIAL_SUCCESS（而非整单 FAILED）。
+  await prisma.$transaction(async (tx) => {
     await tx.scanTaskAttempt.updateMany({
       where: {
         scanTaskId: {
@@ -224,10 +215,31 @@ async function markRunningScanJobTimedOut(
       },
     });
 
-    return {
-      id: scanJob.id,
-      shopId: scanJob.shopId,
-      failedResourceTypes,
-    };
+    await tx.scanJob.updateMany({
+      where: {
+        id: scanJobId,
+        status: "RUNNING",
+      },
+      data: {
+        error: SCAN_TIMEOUT_ERROR,
+      },
+    });
   });
+
+  const finalizeResult = await finalizeScanJobIfTerminal(scanJobId);
+  if (!finalizeResult || !finalizeResult.transitioned) {
+    logger.warn(
+      {
+        scanJobId,
+        expectedFailedResourceTypes: failedResourceTypes,
+      },
+      "scan-timeout.finalize-skipped",
+    );
+  }
+
+  return {
+    id: scanJob.id,
+    shopId: scanJob.shopId,
+    failedResourceTypes,
+  };
 }

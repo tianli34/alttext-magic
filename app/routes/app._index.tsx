@@ -380,7 +380,7 @@ function DashboardContent() {
             </s-box>
           )}
 
-          {/* 计划与配额摘要占位 */}
+          {/* 当前额度卡片 */}
           <QuotaSummary />
         </s-stack>
       </s-section>

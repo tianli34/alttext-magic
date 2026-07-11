@@ -14,6 +14,7 @@ import { createLogger } from "../../server/utils/logger";
 import {
   getCreditBalance,
   planCreditAllocation,
+  getSpendableBuckets,
 } from "../../server/modules/billing/credit/credit-balance.server";
 import type { CreditBucketType } from "../../server/modules/billing/billing.types";
 import { isIncludedFamily } from "../../server/modules/billing/credit/consumption-order";
@@ -100,11 +101,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  // 6. 获取余额概览
-  const balance = await getCreditBalance(shop.id, prisma);
+  // 6. 一次性查询可消费桶，余额概览与分配规划复用，避免重复 DB 查询
+  const buckets = await getSpendableBuckets(shop.id, prisma);
 
-  // 7. 规划额度分配（不创建 reservation）
-  const allocationPlan = await planCreditAllocation(shop.id, estimatedCredits, prisma);
+  // 7. 获取余额概览（复用已查询桶）
+  const balance = await getCreditBalance(shop.id, prisma, buckets);
+
+  // 8. 规划额度分配（不创建 reservation，复用已查询桶）
+  const allocationPlan = await planCreditAllocation(shop.id, estimatedCredits, prisma, buckets);
 
   // 8. 构造响应 —— allocation 按 bucketType 分组合并
   const mergedAllocation = mergeAllocationByType(allocationPlan.allocation);

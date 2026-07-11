@@ -12,7 +12,7 @@
  * - 默认 BATCH_SIZE=100，单次执行最多处理 100 条，避免长时间占用事务。
  */
 import prisma from "../../server/db/prisma.server";
-import { releaseReservation } from "../../app/services/credits/credit-reservation.server";
+import { releaseReservation } from "../../server/modules/billing/credit/credit-reservation.service";
 import { createLogger } from "../../server/utils/logger";
 const logger = createLogger({ module: "reservation-reaper-processor" });
 /** 单次执行最多处理的 reservation 数量 */

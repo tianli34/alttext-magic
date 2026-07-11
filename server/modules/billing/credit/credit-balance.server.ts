@@ -204,12 +204,14 @@ export async function getSpendableBuckets(
  *
  * @param shopId  店铺 ID
  * @param client 可选 PrismaClient 实例
+ * @param preloadedBuckets 可选预载桶列表（由调用方一次性查询后传入，避免重复 DB 查询）
  */
 export async function getCreditBalance(
   shopId: string,
   client?: PrismaClient,
+  preloadedBuckets?: SpendableBucketSummary[],
 ): Promise<CreditBalanceResult> {
-  const buckets = await getSpendableBuckets(shopId, client);
+  const buckets = preloadedBuckets ?? (await getSpendableBuckets(shopId, client));
 
   let includedRemaining = 0;
   let welcomeRemaining = 0;
@@ -261,17 +263,19 @@ export async function getCreditBalance(
  * @param shopId  店铺 ID
  * @param amount  需要分配的额度数量（必须 > 0）
  * @param client 可选 PrismaClient 实例
+ * @param preloadedBuckets 可选预载桶列表（由调用方一次性查询后传入，避免重复 DB 查询）
  */
 export async function planCreditAllocation(
   shopId: string,
   amount: number,
   client?: PrismaClient,
+  preloadedBuckets?: SpendableBucketSummary[],
 ): Promise<CreditAllocationPlan> {
   if (!Number.isInteger(amount) || amount <= 0) {
     throw new Error(`[credit-balance] amount 必须为正整数，当前: ${amount}`);
   }
 
-  const buckets = await getSpendableBuckets(shopId, client);
+  const buckets = preloadedBuckets ?? (await getSpendableBuckets(shopId, client));
 
   let remaining = amount;
   const allocation: AllocationEntry[] = [];

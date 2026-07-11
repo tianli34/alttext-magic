@@ -80,6 +80,10 @@ import { registerReservationReaperScheduler } from "./schedulers/reservation-rea
 import { registerBillingSyncScheduler } from "./schedulers/billing-sync.scheduler.js";
 import { registerCleanupScheduler } from "./schedulers/cleanup.scheduler.js";
 import { registerLockReaperScheduler } from "./schedulers/lock-timeout.scheduler.js";
+import {
+  DEFAULT_BULK_ATTEMPT_REAPER_INTERVAL_MS,
+  runBulkAttemptReaperOnce,
+} from "./schedulers/bulk-attempt-reaper.scheduler.js";
 import { withJobLogger } from "./utils/job-logger.js";
 
 const logger = createLogger({ module: "worker-runtime" });
@@ -115,6 +119,25 @@ const scanTimeoutSweepInterval = setInterval(() => {
 }, DEFAULT_SCAN_TIMEOUT_SWEEP_INTERVAL_MS);
 
 scanTimeoutSweepInterval.unref();
+
+let bulkAttemptReaperRunning = false;
+
+const bulkAttemptReaperInterval = setInterval(() => {
+  if (bulkAttemptReaperRunning) {
+    return;
+  }
+
+  bulkAttemptReaperRunning = true;
+  void runBulkAttemptReaperOnce()
+    .catch((error: unknown) => {
+      logger.error({ err: error }, "bulk-attempt-reaper-scheduler.failed");
+    })
+    .finally(() => {
+      bulkAttemptReaperRunning = false;
+    });
+}, DEFAULT_BULK_ATTEMPT_REAPER_INTERVAL_MS);
+
+bulkAttemptReaperInterval.unref();
 
 const webhookWorker = new Worker<WebhookQueueJobData>(
   WEBHOOK_QUEUE_NAME,
@@ -988,6 +1011,7 @@ writebackWorker.on("error", (error) => {
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "worker.shutdown");
   clearInterval(scanTimeoutSweepInterval);
+  clearInterval(bulkAttemptReaperInterval);
   await Promise.all([
     webhookWorker.close(),
     scanStartWorker.close(),

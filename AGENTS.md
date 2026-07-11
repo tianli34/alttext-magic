@@ -1,6 +1,6 @@
 # AGENTS.md
 项目: Shopify自动生成图片Alt Text应用
-技术栈: TS · React Router v7 · Prisma+PG · Redis+BullMQ · Polaris · App Bridge
+技术栈: TS · React Router v7 · Prisma+PG · Redis+BullMQ · Polaris Web Components · App Bridge
 
 ## 架构
 
@@ -23,8 +23,6 @@
 
 ## 工作流限制
 
-- 始前必读: `docs/Specs/tree.txt`
-- 按需查阅: 仅限 `docs/Specs/*.md`
 - 严格纪律: 禁脑补; 须报告文档/代码冲突; 未经明确指示严禁读取其他文档(.md/.txt/.pdf 等)
 - 使用技能: 需要读取 schema.prisma 时使用 `pq` 命令 (详见 `.agents/skills/prisma-query/SKILL.md`)
 

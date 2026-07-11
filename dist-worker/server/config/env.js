@@ -2,6 +2,10 @@ import { z } from "zod";
 import dotenv from "dotenv";
 // 在最早期加载 .env
 dotenv.config();
+// 读取 TZ 并立即设置 Node.js 运行时时区
+// 必须在任何 Date 操作之前生效
+const rawTz = process.env.TZ || "UTC";
+process.env.TZ = rawTz;
 /**
  * 日志级别枚举 —— 与 pino 保持一致
  */
@@ -60,6 +64,7 @@ const envSchema = z.object({
         .regex(/^[a-f0-9]+$/i, "TOKEN_ENCRYPTION_KEY must be a hex-encoded string"),
     // ── Logging ──────────────────────────────────────────────
     LOG_LEVEL: LogLevel.default("info"),
+    LOG_FORMAT: z.enum(["json", "pretty"]).default("pretty"),
     // ── Billing Adapter ─────────────────────────────────────
     BILLING_ADAPTER: z
         .enum(["shopify", "fake"])
@@ -73,10 +78,43 @@ const envSchema = z.object({
     AI_PRIMARY_API_KEY: z.string().default(""),
     AI_PRIMARY_ENDPOINT: z.string().url().optional(),
     // 副模型配置（fallback）
-    AI_FALLBACK_PROVIDER: z.string().min(1).default("openai"),
-    AI_FALLBACK_MODEL: z.string().min(1).default("gpt-4o-mini"),
-    AI_FALLBACK_API_KEY: z.string().default(""),
-    AI_FALLBACK_ENDPOINT: z.string().url().optional(),
+    AI_2nd_PROVIDER: z.string().min(1).default("openai"),
+    AI_2nd_MODEL: z.string().min(1).default("gpt-4o-mini"),
+    AI_2nd_API_KEY: z.string().default(""),
+    AI_2nd_ENDPOINT: z.string().url().optional(),
+    // 第 3 候补模型
+    AI_3rd_PROVIDER: z.string().min(1).default("openai"),
+    AI_3rd_MODEL: z.string().min(1).default("gpt-4o-mini"),
+    AI_3rd_API_KEY: z.string().default(""),
+    AI_3rd_ENDPOINT: z.string().url().optional(),
+    // 第 4 候补模型
+    AI_4th_PROVIDER: z.string().min(1).default("openai"),
+    AI_4th_MODEL: z.string().min(1).default("gpt-4o-mini"),
+    AI_4th_API_KEY: z.string().default(""),
+    AI_4th_ENDPOINT: z.string().url().optional(),
+    // 第 5 候补模型
+    AI_5th_PROVIDER: z.string().min(1).default("openai"),
+    AI_5th_MODEL: z.string().min(1).default("gpt-4o-mini"),
+    AI_5th_API_KEY: z.string().default(""),
+    AI_5th_ENDPOINT: z.string().url().optional(),
+    // 第 6 候补模型
+    AI_6th_PROVIDER: z.string().min(1).default("openai"),
+    AI_6th_MODEL: z.string().min(1).default("gpt-4o-mini"),
+    AI_6th_API_KEY: z.string().default(""),
+    AI_6th_ENDPOINT: z.string().url().optional(),
+    // 第 7 候补模型
+    AI_7th_PROVIDER: z.string().min(1).default("openai"),
+    AI_7th_MODEL: z.string().min(1).default("gpt-4o-mini"),
+    AI_7th_API_KEY: z.string().default(""),
+    AI_7th_ENDPOINT: z.string().url().optional(),
+    // 第 8 候补模型
+    AI_8th_PROVIDER: z.string().min(1).default("openai"),
+    AI_8th_MODEL: z.string().min(1).default("gpt-4o-mini"),
+    AI_8th_API_KEY: z.string().default(""),
+    AI_8th_ENDPOINT: z.string().url().optional(),
+    // ── Timezone ───────────────────────────────────────────
+    // Node.js 运行时时区，影响 Date 序列化与 pino 日志时间戳。服务端应使用 UTC。
+    TZ: z.string().default("UTC"),
     // ── Generation Worker ───────────────────────────────────
     GENERATE_ALT_CONCURRENCY: z.coerce
         .number()
@@ -84,6 +122,21 @@ const envSchema = z.object({
         .positive()
         .max(50)
         .default(5),
+    // ── 写回 Worker ─────────────────────────────────────────
+    WRITEBACK_CONCURRENCY: z.coerce
+        .number()
+        .int()
+        .positive()
+        .max(5)
+        .default(3),
+    // ── Settings / Help Links ──────────────────────────────
+    SETTINGS_HELP_FAQ_URL: z.string().url().optional(),
+    SETTINGS_HELP_CONTACT_URL: z.string().url().optional(),
+    SETTINGS_HELP_DOCS_URL: z.string().url().optional(),
+    // ── Navigation Help Links ─────────────────────────────
+    HELP_FAQ_URL: z.string().url().optional(),
+    SUPPORT_EMAIL: z.string().email().optional(),
+    DOCS_URL: z.string().url().optional(),
 });
 /**
  * 解析 & 校验

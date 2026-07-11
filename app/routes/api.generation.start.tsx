@@ -26,6 +26,7 @@ import { createLogger } from "../../server/utils/logger";
 import {
   getCreditBalance,
   planCreditAllocation,
+  getSpendableBuckets,
   type AllocationEntry,
   type CreditBalanceResult,
 } from "../../server/modules/billing/credit/credit-balance.server";
@@ -76,7 +77,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const shop = await prisma.shop.findUnique({
     where: { shopDomain },
-    select: { id: true },
+    select: { id: true, currentPlan: true },
   });
 
   if (!shop) {
@@ -108,6 +109,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json(
       {
         error: "INSUFFICIENT_CREDIT",
+        currentPlan: shop.currentPlan,
         ...creditDetailPayload(preflight),
       },
       { status: 409 },
@@ -189,6 +191,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return Response.json(
         {
           error: "INSUFFICIENT_CREDIT",
+          currentPlan: shop.currentPlan,
           requested: error.requested,
           available: error.available,
           ...creditDetailPayload(latestPreflight),
@@ -392,9 +395,11 @@ function sortCandidatesByInput(
 }
 
 async function runCreditPreflight(shopId: string, count: number): Promise<CreditPreflightResult> {
+  // 一次性查询可消费桶，余额概览与分配规划复用，避免重复 DB 查询
+  const buckets = await getSpendableBuckets(shopId, prisma);
   const [balance, allocationPlan] = await Promise.all([
-    getCreditBalance(shopId, prisma),
-    planCreditAllocation(shopId, count, prisma),
+    getCreditBalance(shopId, prisma, buckets),
+    planCreditAllocation(shopId, count, prisma, buckets),
   ]);
 
   return {

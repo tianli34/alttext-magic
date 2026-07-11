@@ -56,7 +56,12 @@ export default function createDeriveScanProcessor(worker) {
  */
 export async function processDeriveScanJob(data) {
     const { shopId, scanJobId, scanTaskId, scanTaskAttemptId } = data;
-    logger.info({ shopId, scanTaskId, scanTaskAttemptId }, "derive-scan.start");
+    const jobLogger = logger.withContext({
+        shop_domain: shopId,
+        batch_id: scanJobId,
+        job_item_id: scanTaskAttemptId,
+    });
+    jobLogger.info({ shopId, scanTaskId, scanTaskAttemptId }, "derive-scan.start");
     // 更新 Redis 进度阶段为 derive
     await updateScanProgressPhase(scanJobId, SCAN_PHASE.DERIVE, "正在推导扫描结果…");
     try {
@@ -66,7 +71,7 @@ export async function processDeriveScanJob(data) {
         if (result.skipped) {
             const successfulAttemptId = await deriveProcessorDependencies.getTaskSuccessfulAttemptId(scanTaskId);
             if (successfulAttemptId !== scanTaskAttemptId) {
-                logger.warn({
+                jobLogger.warn({
                     shopId,
                     scanJobId,
                     scanTaskId,
@@ -99,7 +104,7 @@ export async function processDeriveScanJob(data) {
             await setScanProgressStatus(scanJobId, finalizeResult.status);
             await deriveProcessorDependencies.releaseLockByType(shopId, "SCAN");
         }
-        logger.info({
+        jobLogger.info({
             shopId,
             scanJobId,
             scanTaskId,

@@ -104,7 +104,12 @@ export default function createParseBulkProcessor(worker) {
  */
 export async function processParseBulkJob(data) {
     const { shopId, scanJobId, scanTaskId, scanTaskAttemptId } = data;
-    logger.info({ shopId, scanTaskId, scanTaskAttemptId }, "parse-bulk.start");
+    const jobLogger = logger.withContext({
+        shop_domain: shopId,
+        batch_id: scanJobId,
+        job_item_id: scanTaskAttemptId,
+    });
+    jobLogger.info({ shopId, scanTaskId, scanTaskAttemptId }, "parse-bulk.start");
     // 1. 读取 attempt 信息，获取 bulkResultUrl 和 resourceType
     const attempt = await parseBulkProcessorDependencies.findAttempt(scanTaskAttemptId);
     if (!attempt) {
@@ -112,7 +117,7 @@ export async function processParseBulkJob(data) {
     }
     if (attempt.status === "SUCCESS" &&
         attempt.scanTask.successfulAttemptId === scanTaskAttemptId) {
-        logger.warn({
+        jobLogger.warn({
             attemptId: scanTaskAttemptId,
             status: attempt.status,
             taskStatus: attempt.scanTask.status,
@@ -127,11 +132,11 @@ export async function processParseBulkJob(data) {
             scanTaskId,
             scanTaskAttemptId,
         });
-        logger.info({ shopId, scanTaskId, scanTaskAttemptId }, "parse-bulk.derive-reenqueued");
+        jobLogger.info({ shopId, scanTaskId, scanTaskAttemptId }, "parse-bulk.derive-reenqueued");
         return;
     }
     if (attempt.status !== "READY_TO_PARSE") {
-        logger.warn({
+        jobLogger.warn({
             attemptId: scanTaskAttemptId,
             status: attempt.status,
             taskStatus: attempt.scanTask.status,
@@ -158,7 +163,7 @@ export async function processParseBulkJob(data) {
             parsedRows,
             finishedAt,
         });
-        logger.info({ shopId, scanTaskId, scanTaskAttemptId, resourceType, parsedRows }, "parse-bulk.success");
+        jobLogger.info({ shopId, scanTaskId, scanTaskAttemptId, resourceType, parsedRows }, "parse-bulk.success");
         // 6. 投递 derive job（staging → 候选目标推导）
         await parseBulkProcessorDependencies.enqueueDeriveScan({
             shopId,
@@ -166,7 +171,7 @@ export async function processParseBulkJob(data) {
             scanTaskId,
             scanTaskAttemptId,
         });
-        logger.info({ shopId, scanTaskId, scanTaskAttemptId }, "parse-bulk.derive-enqueued");
+        jobLogger.info({ shopId, scanTaskId, scanTaskAttemptId }, "parse-bulk.derive-enqueued");
     }
     catch (error) {
         const failure = classifyParseFailure(error);
@@ -177,7 +182,7 @@ export async function processParseBulkJob(data) {
             errorMessage,
             finishedAt,
         });
-        logger.error({
+        jobLogger.error({
             shopId,
             scanJobId,
             scanTaskId,
@@ -195,7 +200,7 @@ export async function processParseBulkJob(data) {
                 scanTaskId,
             });
             const retrySubmitResult = await parseBulkProcessorDependencies.submitTask(scanTaskId);
-            logger.warn({
+            jobLogger.warn({
                 shopId,
                 scanJobId,
                 scanTaskId,

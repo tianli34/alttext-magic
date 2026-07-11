@@ -99,6 +99,7 @@ export function useWritebackSSE(
 
     if (!batchId) {
       setConnected(false);
+      setProgress(null);
       return;
     }
 
