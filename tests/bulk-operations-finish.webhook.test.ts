@@ -33,6 +33,7 @@ async function run(): Promise<void> {
             errorCode: null,
             url: "https://example.com/result.ndjson",
             partialDataUrl: null,
+            objectCount: 0,
             createdAt: new Date().toISOString(),
             completedAt: new Date().toISOString(),
           };

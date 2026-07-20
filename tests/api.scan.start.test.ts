@@ -40,7 +40,7 @@ let capturedEnqueueData: {
 } | null = null;
 
 /** 记录 initScanProgress 被调用时的参数 */
-let capturedProgressInit: { scanJobId: string; totalTasks: number } | null = null;
+let capturedProgressInit: { scanJobId: string } | null = null;
 
 /**
  * 重置所有 mock 状态
@@ -168,7 +168,6 @@ async function callAction(
       // 10. initScanProgress（记录调用）
       capturedProgressInit = {
         scanJobId: scanJobResult.scanJobId,
-        totalTasks: enabledFlags.length,
       };
 
       // 11. enqueueScanStart（记录调用）
@@ -237,7 +236,6 @@ async function run(): Promise<void> {
 
     assert.ok(capturedProgressInit, "initScanProgress 应被调用");
     assert.equal(capturedProgressInit!.scanJobId, mockScanJobId);
-    assert.equal(capturedProgressInit!.totalTasks, 4, "全选时应创建 4 个 scan_task");
   }
 
   /* ================================================================ */
@@ -256,7 +254,6 @@ async function run(): Promise<void> {
     const data = await res.json();
 
     assert.equal(res.status, 200, "部分 scope 应返回 200");
-    assert.equal(capturedProgressInit!.totalTasks, 2, "2 个 scope 选中应创建 2 个 scan_task");
   }
 
   /* ================================================================ */

@@ -1,5 +1,9 @@
 // shared/logger/index.ts
-import pino, { type Logger, type LoggerOptions } from "pino";
+import pino, {
+  type Logger,
+  type LoggerOptions,
+  type TransportTargetOptions,
+} from "pino";
 
 /**
  * 结构化日志上下文接口定义
@@ -44,6 +48,8 @@ function wrapLogger(pinoLogger: Logger): ExtendedLogger {
 const isDev = (process.env.NODE_ENV || "development") === "development";
 const logFormat = process.env.LOG_FORMAT || "pretty";
 const logLevel = process.env.LOG_LEVEL || "info";
+// 日志文件落盘路径（仅 worker 需要时通过 LOG_FILE 环境变量开启）
+const logFile = process.env.LOG_FILE;
 
 const baseOptions: LoggerOptions = {
   level: logLevel,
@@ -78,8 +84,8 @@ const baseOptions: LoggerOptions = {
   errorKey: "err",
 };
 
-// 本地开发且非 json 格式时，使用 pino-pretty 进行彩色输出
-const transport = (isDev && logFormat !== "json")
+// 标准输出目标：本地开发且非 json 格式时使用 pino-pretty 彩色输出，否则输出 JSON
+const stdoutTarget: TransportTargetOptions = (isDev && logFormat !== "json")
   ? {
       target: "pino-pretty",
       options: {
@@ -89,7 +95,31 @@ const transport = (isDev && logFormat !== "json")
         singleLine: false,
       },
     }
-  : undefined;
+  : {
+      target: "pino/file",
+      options: { destination: 1 }, // 1 = stdout
+    };
+
+/**
+ * 传输配置：
+ * - 未设置 LOG_FILE 时，退化为原有单一 stdout 行为（pretty 用内联 transport，json 用无 transport）。
+ * - 设置 LOG_FILE 时，使用 multi-target：保留 stdout 终端体验 + 追加 JSON 文件落盘，供日志提取脚本逐行解析。
+ */
+let transport: LoggerOptions["transport"];
+if (logFile) {
+  const targets: TransportTargetOptions[] = [
+    stdoutTarget,
+    {
+      target: "pino/file",
+      options: { destination: logFile, mkdir: true },
+    },
+  ];
+  transport = { targets };
+} else if (isDev && logFormat !== "json") {
+  transport = stdoutTarget;
+} else {
+  transport = undefined;
+}
 
 /**
  * 根 Logger 实例

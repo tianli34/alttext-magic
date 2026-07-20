@@ -350,6 +350,29 @@ export async function isOperationRunning(
 }
 
 /**
+ * 判断 shop 是否真的存在进行中的扫描任务（UI 展示扫描界面的唯一依据）。
+ *
+ * 与 dashboard.service.ts 的 getActiveScanJobId 共用同一判定来源
+ * （scan_job.status = 'RUNNING'），用于消除“锁残留但 scanJob 已非 RUNNING”
+ * 导致的状态分歧：仅当此处返回 true 时才对外提示“Another scan is already running”，
+ * 从而保证“提示有扫描进行中”与“UI 显示扫描界面”严格一致。
+ *
+ * @param shopId 店铺 ID
+ * @returns 是否存在 RUNNING 状态的 scan_job
+ */
+export async function hasRunningScanJob(shopId: string): Promise<boolean> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id"
+    FROM "scan_job"
+    WHERE "shop_id" = ${shopId}
+      AND "status" = 'RUNNING'
+    LIMIT 1
+  `);
+
+  return rows.length > 0;
+}
+
+/**
  * 回收所有已过期但仍标记为 RUNNING 的锁。
  */
 export async function cleanupExpiredLocks(): Promise<CleanupExpiredLocksResult> {

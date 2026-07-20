@@ -84,6 +84,10 @@ import {
   DEFAULT_BULK_ATTEMPT_REAPER_INTERVAL_MS,
   runBulkAttemptReaperOnce,
 } from "./schedulers/bulk-attempt-reaper.scheduler.js";
+import {
+  DEFAULT_DISCOVERY_PROGRESS_INTERVAL_MS,
+  runDiscoveryProgressPollOnce,
+} from "./schedulers/discovery-progress.scheduler.js";
 import { withJobLogger } from "./utils/job-logger.js";
 
 const logger = createLogger({ module: "worker-runtime" });
@@ -138,6 +142,25 @@ const bulkAttemptReaperInterval = setInterval(() => {
 }, DEFAULT_BULK_ATTEMPT_REAPER_INTERVAL_MS);
 
 bulkAttemptReaperInterval.unref();
+
+let discoveryProgressRunning = false;
+
+const discoveryProgressInterval = setInterval(() => {
+  if (discoveryProgressRunning) {
+    return;
+  }
+
+  discoveryProgressRunning = true;
+  void runDiscoveryProgressPollOnce()
+    .catch((error: unknown) => {
+      logger.error({ err: error }, "discovery-progress-scheduler.failed");
+    })
+    .finally(() => {
+      discoveryProgressRunning = false;
+    });
+}, DEFAULT_DISCOVERY_PROGRESS_INTERVAL_MS);
+
+discoveryProgressInterval.unref();
 
 const webhookWorker = new Worker<WebhookQueueJobData>(
   WEBHOOK_QUEUE_NAME,
@@ -1012,6 +1035,7 @@ async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "worker.shutdown");
   clearInterval(scanTimeoutSweepInterval);
   clearInterval(bulkAttemptReaperInterval);
+  clearInterval(discoveryProgressInterval);
   await Promise.all([
     webhookWorker.close(),
     scanStartWorker.close(),

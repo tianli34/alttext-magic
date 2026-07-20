@@ -18,15 +18,11 @@ const pool =
   globalForPrisma.pool ??
   new Pool({
     connectionString: env.DATABASE_URL,
+    options: "-c timezone=UTC",              // 连接建立时由服务端设置时区，规避未 await 的 query 弃用警告
     max: 10,                                 // 限制每个 Pool 最大连接数
     idleTimeoutMillis: 30_000,               // 空闲连接 30s 后释放
     connectionTimeoutMillis: 5_000,          // 获取连接超时 5s（而不是无限等待）
   });
-
-// 新建连接时将会话时区设为 UTC，确保 @default(now()) 存储正确的时间戳
-pool.on("connect", (client) => {
-  client.query(`SET timezone TO 'UTC'`);
-});
 
 const adapter = new PrismaPg(pool);
 

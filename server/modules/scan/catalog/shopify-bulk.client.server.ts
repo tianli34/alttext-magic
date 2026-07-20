@@ -26,6 +26,8 @@ export interface ShopifyBulkOperationSnapshot {
   errorCode: string | null;
   url: string | null;
   partialDataUrl: string | null;
+  /** 查询根节点已处理对象的运行计数，用于发现阶段不确定进度展示 */
+  objectCount: number;
   createdAt: string;
   completedAt: string | null;
 }
@@ -123,7 +125,11 @@ interface BulkOperationsListResult {
 }
 
 interface BulkOperationByIdResult {
-  bulkOperation: ShopifyBulkOperationSnapshot | null;
+  bulkOperation:
+    | (Omit<ShopifyBulkOperationSnapshot, "objectCount"> & {
+        objectCount: string | number | null;
+      })
+    | null;
 }
 
 export async function runBulkOperationQuery(
@@ -181,6 +187,7 @@ export async function listRunningBulkQueryOperations(
       errorCode: null,
       url: null,
       partialDataUrl: null,
+      objectCount: 0,
       createdAt: edge.node.createdAt,
       completedAt: null,
     }))
@@ -203,6 +210,7 @@ export async function getBulkOperationById(
           errorCode
           url
           partialDataUrl
+          objectCount
           createdAt
           completedAt
         }
@@ -213,7 +221,12 @@ export async function getBulkOperationById(
 
   if (!data.bulkOperation) {
     logger.warn({ shopId, bulkOperationId }, "shopify-bulk.bulk-operation-missing");
+    return null;
   }
 
-  return data.bulkOperation;
+  // objectCount 为 UnsignedInt64（JSON 中以字符串返回），统一归一化为 number。
+  return {
+    ...data.bulkOperation,
+    objectCount: Number(data.bulkOperation.objectCount) || 0,
+  };
 }

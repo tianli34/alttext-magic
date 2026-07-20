@@ -495,6 +495,7 @@ model ScanTaskAttempt {
   bulkResultUrl      String?               @map("bulk_result_url")
   resultUrlFetchedAt DateTime?             @map("result_url_fetched_at")
   parsedRows         Int                   @default(0) @map("parsed_rows")
+  totalImages        Int                   @default(0) @map("total_images")
   lastParseError     String?               @map("last_parse_error")
   startedAt          DateTime              @default(now()) @map("started_at")
   finishedAt         DateTime?             @map("finished_at")

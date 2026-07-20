@@ -5,6 +5,7 @@
  *          当进度到达终态（done / failed）或客户端断开时自动停止。
  */
 import { getScanProgress } from "./progress-publisher";
+import type { ScanResourceTotals } from "../modules/scan/scan.types";
 import { createLogger } from "../utils/logger";
 
 const logger = createLogger({ module: "sse-service" });
@@ -16,10 +17,18 @@ const SSE_POLL_INTERVAL_MS = 2000;
 export interface SSEProgressEvent {
   /** 事件类型标识 */
   type: "progress";
-  /** 已完成的任务数 */
-  completedTasks: number;
-  /** 总任务数 */
-  totalTasks: number;
+  /** 图片总数（原料：媒体图数） */
+  totalImages: number;
+  /** 已处理图片数 */
+  processedImages: number;
+  /** 失败图片数 */
+  failedImages: number;
+  /** 发现阶段已发现对象数（Bulk objectCount 聚合，用于不确定进度计数） */
+  discoveredObjects: number;
+  /** 按资源类型拆分的图片处理进度（用于每类独立进度条） */
+  resourceTotals: ScanResourceTotals;
+  /** 预计剩余秒数 */
+  etaSeconds: number | null;
   /** 当前状态 */
   status: string;
   /** 当前阶段 */
@@ -72,8 +81,12 @@ export function startSSEProgressStream(
         if (progress) {
           const event: SSEProgressEvent = {
             type: "progress",
-            completedTasks: progress.completedTasks,
-            totalTasks: progress.totalTasks,
+            totalImages: progress.totalImages,
+            processedImages: progress.processedImages,
+            failedImages: progress.failedImages,
+            discoveredObjects: progress.discoveredObjects,
+            resourceTotals: progress.resourceTotals,
+            etaSeconds: progress.etaSeconds,
             status: progress.status,
             phase: progress.phase,
             message: progress.message,
@@ -94,8 +107,12 @@ export function startSSEProgressStream(
           // Redis 键已过期或不存在
           const event: SSEProgressEvent = {
             type: "progress",
-            completedTasks: 0,
-            totalTasks: 0,
+            totalImages: 0,
+            processedImages: 0,
+            failedImages: 0,
+            discoveredObjects: 0,
+            resourceTotals: {},
+            etaSeconds: null,
             status: "UNKNOWN",
             phase: "unknown",
             message: "进度数据已过期",

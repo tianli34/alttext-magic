@@ -12,9 +12,6 @@ import {
   computeNextCandidateState,
   rebuildTargetProjections,
 } from "./catalog/publish.service";
-import { createLogger } from "../../utils/logger";
-
-const logger = createLogger({ module: "collection-convergence" });
 
 // ============================================================
 // 类型定义
@@ -235,18 +232,6 @@ export async function convergeCollection(
   });
 
   result.projectionCount = projectionCount;
-
-  logger.info(
-    {
-      shopId: input.shopId,
-      collectionId: input.collectionId,
-      hasImage,
-      presentStatus,
-      candidateStatus: nextCandidate.status,
-      projectionCount,
-    },
-    "converge-collection.success"
-  );
 
   return result;
 }

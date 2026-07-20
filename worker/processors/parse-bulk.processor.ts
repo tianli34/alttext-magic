@@ -24,6 +24,7 @@ import {
   flushMediaFileStaging,
   flushProductMediaStaging,
   countStagingRows,
+  countMediaImages,
 } from "../../server/modules/scan/catalog/staging.service";
 import { enqueueDeriveScan } from "../../server/queues/derive-scan.queue";
 import type { ProductMediaFlushItem } from "../../server/modules/scan/catalog/parsers/staging.types";
@@ -35,7 +36,7 @@ import {
   resetScanTaskToPendingForRetry,
 } from "../../server/modules/scan/catalog/scan-task.service";
 import { enqueuePublishScanResult } from "../../server/queues/publish-scan.queue";
-import { updateScanProgressPhase } from "../../server/sse/progress-publisher";
+import { updateScanProgressPhase, addScanTotalImages, addScanResourceTotalImages } from "../../server/sse/progress-publisher";
 import { SCAN_PHASE } from "../../server/modules/scan/scan.constants";
 
 const logger = createLogger({ module: "parse-bulk-processor" });
@@ -74,9 +75,14 @@ interface ParseBulkProcessorDependencies {
     scanTaskAttemptId: string,
     resourceType: ScanResourceType,
   ): Promise<number>;
+  countMediaImages(
+    scanTaskAttemptId: string,
+    resourceType: ScanResourceType,
+  ): Promise<number>;
   markAttemptSuccess(input: {
     scanTaskAttemptId: string;
     parsedRows: number;
+    totalImages: number;
     finishedAt: Date;
   }): Promise<void>;
   markAttemptFailed(input: {
@@ -123,12 +129,14 @@ const defaultDependencies: ParseBulkProcessorDependencies = {
   },
   parseByResourceType,
   countStagingRows,
-  async markAttemptSuccess(input) {
+  countMediaImages,
+  async   markAttemptSuccess(input) {
     await prisma.scanTaskAttempt.update({
       where: { id: input.scanTaskAttemptId },
       data: {
         status: "SUCCESS",
         parsedRows: input.parsedRows,
+        totalImages: input.totalImages,
         finishedAt: input.finishedAt,
         lastParseError: null,
       },
@@ -289,17 +297,27 @@ export async function processParseBulkJob(
       attempt.bulkResultUrl,
     );
 
-    // 4. 统计已写入行数
+    // 4. 统计已写入行数 + 图片（原料）总数
     const parsedRows = await parseBulkProcessorDependencies.countStagingRows(
+      scanTaskAttemptId,
+      resourceType,
+    );
+    const totalImages = await parseBulkProcessorDependencies.countMediaImages(
       scanTaskAttemptId,
       resourceType,
     );
     const finishedAt = new Date();
 
-    // 5. 标记 attempt 为 SUCCESS
+    // 5. 累加图片总数到 Redis 进度（供图片级百分比使用）
+    await addScanTotalImages(scanJobId, totalImages);
+    // 5.1 按资源类型累加图片总数（供每类独立进度条使用）
+    await addScanResourceTotalImages(scanJobId, resourceType, totalImages);
+
+    // 6. 标记 attempt 为 SUCCESS
     await parseBulkProcessorDependencies.markAttemptSuccess({
       scanTaskAttemptId,
       parsedRows,
+      totalImages,
       finishedAt,
     });
 

@@ -12,11 +12,11 @@ import prisma from "../db.server";
 import { getBootstrapData } from "../../server/modules/bootstrap/bootstrap.service";
 import { GroupStatsCard, type GroupStats } from "../components/dashboard/GroupStatsCard";
 import { QuotaSummary } from "../components/dashboard/QuotaSummary";
+import { ScanProgressFloat } from "../components/dashboard/ScanProgressFloat";
 import dashboardGridStyles from "../components/dashboard/DashboardGrid.module.css";
 import { formatRelativeTime } from "../lib/format";
 import { useTimezone } from "../lib/timezone";
 import { DEFAULT_SCOPE_FLAG_STATE } from "../lib/scope-utils";
-import { buildAppPath } from "../lib/app-navigation";
 
 /* ------------------------------------------------------------------ */
 /*  类型定义                                                           */
@@ -122,8 +122,6 @@ export default function AppDashboardPage() {
 
 function DashboardContent() {
   const timezone = useTimezone();
-  const location = useLocation();
-  const navigate = useNavigate();
   /** Dashboard API 数据 */
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   /** 数据加载中 */
@@ -136,6 +134,11 @@ function DashboardContent() {
   /** 重新扫描状态 */
   const [rescanning, setRescanning] = useState(false);
   const [rescanError, setRescanError] = useState<string | null>(null);
+
+  /** 当前浮窗展示的扫描任务 ID（null 时不显示浮窗） */
+  const [floatScanJobId, setFloatScanJobId] = useState<string | null>(null);
+  /** 用户已手动关闭浮窗的扫描任务 ID（避免关闭后被 activeScanJobId 重新拉起） */
+  const [dismissedScanJobId, setDismissedScanJobId] = useState<string | null>(null);
 
   /* ---------------------------------------------------------------- */
   /*  获取 Dashboard 数据                                              */
@@ -193,6 +196,20 @@ function DashboardContent() {
   }, [dashboardData?.isScanning]);
 
   /* ---------------------------------------------------------------- */
+  /*  存在进行中的扫描任务时自动拉起进度浮窗（刷新恢复 / onboarding 跳转）  */
+  /* ---------------------------------------------------------------- */
+  useEffect(() => {
+    const activeId = dashboardData?.activeScanJobId ?? null;
+    if (
+      activeId &&
+      activeId !== floatScanJobId &&
+      activeId !== dismissedScanJobId
+    ) {
+      setFloatScanJobId(activeId);
+    }
+  }, [dashboardData?.activeScanJobId, floatScanJobId, dismissedScanJobId]);
+
+  /* ---------------------------------------------------------------- */
   /* ---------------------------------------------------------------- */
   /*  重新扫描 → 提取 scanJobId → 导航到进度页                          */
   /* ---------------------------------------------------------------- */
@@ -222,17 +239,29 @@ function DashboardContent() {
 
       const result = await response.json() as { scanJobId?: string };
       if (result.scanJobId) {
-        // 拿到 scanJobId → 导航到扫描进度页
-        navigate(buildAppPath(`/app/scan-progress?scanJobId=${result.scanJobId}`, location.search));
+        // 拿到 scanJobId → 展示进度浮窗
+        setDismissedScanJobId(null);
+        setFloatScanJobId(result.scanJobId);
+        setRescanning(false);
+
+        // 开发环境：将进度排查命令写入剪贴板，异常时可直接在终端粘贴运行
+        if (import.meta.env.DEV) {
+          const cmd = `npx tsx scripts/scan-progress-inspect.ts ${result.scanJobId}`;
+          void navigator.clipboard?.writeText(cmd).then(
+            () => console.info(`[scan] 排查命令已复制到剪贴板: ${cmd}`),
+            () => console.info(`[scan] 排查命令(复制失败请手动复制): ${cmd}`),
+          );
+        }
       } else {
         // 兜底：无 scanJobId 时刷新 dashboard 数据
+        setRescanning(false);
         setRefreshKey((prev) => prev + 1);
       }
     } catch {
       setRescanError("网络错误，请稍后重试");
       setRescanning(false);
     }
-  }, [navigate, dashboardData, location.search]);
+  }, [dashboardData]);
   /* ---------------------------------------------------------------- */
   /*  渲染                                                             */
   /* ---------------------------------------------------------------- */
@@ -305,11 +334,12 @@ function DashboardContent() {
                 <s-text tone="info">⏳</s-text>
                 <s-text>正在扫描…</s-text>
                 <s-text tone="neutral">数据可能会暂时滞后。</s-text>
-                {activeScanJobId && (
+                {activeScanJobId && !floatScanJobId && (
                   <div
-                    onClick={() =>
-                      navigate(buildAppPath(`/app/scan-progress?scanJobId=${activeScanJobId}`, location.search))
-                    }
+                    onClick={() => {
+                      setDismissedScanJobId(null);
+                      setFloatScanJobId(activeScanJobId);
+                    }}
                     style={{ display: "inline-block", cursor: "pointer", marginLeft: "0.5rem" }}
                   >
                     <s-button variant="secondary" accessibilityLabel="查看进度">
@@ -334,9 +364,9 @@ function DashboardContent() {
               <s-button
                 variant="primary"
                 {...(isScanButtonDisabled ? { disabled: true } : {})}
-                accessibilityLabel="重新扫描"
+                accessibilityLabel="扫描"
               >
-                {rescanning ? "正在启动扫描…" : isScanning ? "扫描中…" : "重新扫描"}
+                {rescanning ? "正在启动扫描…" : isScanning ? "扫描中…" : "扫描"}
               </s-button>
             </div>
           </s-stack>
@@ -384,6 +414,24 @@ function DashboardContent() {
           <QuotaSummary />
         </s-stack>
       </s-section>
+
+      {/* 扫描进度浮窗（右下角固定，可最小化） */}
+      {floatScanJobId && (
+        <ScanProgressFloat
+          key={floatScanJobId}
+          scanJobId={floatScanJobId}
+          onClose={() => {
+            setDismissedScanJobId(floatScanJobId);
+            setFloatScanJobId(null);
+            // 刷新 dashboard 统计数据
+            setRefreshKey((prev) => prev + 1);
+          }}
+          onRescan={(newScanJobId) => {
+            setDismissedScanJobId(null);
+            setFloatScanJobId(newScanJobId);
+          }}
+        />
+      )}
     </s-page>
   );
 }

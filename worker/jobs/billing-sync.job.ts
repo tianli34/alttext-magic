@@ -104,7 +104,6 @@ export async function syncAllShopsBilling(
   // ---- 1. 查询所有活跃 shop ----
   const shops = await db.shop.findMany({
     where: {
-      accessTokenEncrypted: { not: null as unknown as string },
       uninstalledAt: null,
     },
     select: {

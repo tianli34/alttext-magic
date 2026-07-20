@@ -19,7 +19,12 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ackNotice } from "../../server/modules/notice/scan-notice-ack.service";
 import { updateScanScopeFlags } from "../../server/modules/shop/scope.service";
-import { acquireLock, releaseLock } from "../../server/modules/lock/operation-lock.service";
+import {
+  acquireLock,
+  releaseLock,
+  releaseLockByType,
+  hasRunningScanJob,
+} from "../../server/modules/lock/operation-lock.service";
 import { isWritebackLocked } from "../../server/modules/lock/writeback-lock.service";
 import { createScanJobWithTasks } from "../../server/modules/scan/catalog/scan-job.service";
 import { scopeFlagsToResourceTypes } from "../../server/modules/scan/scan.constants";
@@ -121,15 +126,75 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
     const isGenerate = lockResult.lock?.operationType === "GENERATE";
     const isWriteback = lockResult.lock?.operationType === "WRITEBACK";
-    let msg: string;
+    const isScan = lockResult.lock?.operationType === "SCAN";
+
     if (isGenerate) {
-      msg = "A generation is already running. Please try again later.";
-    } else if (isWriteback) {
-      msg = "A writeback is already running. Please try again later.";
-    } else {
-      msg = "Another scan is already running. Please try again later.";
+      return Response.json(
+        { error: "A generation is already running. Please try again later." },
+        { status: 409 },
+      );
     }
-    return Response.json({ error: msg }, { status: 409 });
+    if (isWriteback) {
+      return Response.json(
+        { error: "A writeback is already running. Please try again later." },
+        { status: 409 },
+      );
+    }
+
+    // SCAN 锁冲突：仅当确实还存在 RUNNING 的 scan_job（即 UI 正在展示扫描界面）
+    // 时才提示“Another scan is already running”，否则视为残留锁并清理后继续。
+    if (isScan) {
+      const runningJobExists = await hasRunningScanJob(shop.id);
+      if (runningJobExists) {
+        return Response.json(
+          { error: "Another scan is already running. Please try again later." },
+          { status: 409 },
+        );
+      }
+
+      // 残留锁清理：释放后继续原流程（下方锁获取将重新拿到锁并正常启动扫描）。
+      logger.warn(
+        { shopId: shop.id, batchId: lockResult.lock?.batchId },
+        "Stale SCAN lock found without running scan_job; releasing before retry",
+      );
+      try {
+        await releaseLockByType(shop.id, "SCAN");
+      } catch (err) {
+        logger.error({ shopId: shop.id, err }, "Failed to release stale SCAN lock");
+      }
+
+      const retry = await acquireLock(shop.id, "SCAN", lockOwner);
+      if (!retry.acquired) {
+        return Response.json(
+          { error: "Another scan is already running. Please try again later." },
+          { status: 409 },
+        );
+      }
+    } else {
+      // 未知锁类型：与 SCAN 同视为可清理的残留锁，避免误导用户。
+      logger.warn(
+        { shopId: shop.id, conflictingLockType: lockResult.lock?.operationType },
+        "Unknown conflict lock type treated as stale; releasing before retry",
+      );
+      try {
+        if (lockResult.lock?.operationType) {
+          await releaseLockByType(
+            shop.id,
+            lockResult.lock.operationType as "SCAN" | "GENERATE" | "WRITEBACK",
+          );
+        }
+      } catch (err) {
+        logger.error({ shopId: shop.id, err }, "Failed to release unknown stale lock");
+      }
+
+      const retry = await acquireLock(shop.id, "SCAN", lockOwner);
+      if (!retry.acquired) {
+        return Response.json(
+          { error: "Another scan is already running. Please try again later." },
+          { status: 409 },
+        );
+      }
+    }
   }
 
   try {
@@ -154,7 +219,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     // 13. 初始化 Redis 进度键
-    await initScanProgress(scanJobResult.scanJobId, enabledResourceTypes.length);
+    await initScanProgress(scanJobResult.scanJobId);
 
     // 14. 入队 BullMQ
     await enqueueScanStart({

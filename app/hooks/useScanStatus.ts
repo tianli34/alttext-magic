@@ -47,8 +47,14 @@ export interface ScanStatusData {
   scanJob: ScanJobStatus;
   tasks: ScanTaskStatus[];
   progress: {
-    completedTasks: number;
-    totalTasks: number;
+    totalImages: number;
+    processedImages: number;
+    failedImages: number;
+    /** 发现阶段已发现对象数（Bulk objectCount 聚合，用于不确定进度计数） */
+    discoveredObjects: number;
+    /** 按资源类型拆分的图片处理进度（用于每类独立进度条） */
+    resourceTotals: Record<string, { resourceType: string; totalImages: number; processedImages: number; failedImages: number }>;
+    etaSeconds: number | null;
     status: string;
     phase: string;
     message: string;

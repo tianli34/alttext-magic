@@ -29,10 +29,23 @@ export interface CreateScanJobResult {
 
 /** Redis 扫描进度键的值结构 */
 export interface ScanProgressData {
-  completedTasks: number;
-  totalTasks: number;
   status: string;
 }
+
+/** 单类资源的图片处理进度（实时口径，与全局进度同源） */
+export interface ScanResourceProgress {
+  /** 资源类型 */
+  resourceType: string;
+  /** 该资源类型待处理图片总数（原料：媒体图数） */
+  totalImages: number;
+  /** 已成功处理图片数 */
+  processedImages: number;
+  /** 失败图片数 */
+  failedImages: number;
+}
+
+/** 资源类型 -> 进度明细 的映射（用于按类展示独立进度条） */
+export type ScanResourceTotals = Record<string, ScanResourceProgress>;
 
 /** ScopeFlag 到 ScanResourceType 的映射类型 */
 export type ScopeToResourceMap = Record<ScopeFlag, ScanResourceType>;
@@ -116,11 +129,17 @@ export interface ScanStatusJob {
 
 /** Redis 进度摘要（可选，Redis 键过期后为 null） */
 export interface ScanProgressSummary {
-  completedTasks: number;
-  totalTasks: number;
+  totalImages: number;
+  processedImages: number;
+  failedImages: number;
+  /** 发现阶段已发现对象数（Bulk objectCount 聚合，用于不确定进度计数） */
+  discoveredObjects: number;
+  /** 按资源类型拆分的图片处理进度（用于每类独立进度条） */
+  resourceTotals: ScanResourceTotals;
   status: string;
   phase: string;
   message: string;
+  etaSeconds: number | null;
 }
 
 /** GET /api/scan/status 完整响应体 */

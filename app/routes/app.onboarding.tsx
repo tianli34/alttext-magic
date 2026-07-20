@@ -119,14 +119,9 @@ export default function OnboardingPage() {
         return;
       }
 
-      // 提取 scanJobId → 导航到扫描进度页
-      const result = await response.json() as { scanJobId?: string };
-      if (result.scanJobId) {
-        navigate(buildAppPath(`/app/scan-progress?scanJobId=${result.scanJobId}`, location.search));
-      } else {
-        // 兜底：无 scanJobId 时回到 dashboard
-        navigate(buildAppPath("/app", location.search));
-      }
+      // 提取 scanJobId → 回到 Dashboard，由其进度浮窗自动展示扫描进度
+      await response.json();
+      navigate(buildAppPath("/app", location.search));
     } catch {
       setError("网络错误，请稍后重试");
       setSubmitting(false);

@@ -1,0 +1,12 @@
+[31;1m[eval]:1[0m
+[31;1mconst Redis=require('ioredis');const c=new Redis('redis://localhost:6379');c.on('error',e=,e.message);process.exit(1)});(async()= k='scan:progress:cmrspbmvs000bk0ttpwn6e7v8';const exists=await c.exists(k);console.log('exists',exists);if(exists){const ttl=await c.ttl(k);console.log('ttl',ttl);const all=await c.hgetall(k);console.log(JSON.stringify(all,null,2));}else{console.log('KEY NOT FOUND (expired or never written)');}await c.quit();})().catch(e=;process.exit(1)})[0m
+[31;1m                                                                                          ^[0m
+[31;1mExpression expected[0m
+[31;1m[0m
+[31;1mSyntaxError: Unexpected token ','[0m
+[31;1m    at makeContextifyScript (node:internal/vm:185:14)[0m
+[31;1m    at compileScript (node:internal/process/execution:383:10)[0m
+[31;1m    at evalTypeScript (node:internal/process/execution:256:22)[0m
+[31;1m    at node:internal/main/eval_string:74:3[0m
+[31;1m[0m
+[31;1mNode.js v22.18.0[0m

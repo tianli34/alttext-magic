@@ -18,6 +18,9 @@ import type {
   ScanStatusJob,
   ScanStatusTask,
   ScanStatusAttempt,
+  ScanProgressSummary,
+  ScanResourceTotals,
+  ScanResourceProgress,
 } from "../scan.types";
 
 const logger = createLogger({ module: "scan-job-service" });
@@ -148,8 +151,8 @@ export async function getScanStatus(
   scanJobId: string,
   shopId: string,
 ): Promise<ScanStatusResponse | null> {
-  // 1. 并行查询 scan_job + tasks + Redis 进度
-  const [scanJob, tasksWithAttempts, progress] = await Promise.all([
+  // 1. 并行查询 scan_job + tasks + attempt 图片聚合 + Redis 进度
+  const [scanJob, tasksWithAttempts, attemptImages, progress] = await Promise.all([
     // scan_job 基础信息
     prisma.scanJob.findUnique({
       where: { id: scanJobId },
@@ -198,9 +201,32 @@ export async function getScanStatus(
         },
       },
     }),
+    // 所有 attempt 的图片总数（Redis 进度过期时用于回算图片级进度）
+    prisma.scanTaskAttempt.findMany({
+      where: { scanTask: { scanJobId } },
+      select: {
+        totalImages: true,
+        status: true,
+        scanTask: {
+          select: { resourceType: true },
+        },
+      },
+    }),
     // Redis 进度摘要（键过期后返回 null）
     getScanProgress(scanJobId),
   ]);
+
+  // Redis 进度丢失/过期时，用 DB 实际 attempt 数据回算图片级进度（可恢复展示）
+  const resolvedProgress =
+    progress ??
+    resolveProgressFromAttempts(
+      attemptImages.map((a) => ({
+        totalImages: a.totalImages,
+        status: a.status,
+        resourceType: a.scanTask.resourceType,
+      })),
+      scanJob,
+    );
 
   // 2. scan_job 不存在或不属于当前 shop
   if (!scanJob) {
@@ -247,8 +273,81 @@ export async function getScanStatus(
   return {
     scanJob: scanJobDto,
     tasks: taskDtos,
-    progress,
+    progress: resolvedProgress,
     lastPublishedAt,
+  };
+}
+
+/**
+ * Redis 进度键过期/丢失时，依据 scan_task_attempt 实际数据回算图片级进度。
+ *
+ * 口径（与 Redis 进度一致）：
+ * - totalImages：所有 attempt 的 totalImages 之和
+ * - processedImages：SUCCESS 状态 attempt 的 totalImages 之和
+ * - failedImages：FAILED 状态 attempt 的 totalImages 之和
+ * - resourceTotals：按 resourceType 聚合上述三类图片数，用于每类独立进度条
+ * - status/phase：由 scan_job 状态推导
+ */
+function resolveProgressFromAttempts(
+  attemptImages: { totalImages: number; status: string; resourceType: string }[],
+  scanJob: { status: string } | null,
+): ScanProgressSummary {
+  let totalImages = 0;
+  let processedImages = 0;
+  let failedImages = 0;
+
+  const resourceTotals: ScanResourceTotals = {};
+  const ensureEntry = (resourceType: string): ScanResourceProgress => {
+    if (!resourceTotals[resourceType]) {
+      resourceTotals[resourceType] = {
+        resourceType,
+        totalImages: 0,
+        processedImages: 0,
+        failedImages: 0,
+      };
+    }
+    return resourceTotals[resourceType];
+  };
+
+  for (const attempt of attemptImages) {
+    const rt = attempt.resourceType;
+    totalImages += attempt.totalImages;
+    const entry = ensureEntry(rt);
+    entry.totalImages += attempt.totalImages;
+
+    if (attempt.status === "SUCCESS") {
+      processedImages += attempt.totalImages;
+      entry.processedImages += attempt.totalImages;
+    } else     if (attempt.status === "FAILED") {
+      failedImages += attempt.totalImages;
+      entry.failedImages += attempt.totalImages;
+    }
+  }
+
+  const isTerminal =
+    scanJob?.status === "SUCCESS" ||
+    scanJob?.status === "PARTIAL_SUCCESS" ||
+    scanJob?.status === "FAILED";
+  const phase = !scanJob
+    ? "unknown"
+    : scanJob.status === "FAILED"
+      ? "failed"
+      : isTerminal
+        ? "done"
+        : "derive";
+  const status = scanJob?.status ?? "UNKNOWN";
+
+  return {
+    totalImages,
+    processedImages,
+    failedImages,
+    // Redis 过期回算场景无 objectCount 数据（发现阶段依赖 Redis 实时值），置 0。
+    discoveredObjects: 0,
+    resourceTotals,
+    status,
+    phase,
+    message: "",
+    etaSeconds: null,
   };
 }
 

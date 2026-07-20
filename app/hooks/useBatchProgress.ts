@@ -55,6 +55,17 @@ function resolveTerminalPhaseFromJobStatus(status: string | null | undefined): s
   return "";
 }
 
+/** 将剩余秒数格式化为中文预计时间文案（如 "约 4 分钟"）。 */
+function formatEtaLabel(etaSeconds: number | null): string {
+  if (etaSeconds === null || etaSeconds <= 0) return "";
+  if (etaSeconds < 60) return "约不到 1 分钟";
+  const minutes = Math.round(etaSeconds / 60);
+  if (minutes < 60) return `约 ${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  return `约 ${hours} 小时 ${remainMinutes} 分钟`;
+}
+
 interface UseBatchProgressReturn {
   /** 实时进度（SSE 推送） */
   progress: SSEProgressData | null;
@@ -64,8 +75,18 @@ interface UseBatchProgressReturn {
   loading: boolean;
   /** 是否正在扫描中（非终态） */
   isScanning: boolean;
-  /** 进度百分比 0-100 */
+  /** 进度百分比 0-100（task 粒度，兼容旧逻辑） */
   percent: number;
+  /** 图片级进度百分比 0-100（原料：媒体图数） */
+  imagePercent: number;
+  /** 图片获取是否失败（已到终态但始终未能解析出图片总数） */
+  imageFetchFailed: boolean;
+  /** 是否处于发现阶段（正在收集图片清单，总量未知） */
+  isDiscovering: boolean;
+  /** 发现阶段已发现对象数（Bulk objectCount 聚合） */
+  discoveredObjects: number;
+  /** 预计剩余时间文案（如 "约 4 分钟"），无数据时为空串 */
+  etaLabel: string;
   /** 阶段中文标签 */
   phaseLabel: string;
   /** 是否已完成（成功或失败） */
@@ -122,21 +143,6 @@ export function useBatchProgress(
   const jobStatus = scanStatus?.scanJob?.status ?? null;
   const fallbackTerminalPhase = resolveTerminalPhaseFromJobStatus(jobStatus);
   const currentPhase = currentProgress?.phase ?? fallbackTerminalPhase;
-  const percent =
-    currentProgress && currentProgress.totalTasks > 0
-      ? Math.round(
-          (currentProgress.completedTasks / currentProgress.totalTasks) * 100,
-        )
-      : isTerminalJobStatus(jobStatus)
-        ? 100
-      : 0;
-
-  // 5. 判断是否终态
-  const isTerminal = isTerminalPhase(currentPhase) || isTerminalJobStatus(jobStatus);
-  const isScanning = !!scanJobId && !isTerminal;
-
-  // 6. 阶段中文标签
-  const phaseLabel = PHASE_LABELS[currentPhase] ?? currentPhase;
 
   // 7. 重新扫描（返回新的 scanJobId 供调用方导航到进度页）
   const handleRescan = useCallback(async (): Promise<string | null> => {
@@ -189,16 +195,46 @@ const effectiveProgress = progress ?? scanStatus?.progress ?? null;
 const effectivePhase = effectiveProgress?.phase ?? fallbackTerminalPhase;
 const effectiveIsTerminal =
   isTerminalPhase(effectivePhase) || isTerminalJobStatus(jobStatus);
-const effectivePercent =
-  effectiveProgress && effectiveProgress.totalTasks > 0
-    ? Math.round(
-        (effectiveProgress.completedTasks / effectiveProgress.totalTasks) * 100,
-      )
-    : isTerminalJobStatus(jobStatus)
-      ? 100
-    : 0;
 const effectivePhaseLabel = PHASE_LABELS[effectivePhase] ?? effectivePhase;
 const effectiveIsScanning = !!scanJobId && !effectiveIsTerminal;
+
+// 图片级百分比（原料：媒体图数），仅当已知总数时有效
+const effectiveTotalImages = effectiveProgress?.totalImages ?? 0;
+const effectiveProcessedImages = effectiveProgress?.processedImages ?? 0;
+const imagePercent =
+  effectiveTotalImages > 0
+    ? Math.min(
+        100,
+        Math.round((effectiveProcessedImages / effectiveTotalImages) * 100),
+      )
+    : 0;
+// 已到终态却始终未能解析出图片总数（totalImages 为 0），
+// 说明图片清单获取失败，不应伪造 100% 进度。
+const imageFetchFailed = effectiveIsTerminal && effectiveTotalImages === 0;
+const percent = imagePercent;
+// [DEBUG] 终态进度排查
+if (process.env.NODE_ENV !== "production") {
+  console.log("[DEBUG useBatchProgress]", {
+    scanJobId,
+    jobStatus,
+    effectivePhase,
+    effectiveIsTerminal,
+    hasSSEProgress: !!progress,
+    hasScanStatusProgress: !!scanStatus?.progress,
+    effectiveTotalImages,
+    effectiveProcessedImages,
+    imagePercent,
+    imageFetchFailed,
+    resourceTotals: effectiveProgress?.resourceTotals ?? null,
+  });
+}
+const etaSeconds = effectiveProgress?.etaSeconds ?? null;
+const etaLabel = formatEtaLabel(etaSeconds);
+
+// 发现阶段：仍在扫描、尚未解析出图片总数（totalImages 为 0）。
+// 此时进度总量未知，前端应展示不确定进度 + 已发现对象计数。
+const discoveredObjects = effectiveProgress?.discoveredObjects ?? 0;
+const isDiscovering = effectiveIsScanning && effectiveTotalImages === 0;
 const canStop = !!scanStatus &&
   scanStatus.scanJob.status === "RUNNING" &&
   scanStatus.tasks.length > 0 &&
@@ -261,7 +297,12 @@ const canStop = !!scanStatus &&
     scanStatus,
     loading,
     isScanning: effectiveIsScanning,
-    percent: effectivePercent,
+    percent,
+    imagePercent,
+    imageFetchFailed,
+    isDiscovering,
+    discoveredObjects,
+    etaLabel,
     phaseLabel: effectivePhaseLabel,
     isTerminal: effectiveIsTerminal,
     resourceTypeLabels: RESOURCE_TYPE_LABELS,

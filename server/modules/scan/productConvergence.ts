@@ -13,9 +13,6 @@ import {
   computeNextCandidateState,
   rebuildTargetProjections
 } from "./catalog/publish.service";
-import { createLogger } from "../../utils/logger";
-
-const logger = createLogger({ module: "product-convergence" });
 
 export interface ConvergeMediaImage {
   id: string; // mediaImageId (媒体图片标识)，对应 Shopify 的 gid://shopify/MediaImage/xxxx，也是 alt_target.writeTargetId
@@ -375,17 +372,6 @@ export async function convergeProduct(
     });
     result.projectionCount += count;
   }
-
-  logger.info(
-    {
-      shopId: input.shopId,
-      productId: input.productId,
-      mediaCount: input.mediaImages.length,
-      impactedCount: impactedTargetIdList.length,
-      counts: result
-    },
-    "converge-product.success"
-  );
 
   return result;
 }
