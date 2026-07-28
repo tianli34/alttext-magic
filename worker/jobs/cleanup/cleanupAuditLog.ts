@@ -33,7 +33,7 @@ export interface CleanupResult {
  * ```sql
  * DELETE FROM audit_log WHERE id IN (
  *   SELECT id FROM audit_log
- *   WHERE created_at < NOW() - interval '90 days'
+ * WHERE created_at < NOW() - make_interval(days => 90)
  *   LIMIT 1000
  * )
  * ```
@@ -51,7 +51,7 @@ export async function cleanupAuditLog(client: PrismaClient): Promise<CleanupResu
     const result = await client.$executeRaw`
       DELETE FROM audit_log WHERE id IN (
         SELECT id FROM audit_log
-        WHERE created_at < NOW() - interval '${RETENTION_DAYS} days'
+        WHERE created_at < NOW() - make_interval(days => ${RETENTION_DAYS})
         LIMIT ${BATCH_SIZE}
       )
     `;

@@ -244,12 +244,13 @@ function DashboardContent() {
         setFloatScanJobId(result.scanJobId);
         setRescanning(false);
 
-        // 开发环境：将进度排查命令写入剪贴板，异常时可直接在终端粘贴运行
+        // 开发环境：将排查命令写入剪贴板，异常时可直接在终端粘贴运行
         if (import.meta.env.DEV) {
-          const cmd = `npx tsx scripts/scan-progress-inspect.ts ${result.scanJobId}`;
-          void navigator.clipboard?.writeText(cmd).then(
-            () => console.info(`[scan] 排查命令已复制到剪贴板: ${cmd}`),
-            () => console.info(`[scan] 排查命令(复制失败请手动复制): ${cmd}`),
+          const cmd1 = `npx tsx scripts/scan-progress-inspect.ts ${result.scanJobId}`;
+          const cmd2 = `npx tsx scripts/scan-worker-logs.ts ${result.scanJobId}`;
+          void navigator.clipboard?.writeText(cmd2).then(
+            () => console.info(`[scan] worker 日志命令已复制到剪贴板: ${cmd2}`),
+            () => console.info(`[scan] 命令1: ${cmd1}\n       命令2: ${cmd2}`),
           );
         }
       } else {

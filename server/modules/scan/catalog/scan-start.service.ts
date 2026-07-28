@@ -27,6 +27,16 @@ import { SCAN_PHASE } from "../scan.constants";
 
 const logger = createLogger({ module: "scan-start-service" });
 
+/**
+ * finish webhook 早于 bulkSubmitService.markAttemptSubmitted 把 bulkOperationId 落库到达时的
+ * 竞态兜底重试延迟。开发店小数据量下 bulk op 秒级完成, 竞态窗口实测约 2-3s, 取 5s 留余量。
+ */
+const WEBHOOK_NOT_FOUND_RETRY_DELAY_MS = 5_000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 const bulkFinishWebhookPayloadSchema = z.object({
   admin_graphql_api_id: z.string().min(1),
   status: z.string().min(1),
@@ -285,7 +295,7 @@ export async function handleBulkOperationsFinishWebhook(input: {
       ? new Date(payload.completed_at)
       : new Date();
 
-  const completion = await scanStartServiceDependencies.markAttemptFinishedFromWebhook({
+  const markInput = {
     bulkOperationId: payload.admin_graphql_api_id,
     bulkOperationStatus: normalizedStatus,
     bulkResultUrl: bulkOperation?.url ?? bulkOperation?.partialDataUrl ?? null,
@@ -293,7 +303,31 @@ export async function handleBulkOperationsFinishWebhook(input: {
     errorCode: bulkOperation?.errorCode ?? payload.error_code ?? null,
     errorMessage:
       normalizedStatus === "COMPLETED" ? null : "Bulk operation finished with terminal error",
+  };
+
+  // 首查静默: 开发店小数据量时 bulk op 可能秒级完成, 其 finish webhook 会早于
+  // bulkSubmitService.markAttemptSubmitted 把 bulkOperationId 落库而到达(提交竞态)。
+  let completion = await scanStartServiceDependencies.markAttemptFinishedFromWebhook({
+    ...markInput,
+    silentNotFound: true,
   });
+
+  if (!completion) {
+    // 竞态兜底: 延迟一次重试, 覆盖落库窗口; 仍查不到视为无关 bulk op / 脏数据,
+    // 后续调用按默认(silentNotFound=false)打 warn 暴露事件。
+    await delay(WEBHOOK_NOT_FOUND_RETRY_DELAY_MS);
+    webhookLogger.info(
+      { bulkOperationId: payload.admin_graphql_api_id, retryDelayMs: WEBHOOK_NOT_FOUND_RETRY_DELAY_MS },
+      "scan-start.bulk-operation-not-found-retry",
+    );
+    completion = await scanStartServiceDependencies.markAttemptFinishedFromWebhook(markInput);
+  }
+
+  if (!completion) {
+    // 未匹配到任何 scanTaskAttempt: 提交竞态下的脏 webhook / 无关 bulk op,
+    // 不记录 "finished", 避免与上方 not-found 告警形成矛盾日志。
+    return;
+  }
 
   webhookLogger.info(
     {
@@ -306,10 +340,6 @@ export async function handleBulkOperationsFinishWebhook(input: {
     },
     "scan-start.bulk-operation-finished",
   );
-
-  if (!completion) {
-    return;
-  }
 
   const completeLogger = webhookLogger.withContext({
     batch_id: completion.scanJobId,

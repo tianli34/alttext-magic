@@ -124,6 +124,7 @@ async function resolveTarget(
     );
 
     if (taskRes.rowCount === 0) {
+      console.log("[DEBUG] scan_task 查询结果为空");
       logger.error({ scanJobId }, "未找到该 scanJobId 对应的 scan_task 记录");
       process.exit(2);
     }
@@ -156,6 +157,15 @@ async function resolveTarget(
     );
 
     const attemptIds = new Set<string>(attemptRes.rows.map((r) => r.id));
+
+    // DEBUG: 步骤 2 开头和结尾 — 目标 task 的原始时间
+    if (task) {
+      const a0 = attemptRes.rows[0];
+      console.log(
+        `[DEBUG] step2  resourceType=${task.resource_type}  task.startedAt_iso=${task.started_at?.toISOString()}  attempt.startedAt_iso=${a0?.started_at?.toISOString()}  tzOffset=${new Date().getTimezoneOffset()}`,
+      );
+    }
+
     return { task, attempts: attemptRes.rows, attemptIds };
   } finally {
     await client.end();

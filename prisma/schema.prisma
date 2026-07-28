@@ -238,7 +238,7 @@ model Session {
   state               String
   isOnline            Boolean   @default(false)
   scope               String?
-  expires             DateTime?
+  expires             DateTime? @db.Timestamptz(3)
   accessToken         String
   userId              BigInt?
   firstName           String?
@@ -249,8 +249,8 @@ model Session {
   collaborator        Boolean?
   emailVerified       Boolean?
   refreshToken        String?
-  refreshTokenExpires DateTime?
-  updatedAt           DateTime  @default(now()) @updatedAt
+  refreshTokenExpires DateTime? @db.Timestamptz(3)
+  updatedAt           DateTime  @default(now()) @updatedAt @db.Timestamptz(3)
 
   // ---------- Indexes ----------
   @@index([shop])
@@ -270,16 +270,16 @@ model Shop {
   currentPlan             String    @default("FREE") @map("current_plan")
   incrementalScanEnabled  Boolean   @default(false) @map("incremental_scan_enabled")
   scanScopeFlags          Json      @default("{\"PRODUCT_MEDIA\":true,\"FILES\":true,\"COLLECTION_IMAGE\":true,\"ARTICLE_IMAGE\":true}") @map("scan_scope_flags")
-  scanScopeUpdatedAt      DateTime? @map("scan_scope_updated_at")
-  firstPaidBonusGrantedAt DateTime? @map("first_paid_bonus_granted_at")
+  scanScopeUpdatedAt      DateTime? @map("scan_scope_updated_at") @db.Timestamptz(3)
+  firstPaidBonusGrantedAt DateTime? @map("first_paid_bonus_granted_at") @db.Timestamptz(3)
   lastPublishedScopeFlags Json?     @map("last_published_scope_flags")
   lastPublishedScanJobId  String?   @map("last_published_scan_job_id")
-  lastPublishedAt         DateTime? @map("last_published_at")
+  lastPublishedAt         DateTime? @map("last_published_at") @db.Timestamptz(3)
   timezone                String?   @map("timezone")
-  installedAt             DateTime  @default(now()) @map("installed_at")
-  uninstalledAt           DateTime? @map("uninstalled_at")
-  createdAt               DateTime  @default(now()) @map("created_at")
-  updatedAt               DateTime  @updatedAt @map("updated_at")
+  installedAt             DateTime  @default(now()) @map("installed_at") @db.Timestamptz(3)
+  uninstalledAt           DateTime? @map("uninstalled_at") @db.Timestamptz(3)
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   webhookEvents             WebhookEvent[]
@@ -331,7 +331,7 @@ model ScanNoticeAck {
   shopId             String   @map("shop_id")
   noticeVersion      String   @map("notice_version")
   scopeFlagsSnapshot Json     @map("scope_flags_snapshot")
-  acknowledgedAt     DateTime @default(now()) @map("acknowledged_at")
+  acknowledgedAt     DateTime @default(now()) @map("acknowledged_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -350,10 +350,10 @@ model ShopOperationLock {
   shopId      String    @id @map("shop_id")
   lockType    String    @map("lock_type")
   batchId     String?   @map("batch_id")
-  acquiredAt  DateTime  @default(now()) @map("acquired_at")
-  heartbeatAt DateTime? @map("heartbeat_at")
-  expiresAt   DateTime  @map("expires_at")
-  releasedAt  DateTime? @map("released_at")
+  acquiredAt  DateTime  @default(now()) @map("acquired_at") @db.Timestamptz(3)
+  heartbeatAt DateTime? @map("heartbeat_at") @db.Timestamptz(3)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+  releasedAt  DateTime? @map("released_at") @db.Timestamptz(3)
   status      String    @map("status")
 
   // ---------- Relations ----------
@@ -383,14 +383,14 @@ model WebhookEvent {
   attempts             Int                @default(0)
   jobBatchId           String?            @map("job_batch_id")
   coalescedIntoEventId String?            @map("coalesced_into_event_id")
-  queuedAt             DateTime?          @map("queued_at")
-  lastAttemptAt        DateTime?          @map("last_attempt_at")
-  processingStartedAt  DateTime?          @map("processing_started_at")
-  processedAt          DateTime?          @map("processed_at")
+  queuedAt             DateTime?          @map("queued_at") @db.Timestamptz(3)
+  lastAttemptAt        DateTime?          @map("last_attempt_at") @db.Timestamptz(3)
+  processingStartedAt  DateTime?          @map("processing_started_at") @db.Timestamptz(3)
+  processedAt          DateTime?          @map("processed_at") @db.Timestamptz(3)
   errorMessage         String?            @map("error_message")
-  receivedAt           DateTime           @default(now()) @map("received_at")
-  createdAt            DateTime           @default(now()) @map("created_at")
-  updatedAt            DateTime           @updatedAt @map("updated_at")
+  receivedAt           DateTime           @default(now()) @map("received_at") @db.Timestamptz(3)
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop               Shop           @relation(fields: [shopDomain], references: [shopDomain], onDelete: Cascade)
@@ -425,9 +425,9 @@ model ScanJob {
   noticeVersion           String               @map("notice_version")
   successfulResourceTypes Json                 @default("[]") @map("successful_resource_types")
   failedResourceTypes     Json                 @default("[]") @map("failed_resource_types")
-  startedAt               DateTime             @default(now()) @map("started_at")
-  finishedAt              DateTime?            @map("finished_at")
-  publishedAt             DateTime?            @map("published_at")
+  startedAt               DateTime             @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt              DateTime?            @map("finished_at") @db.Timestamptz(3)
+  publishedAt             DateTime?            @map("published_at") @db.Timestamptz(3)
   error                   String?
 
   // ---------- Relations ----------
@@ -439,7 +439,7 @@ model ScanJob {
   lastPublishedTargets AltTarget[]                @relation("LastPublishedScanJobAltTargets")
   lastPublishedUsages  ImageUsage[]               @relation("LastPublishedScanJobImageUsages")
   lastSeenUsages       ImageUsage[]               @relation("LastSeenScanJobImageUsages")
-  lastSeenCandidates   AltCandidate[]              @relation("LastSeenScanJobAltCandidates")
+  lastSeenCandidates   AltCandidate[]             @relation("LastSeenScanJobAltCandidates")
   groupProjections     CandidateGroupProjection[]
 
   // ---------- Indexes ----------
@@ -462,15 +462,15 @@ model ScanTask {
   currentAttemptNo    Int              @default(0) @map("current_attempt_no")
   successfulAttemptId String?          @unique @map("successful_attempt_id")
   maxParseAttempts    Int              @default(3) @map("max_parse_attempts")
-  startedAt           DateTime         @default(now()) @map("started_at")
-  finishedAt          DateTime?        @map("finished_at")
+  startedAt           DateTime         @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt          DateTime?        @map("finished_at") @db.Timestamptz(3)
   error               String?
 
   // ---------- Relations ----------
-  shop              Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  scanJob           ScanJob            @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
-  attempts          ScanTaskAttempt[]  @relation("ScanTaskAttempts")
-  successfulAttempt ScanTaskAttempt?   @relation("SuccessfulScanTaskAttempt", fields: [successfulAttemptId], references: [id], onDelete: SetNull)
+  shop              Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanJob           ScanJob           @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
+  attempts          ScanTaskAttempt[] @relation("ScanTaskAttempts")
+  successfulAttempt ScanTaskAttempt?  @relation("SuccessfulScanTaskAttempt", fields: [successfulAttemptId], references: [id], onDelete: SetNull)
   scanResultUsages  ScanResultUsage[]
 
   // ---------- Indexes ----------
@@ -493,12 +493,12 @@ model ScanTaskAttempt {
   status             ScanTaskAttemptStatus @default(PENDING)
   bulkOperationId    String?               @unique @map("bulk_operation_id")
   bulkResultUrl      String?               @map("bulk_result_url")
-  resultUrlFetchedAt DateTime?             @map("result_url_fetched_at")
+  resultUrlFetchedAt DateTime?             @map("result_url_fetched_at") @db.Timestamptz(3)
   parsedRows         Int                   @default(0) @map("parsed_rows")
   totalImages        Int                   @default(0) @map("total_images")
   lastParseError     String?               @map("last_parse_error")
-  startedAt          DateTime              @default(now()) @map("started_at")
-  finishedAt         DateTime?             @map("finished_at")
+  startedAt          DateTime              @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt         DateTime?             @map("finished_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop              Shop                   @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -532,8 +532,8 @@ model JobBatch {
   failed        Int            @default(0)
   skipped       Int            @default(0)
   status        JobBatchStatus @default(PENDING)
-  startedAt     DateTime       @default(now()) @map("started_at")
-  finishedAt    DateTime?      @map("finished_at")
+  startedAt     DateTime       @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt    DateTime?      @map("finished_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop          Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -717,9 +717,9 @@ model ResourceImageFingerprint {
   resourceId             String                               @map("resource_id")
   fingerprintHash        String                               @map("fingerprint_hash")
   lastProcessedWebhookId String?                              @map("last_processed_webhook_id")
-  lastProcessedAt        DateTime?                            @map("last_processed_at")
-  createdAt              DateTime                             @default(now()) @map("created_at")
-  updatedAt              DateTime                             @updatedAt @map("updated_at")
+  lastProcessedAt        DateTime?                            @map("last_processed_at") @db.Timestamptz(3)
+  createdAt              DateTime                             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                             @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -750,8 +750,8 @@ model ScanResultTarget {
   previewUrl      String?          @map("preview_url")
   currentAltText  String?          @map("current_alt_text")
   currentAltEmpty Boolean          @default(true) @map("current_alt_empty")
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop    Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -785,8 +785,8 @@ model ScanResultUsage {
   title         String?
   handle        String?
   positionIndex Int?             @map("position_index")
-  createdAt     DateTime         @default(now()) @map("created_at")
-  updatedAt     DateTime         @updatedAt @map("updated_at")
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop             Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -821,10 +821,10 @@ model AltTarget {
   currentAltText         String?       @map("current_alt_text")
   currentAltEmpty        Boolean       @default(true) @map("current_alt_empty")
   lastPublishedScanJobId String        @map("last_published_scan_job_id")
-  lastSeenAt             DateTime      @default(now()) @map("last_seen_at")
+  lastSeenAt             DateTime      @default(now()) @map("last_seen_at") @db.Timestamptz(3)
   presentStatus          PresentStatus @default(PRESENT) @map("present_status")
-  createdAt              DateTime      @default(now()) @map("created_at")
-  updatedAt              DateTime      @updatedAt @map("updated_at")
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop                 Shop                       @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -857,11 +857,11 @@ model ImageUsage {
   handle                 String?
   positionIndex          Int?           @map("position_index")
   lastPublishedScanJobId String         @map("last_published_scan_job_id")
-  lastSeenAt             DateTime       @default(now()) @map("last_seen_at")
+  lastSeenAt             DateTime       @default(now()) @map("last_seen_at") @db.Timestamptz(3)
   lastSeenScanJobId      String?        @map("last_seen_scan_job_id")
   presentStatus          PresentStatus  @default(PRESENT) @map("present_status")
-  createdAt              DateTime       @default(now()) @map("created_at")
-  updatedAt              DateTime       @updatedAt @map("updated_at")
+  createdAt              DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop                 Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -889,10 +889,10 @@ model DecorativeMark {
   shopId      String    @map("shop_id")
   altTargetId String    @unique @map("alt_target_id")
   isActive    Boolean   @default(true) @map("is_active")
-  markedAt    DateTime  @default(now()) @map("marked_at")
-  unmarkedAt  DateTime? @map("unmarked_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  markedAt    DateTime  @default(now()) @map("marked_at") @db.Timestamptz(3)
+  unmarkedAt  DateTime? @map("unmarked_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop      Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -917,14 +917,14 @@ model AltCandidate {
   status            AltCandidateStatus         @default(MISSING)
   missingReason     AltCandidateMissingReason? @map("missing_reason")
   riskFlags         Json                       @default("[]") @map("risk_flags")
-  firstSeenAt       DateTime                   @default(now()) @map("first_seen_at")
-  lastSeenAt        DateTime                   @default(now()) @map("last_seen_at")
+  firstSeenAt       DateTime                   @default(now()) @map("first_seen_at") @db.Timestamptz(3)
+  lastSeenAt        DateTime                   @default(now()) @map("last_seen_at") @db.Timestamptz(3)
   lastSeenScanJobId String                     @map("last_seen_scan_job_id")
-  writtenAt         DateTime?                  @map("written_at")
+  writtenAt         DateTime?                  @map("written_at") @db.Timestamptz(3)
   errorCode         String?                    @map("error_code")
   errorMessage      String?                    @map("error_message")
-  createdAt         DateTime                   @default(now()) @map("created_at")
-  updatedAt         DateTime                   @updatedAt @map("updated_at")
+  createdAt         DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop             Shop                       @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -962,8 +962,8 @@ model CandidateGroupProjection {
   usageCountPresent      Int                            @default(0) @map("usage_count_present")
   impactScopeSummary     Json                           @default("{}") @map("impact_scope_summary")
   lastPublishedScanJobId String                         @map("last_published_scan_job_id")
-  createdAt              DateTime                       @default(now()) @map("created_at")
-  updatedAt              DateTime                       @updatedAt @map("updated_at")
+  createdAt              DateTime                       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                       @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop                 Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -993,8 +993,8 @@ model GenerationBatch {
   completedCount Int                   @default(0) @map("completed_count")
   skippedCount   Int                   @default(0) @map("skipped_count")
   failedCount    Int                   @default(0) @map("failed_count")
-  createdAt      DateTime              @default(now()) @map("created_at")
-  updatedAt      DateTime              @updatedAt @map("updated_at")
+  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop   Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -1010,21 +1010,21 @@ model GenerationBatch {
 // ============================================================
 
 model AltDraft {
-  id              String              @id @default(cuid())
-  shopId          String              @map("shop_id")
-  altCandidateId  String              @unique @map("alt_candidate_id")
-  batchId         String?             @map("batch_id")
-  modelUsed       String              @map("model_used")
-  contextMode     AltDraftContextMode @map("context_mode")
-  contextSnapshot Json                @map("context_snapshot")
-  generatedText   String              @map("generated_text")
-  rawText         String?             @map("raw_text")
-  processingStatus String?            @map("processing_status")
-  editedText      String?             @map("edited_text")
-  finalText       String?             @map("final_text")
-  createdAt       DateTime            @default(now()) @map("created_at")
-  updatedAt       DateTime            @updatedAt @map("updated_at")
-  expiresAt       DateTime            @map("expires_at")
+  id               String              @id @default(cuid())
+  shopId           String              @map("shop_id")
+  altCandidateId   String              @unique @map("alt_candidate_id")
+  batchId          String?             @map("batch_id")
+  modelUsed        String              @map("model_used")
+  contextMode      AltDraftContextMode @map("context_mode")
+  contextSnapshot  Json                @map("context_snapshot")
+  generatedText    String              @map("generated_text")
+  rawText          String?             @map("raw_text")
+  processingStatus String?             @map("processing_status")
+  editedText       String?             @map("edited_text")
+  finalText        String?             @map("final_text")
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+  expiresAt        DateTime            @map("expires_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop         Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -1057,9 +1057,9 @@ model AuditLog {
   writeTargetId  String   @map("write_target_id")
   oldAltText     String?  @map("old_alt_text")
   newAltText     String   @map("new_alt_text")
-  writtenAt      DateTime @default(now()) @map("written_at")
+  writtenAt      DateTime @default(now()) @map("written_at") @db.Timestamptz(3)
   modelUsed      String   @map("model_used")
-  createdAt      DateTime @default(now()) @map("created_at")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -1069,6 +1069,7 @@ model AuditLog {
   altCandidate AltCandidate @relation(fields: [altCandidateId], references: [id], onDelete: Cascade)
   altDraft     AltDraft?    @relation(fields: [altDraftId], references: [id], onDelete: SetNull)
 
+  @@unique([shopId, writeTargetId, altCandidateId])
   // ---------- Indexes ----------
   @@index([shopId])
   @@index([jobBatchId])
@@ -1077,7 +1078,6 @@ model AuditLog {
   @@index([altCandidateId])
   @@index([altDraftId])
   @@index([createdAt])
-  @@unique([shopId, writeTargetId, altCandidateId])
   @@index([shopId, writtenAt])
   @@index([shopId, altPlane, writtenAt])
   @@index([shopId, writeTargetId, writtenAt])
@@ -1089,22 +1089,22 @@ model AuditLog {
 // ============================================================
 
 model BillingSubscription {
-  id                       String                    @id @default(cuid())
-  shopId                   String                    @map("shop_id")
-  planCode                 BillingPlanCode           @map("plan_code")
-  billingInterval          BillingInterval           @map("billing_interval")
-  status                   BillingSubscriptionStatus @default(PENDING)
-  externalSubscriptionId   String?                   @unique @map("external_subscription_id")
-  externalBillingReference String?                   @map("external_billing_reference")
-  currentPeriodStart       DateTime?                 @map("current_period_start")
-  currentPeriodEnd         DateTime?                 @map("current_period_end")
-  firstPaidWelcomeGrantedAt DateTime?               @map("first_paid_welcome_granted_at")
-  incrementalScanEnabled  Boolean                   @default(false) @map("incremental_scan_enabled")
-  activatedAt              DateTime?                 @map("activated_at")
-  canceledAt               DateTime?                 @map("canceled_at")
-  expiresAt                DateTime?                 @map("expires_at")
-  createdAt                DateTime                  @default(now()) @map("created_at")
-  updatedAt                DateTime                  @updatedAt @map("updated_at")
+  id                        String                    @id @default(cuid())
+  shopId                    String                    @map("shop_id")
+  planCode                  BillingPlanCode           @map("plan_code")
+  billingInterval           BillingInterval           @map("billing_interval")
+  status                    BillingSubscriptionStatus @default(PENDING)
+  externalSubscriptionId    String?                   @unique @map("external_subscription_id")
+  externalBillingReference  String?                   @map("external_billing_reference")
+  currentPeriodStart        DateTime?                 @map("current_period_start") @db.Timestamptz(3)
+  currentPeriodEnd          DateTime?                 @map("current_period_end") @db.Timestamptz(3)
+  firstPaidWelcomeGrantedAt DateTime?                 @map("first_paid_welcome_granted_at") @db.Timestamptz(3)
+  incrementalScanEnabled    Boolean                   @default(false) @map("incremental_scan_enabled")
+  activatedAt               DateTime?                 @map("activated_at") @db.Timestamptz(3)
+  canceledAt                DateTime?                 @map("canceled_at") @db.Timestamptz(3)
+  expiresAt                 DateTime?                 @map("expires_at") @db.Timestamptz(3)
+  createdAt                 DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                 DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop                 Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -1136,11 +1136,11 @@ model OveragePackPurchase {
   externalPurchaseId       String?                   @unique @map("external_purchase_id")
   externalBillingReference String?                   @map("external_billing_reference")
   idempotencyKey           String                    @unique @map("idempotency_key")
-  purchasedAt              DateTime?                 @map("purchased_at")
-  fulfilledAt              DateTime?                 @map("fulfilled_at")
-  refundedAt               DateTime?                 @map("refunded_at")
-  createdAt                DateTime                  @default(now()) @map("created_at")
-  updatedAt                DateTime                  @updatedAt @map("updated_at")
+  purchasedAt              DateTime?                 @map("purchased_at") @db.Timestamptz(3)
+  fulfilledAt              DateTime?                 @map("fulfilled_at") @db.Timestamptz(3)
+  refundedAt               DateTime?                 @map("refunded_at") @db.Timestamptz(3)
+  createdAt                DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop                Shop                 @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -1172,12 +1172,12 @@ model CreditBucket {
   reservedAmount        Int                @default(0) @map("reserved_amount")
   consumedAmount        Int                @default(0) @map("consumed_amount")
   remainingAmount       Int                @default(0) @map("remaining_amount")
-  effectiveAt           DateTime           @map("effective_at")
-  expiresAt             DateTime?          @map("expires_at")
-  activatedAt           DateTime?          @map("activated_at")
-  exhaustedAt           DateTime?          @map("exhausted_at")
-  createdAt             DateTime           @default(now()) @map("created_at")
-  updatedAt             DateTime           @updatedAt @map("updated_at")
+  effectiveAt           DateTime           @map("effective_at") @db.Timestamptz(3)
+  expiresAt             DateTime?          @map("expires_at") @db.Timestamptz(3)
+  activatedAt           DateTime?          @map("activated_at") @db.Timestamptz(3)
+  exhaustedAt           DateTime?          @map("exhausted_at") @db.Timestamptz(3)
+  createdAt             DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop                Shop                    @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -1210,10 +1210,10 @@ model CreditReservation {
   releasedAmount  Int                     @default(0) @map("released_amount")
   batchId         String?                 @map("batch_id")
   idempotencyKey  String                  @unique @map("idempotency_key")
-  expiresAt       DateTime?               @map("expires_at")
-  resolvedAt      DateTime?               @map("resolved_at")
-  createdAt       DateTime                @default(now()) @map("created_at")
-  updatedAt       DateTime                @updatedAt @map("updated_at")
+  expiresAt       DateTime?               @map("expires_at") @db.Timestamptz(3)
+  resolvedAt      DateTime?               @map("resolved_at") @db.Timestamptz(3)
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop          Shop                    @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -1242,8 +1242,8 @@ model CreditReservationLine {
   reservedAmount Int      @map("reserved_amount")
   consumedAmount Int      @default(0) @map("consumed_amount")
   releasedAmount Int      @default(0) @map("released_amount")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop          Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -1278,8 +1278,8 @@ model CreditLedger {
   metadata                 Json?
   idempotencyKey           String           @unique @map("idempotency_key")
   externalBillingReference String?          @map("external_billing_reference")
-  eventAt                  DateTime         @default(now()) @map("event_at")
-  createdAt                DateTime         @default(now()) @map("created_at")
+  eventAt                  DateTime         @default(now()) @map("event_at") @db.Timestamptz(3)
+  createdAt                DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop            Shop                   @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -1315,10 +1315,10 @@ model BillingLedger {
   currencyCode             String                 @default("USD") @map("currency_code")
   externalBillingReference String                 @map("external_billing_reference")
   idempotencyKey           String                 @unique @map("idempotency_key")
-  occurredAt               DateTime               @default(now()) @map("occurred_at")
-  settledAt                DateTime?              @map("settled_at")
-  createdAt                DateTime               @default(now()) @map("created_at")
-  updatedAt                DateTime               @updatedAt @map("updated_at")
+  occurredAt               DateTime               @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  settledAt                DateTime?              @map("settled_at") @db.Timestamptz(3)
+  createdAt                DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // ---------- Relations ----------
   shop                Shop                 @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -1346,10 +1346,10 @@ model AiModelCall {
   batchId       String?  @map("batch_id")
   modelName     String   @map("model_name")
   durationMs    Int      @map("duration_ms")
-  status        String   @map("status")           // "SUCCESS" | "FAILED"
-  failureOrigin String?  @map("failure_origin")   // "SERVER" | "NON_SERVER"
+  status        String   @map("status") // "SUCCESS" | "FAILED"
+  failureOrigin String?  @map("failure_origin") // "SERVER" | "NON_SERVER"
   errorMessage  String?  @map("error_message")
-  createdAt     DateTime @default(now()) @map("created_at")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([modelName])
   @@index([shopId])

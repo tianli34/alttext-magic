@@ -11,7 +11,7 @@ import { createLogger } from "../utils/logger";
 const logger = createLogger({ module: "sse-service" });
 
 /** SSE 轮询间隔（毫秒） */
-const SSE_POLL_INTERVAL_MS = 2000;
+const SSE_POLL_INTERVAL_MS = 1000;
 
 /** SSE 事件数据类型 */
 export interface SSEProgressEvent {

@@ -151,6 +151,12 @@ export async function markAttemptFinishedFromWebhook(input: {
   finishedAt: Date;
   errorCode: string | null;
   errorMessage: string | null;
+  /**
+   * 查不到 attempt 时是否静默跳过 warn。
+   * 调用方做竞态兜底重试时, 首查传 true 以避免正常的竞态窗口误报 warn,
+   * 重试仍查不到再按默认(false)打 warn 暴露真正的无关/脏数据事件。
+   */
+  silentNotFound?: boolean;
 }): Promise<{
   scanJobId: string;
   scanTaskId: string;
@@ -175,10 +181,12 @@ export async function markAttemptFinishedFromWebhook(input: {
   });
 
   if (!attempt) {
-    logger.warn(
-      { bulkOperationId: input.bulkOperationId },
-      "scan-task-attempt.bulk-operation-not-found",
-    );
+    if (!input.silentNotFound) {
+      logger.warn(
+        { bulkOperationId: input.bulkOperationId },
+        "scan-task-attempt.bulk-operation-not-found",
+      );
+    }
     return null;
   }
 
