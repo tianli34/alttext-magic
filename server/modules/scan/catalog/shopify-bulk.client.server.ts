@@ -9,6 +9,79 @@ import { createLogger } from "../../../utils/logger";
 const logger = createLogger({ module: "shopify-bulk-client" });
 const SHOPIFY_ADMIN_API_VERSION = "2026-04";
 
+// 单次 Shopify Admin GraphQL 请求的网络超时（覆盖 undici 默认 10s connect timeout）。
+const SHOPIFY_HTTP_TIMEOUT_MS = 15_000;
+// 网络层瞬时错误的最大重试次数。HTTP 4xx/5xx 与 GraphQL userErrors 属确定性失败，不重试。
+const SHOPIFY_HTTP_MAX_ATTEMPTS = 3;
+// 指数退避基数：第 1 次重试 400ms，第 2 次 800ms。
+const SHOPIFY_HTTP_BACKOFF_BASE_MS = 400;
+
+/**
+ * 判定某次 fetch 失败是否属于「可重试的网络层瞬时错误」。
+ * 仅覆盖连接/超时/重置等网络异常；HTTP 状态码错误与 GraphQL userErrors 不在此列。
+ * undici 的 fetch 网络失败统一表现为 TypeError('fetch failed')，真实原因挂在 error.cause 上。
+ */
+function isRetryableNetworkError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const chain: Error[] = [error];
+  if (error.cause instanceof Error) {
+    chain.push(error.cause);
+  }
+  return chain.some((e) => {
+    const name = e.name ?? "";
+    const code = (e as { code?: string }).code ?? "";
+    if (name === "TimeoutError" || name === "ConnectTimeoutError") return true;
+    if (name.startsWith("UND_ERR")) return true;
+    if (
+      [
+        "ECONNRESET",
+        "ECONNREFUSED",
+        "ETIMEDOUT",
+        "ENOTFOUND",
+        "EAI_AGAIN",
+        "ECONNABORTED",
+        "EPIPE",
+        "EPROTO",
+      ].includes(code)
+    ) {
+      return true;
+    }
+    // fetch 统一封装的网络错误
+    if (error.message === "fetch failed") return true;
+    return false;
+  });
+}
+
+/**
+ * 对 Shopify Admin GraphQL 端点发起请求，仅在网络层瞬时失败时按指数退避重试。
+ * 调用方仍需自行处理 HTTP 状态码与 GraphQL userErrors（这些不会被重试）。
+ */
+async function fetchShopifyAdmin(url: string, init: RequestInit): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= SHOPIFY_HTTP_MAX_ATTEMPTS; attempt++) {
+    const signal = AbortSignal.timeout(SHOPIFY_HTTP_TIMEOUT_MS);
+    try {
+      return await fetch(url, { ...init, signal });
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableNetworkError(error)) {
+        throw error;
+      }
+      if (attempt < SHOPIFY_HTTP_MAX_ATTEMPTS) {
+        const delayMs = SHOPIFY_HTTP_BACKOFF_BASE_MS * 2 ** (attempt - 1);
+        logger.warn(
+          { attempt, maxAttempts: SHOPIFY_HTTP_MAX_ATTEMPTS, delayMs, err: error },
+          "shopify-bulk.fetch-retry",
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastError;
+}
+
 interface ShopifyGraphqlResponse<TData> {
   data?: TData;
   errors?: Array<{ message: string }>;
@@ -66,7 +139,7 @@ async function executeShopifyAdminGraphql<TData>(
   variables?: Record<string, unknown>,
 ): Promise<TData> {
   const { shopDomain, accessToken } = await getShopAdminContext(shopId);
-  const response = await fetch(
+  const response = await fetchShopifyAdmin(
     `https://${shopDomain}/admin/api/${SHOPIFY_ADMIN_API_VERSION}/graphql.json`,
     {
       method: "POST",

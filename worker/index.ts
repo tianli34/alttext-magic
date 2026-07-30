@@ -89,6 +89,7 @@ import {
   runDiscoveryProgressPollOnce,
 } from "./schedulers/discovery-progress.scheduler.js";
 import { withJobLogger } from "./utils/job-logger.js";
+import { writeScanLog } from "./utils/scan-run-logger.js";
 
 const logger = createLogger({ module: "worker-runtime" });
 const webhookConnection = createRedisConnection();
@@ -180,7 +181,7 @@ const scanStartWorker = new Worker<ScanStartJobData>(
   async (job) => {
     await withJobLogger(job, async () => {
       await processScanStartJob(job.data.scanJobId);
-    });
+    }, SCAN_START_QUEUE_NAME);
   },
   {
     connection: scanStartConnection,
@@ -193,7 +194,7 @@ const parseBulkWorker = new Worker<ParseBulkJobData>(
   async (job) => {
     await withJobLogger(job, async () => {
       await processParseBulkJob(job.data);
-    });
+    }, PARSE_BULK_QUEUE_NAME);
   },
   {
     connection: parseBulkConnection,
@@ -206,7 +207,7 @@ const deriveScanWorker = new Worker<DeriveScanJobData>(
   async (job) => {
     await withJobLogger(job, async () => {
       await processDeriveScanJob(job.data);
-    });
+    }, DERIVE_SCAN_QUEUE_NAME);
   },
   {
     connection: deriveScanConnection,
@@ -219,7 +220,7 @@ const publishScanWorker = new Worker<PublishScanJobData>(
   async (job) => {
     await withJobLogger(job, async () => {
       await processPublishScanJob(job.data);
-    });
+    }, PUBLISH_SCAN_QUEUE_NAME);
   },
   {
     connection: publishScanConnection,
@@ -271,7 +272,7 @@ const generateAltWorker = new Worker<GenerateAltJobData>(
   async (job) => {
     await withJobLogger(job, async () => {
       await processGenerateAltJob(job.data);
-    });
+    }, GENERATE_ALT_QUEUE_NAME);
   },
   {
     connection: generateAltConnection,
@@ -284,7 +285,7 @@ const writebackWorker = new Worker<WritebackJobData>(
   async (job) => {
     await withJobLogger(job, async () => {
       await processWritebackJob(job.data);
-    });
+    }, WRITEBACK_QUEUE_NAME);
   },
   {
     connection: writebackConnection,
@@ -593,6 +594,12 @@ scanStartWorker.on("completed", (job) => {
     },
     "worker.completed",
   );
+  writeScanLog("worker.completed", {
+    queue: SCAN_START_QUEUE_NAME,
+    jobId: job.id,
+    scanJobId: job.data.scanJobId,
+    shopId: job.data.shopId,
+  });
 });
 
 parseBulkWorker.on("completed", (job) => {
@@ -605,6 +612,12 @@ parseBulkWorker.on("completed", (job) => {
     },
     "worker.completed",
   );
+  writeScanLog("worker.completed", {
+    queue: PARSE_BULK_QUEUE_NAME,
+    jobId: job.id,
+    scanTaskAttemptId: job.data.scanTaskAttemptId,
+    shopId: job.data.shopId,
+  });
 });
 
 deriveScanWorker.on("completed", (job) => {
@@ -617,6 +630,12 @@ deriveScanWorker.on("completed", (job) => {
     },
     "worker.completed",
   );
+  writeScanLog("worker.completed", {
+    queue: DERIVE_SCAN_QUEUE_NAME,
+    jobId: job.id,
+    scanTaskAttemptId: job.data.scanTaskAttemptId,
+    shopId: job.data.shopId,
+  });
 });
 
 publishScanWorker.on("completed", (job) => {
@@ -629,6 +648,12 @@ publishScanWorker.on("completed", (job) => {
     },
     "worker.completed",
   );
+  writeScanLog("worker.completed", {
+    queue: PUBLISH_SCAN_QUEUE_NAME,
+    jobId: job.id,
+    scanJobId: job.data.scanJobId,
+    shopId: job.data.shopId,
+  });
 });
 
 quotaGrantWorker.on("completed", (job) => {
@@ -665,6 +690,13 @@ generateAltWorker.on("completed", (job) => {
     },
     "worker.completed",
   );
+  writeScanLog("worker.completed", {
+    queue: GENERATE_ALT_QUEUE_NAME,
+    jobId: job.id,
+    batchId: job.data.batchId,
+    candidateId: job.data.candidateId,
+    shopId: job.data.shopId,
+  });
 });
 
 writebackWorker.on("completed", (job) => {
@@ -678,6 +710,13 @@ writebackWorker.on("completed", (job) => {
     },
     "worker.completed",
   );
+  writeScanLog("worker.completed", {
+    queue: WRITEBACK_QUEUE_NAME,
+    jobId: job.id,
+    batchId: job.data.batchId,
+    candidateId: job.data.candidateId,
+    shopId: job.data.shopId,
+  });
 });
 
 continuousScanDebounceWorker.on("completed", (job) => {
@@ -774,6 +813,13 @@ scanStartWorker.on("failed", (job, error) => {
     },
     "worker.failed",
   );
+  writeScanLog("worker.failed", {
+    queue: SCAN_START_QUEUE_NAME,
+    jobId: job?.id,
+    scanJobId: job?.data.scanJobId,
+    shopId: job?.data.shopId,
+    err: error,
+  });
 });
 
 parseBulkWorker.on("failed", (job, error) => {
@@ -787,6 +833,13 @@ parseBulkWorker.on("failed", (job, error) => {
     },
     "worker.failed",
   );
+  writeScanLog("worker.failed", {
+    queue: PARSE_BULK_QUEUE_NAME,
+    jobId: job?.id,
+    scanTaskAttemptId: job?.data.scanTaskAttemptId,
+    shopId: job?.data.shopId,
+    err: error,
+  });
 });
 
 deriveScanWorker.on("failed", (job, error) => {
@@ -800,6 +853,13 @@ deriveScanWorker.on("failed", (job, error) => {
     },
     "worker.failed",
   );
+  writeScanLog("worker.failed", {
+    queue: DERIVE_SCAN_QUEUE_NAME,
+    jobId: job?.id,
+    scanTaskAttemptId: job?.data.scanTaskAttemptId,
+    shopId: job?.data.shopId,
+    err: error,
+  });
 });
 
 publishScanWorker.on("failed", (job, error) => {
@@ -813,6 +873,13 @@ publishScanWorker.on("failed", (job, error) => {
     },
     "worker.failed",
   );
+  writeScanLog("worker.failed", {
+    queue: PUBLISH_SCAN_QUEUE_NAME,
+    jobId: job?.id,
+    scanJobId: job?.data.scanJobId,
+    shopId: job?.data.shopId,
+    err: error,
+  });
 });
 
 quotaGrantWorker.on("failed", (job, error) => {
@@ -852,6 +919,14 @@ generateAltWorker.on("failed", (job, error) => {
     },
     "worker.failed",
   );
+  writeScanLog("worker.failed", {
+    queue: GENERATE_ALT_QUEUE_NAME,
+    jobId: job?.id,
+    batchId: job?.data.batchId,
+    candidateId: job?.data.candidateId,
+    shopId: job?.data.shopId,
+    err: error,
+  });
 });
 
 writebackWorker.on("failed", (job, error) => {
@@ -868,6 +943,16 @@ writebackWorker.on("failed", (job, error) => {
     },
     "worker.failed",
   );
+  writeScanLog("worker.failed", {
+    queue: WRITEBACK_QUEUE_NAME,
+    jobId: job?.id,
+    batchId: job?.data.batchId,
+    candidateId: job?.data.candidateId,
+    shopId: job?.data.shopId,
+    attemptsMade: job?.attemptsMade,
+    attempts: job?.opts.attempts,
+    err: error,
+  });
 
   if (!job) return;
 

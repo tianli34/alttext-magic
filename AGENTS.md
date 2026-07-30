@@ -7,7 +7,7 @@
 三层分离:
 - `app/` — React Router 前端, 路由定义在 `app/routes/`, 入口 `app/root.tsx`
 - `server/` — 服务端业务逻辑: 模块(`server/modules/`), 队列定义(`server/queues/`), AI 网关(`server/ai/`), SSE, 计费
-- `worker/` — BullMQ 工作者: `worker/index.ts` 注册 9 个 Worker + 4 个调度器
+- `worker/` — BullMQ 工作者: `worker/index.ts` 注册 16 个 Worker + 8 个调度机制(5 个 BullMQ repeatable 调度器: quota-grant-scheduled/reservation-reaper-scheduled/billing-sync-scheduled/cleanup-scheduled/lock-reaper-scheduled + 3 个 setInterval 扫描: scan-timeout/bulk-attempt-reaper/discovery-progress)
 - `shared/` — 跨层常量
 - Prisma 单例: `server/db/prisma.server.ts`, `app/db.server.ts` 仅 re-export
 - 双构建目标: web (Vite/RR 打包) + worker (tsc → `dist-worker/`)

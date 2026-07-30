@@ -18,10 +18,18 @@
  *   --resource <TYPE>    可选，手动指定资源类型（PRODUCT_MEDIA/FILES/COLLECTION_IMAGE/ARTICLE_IMAGE），
  *                        覆盖「finished_at 最晚」的默认选定逻辑。
  *
- * 相关字段口径（与 worker 日志绑定一致）：
- *   - parse-bulk / derive-scan 队列：BullMQ job.id == scanTaskAttemptId，
- *     经 withJobLogger 绑定为 job_item_id；processor 另显式绑定 scanTaskId / scanTaskAttemptId / resourceType。
- *   - scan-start 队列：仅带 scanJobId（进度条外层派发日志，无 resourceType）。
+ * 相关字段口径（与 worker 日志绑定一致，见 worker/utils/scan-run-logger.ts）：
+ *   - worker.log 现已仅由 scan-run-logger 管理：每次新扫描（scan-start）开始前 truncate，
+ *     故文件内只保留「最近一次 scanJobId」的扫描链路日志；全局 logger 不再落盘于此。
+ *   - 每条记录带 base 字段：level（pino 数字：30=info/50=error…）、time（ISO 字符串）、
+ *     app、env、log_target="scan-run"。
+ *   - 进度条级（parse-bulk / derive-scan）：BullMQ job.id == scanTaskAttemptId
+ *     （enqueueParseBulkToStaging / enqueueDeriveScan 均以 scanTaskAttemptId 作 jobId），
+ *     经 withJobLogger 绑定为 job_item_id，并在 worker.completed/failed 中显式带出
+ *     scanTaskAttemptId / jobId；故可用 attemptIds 直接命中。
+ *   - 运行级（scan-start / publish-scan / scan-run.start）：仅带 scanJobId，无 resourceType，
+ *     无法在日志内区分资源，故以 scanJobId 整体命中。
+ *   - 旧格式的 scanTaskId / resourceType 字段已不再写入，相关分支仅作向后兼容保留。
  */
 import "dotenv/config";
 import { createInterface } from "node:readline";
@@ -173,24 +181,58 @@ async function resolveTarget(
 }
 
 /**
- * 判断一条日志是否属于目标进度条
+ * 判断一条日志是否属于目标扫描运行 / 目标进度条。
+ *
+ * 命中逻辑（见文件头「相关字段口径」）：
+ *   1) 进度条级：记录中任一 attempt 标识（job_item_id / jobId / scanTaskAttemptId /
+ *      scanTaskId）命中 attemptIds 集合（对应 scan_task_attempt.id）。
+ *   2) 运行级：scan-start / publish-scan / scan-run.start 仅带 scanJobId，
+ *      以 scanJobId 整体命中（这些记录无法在日志内区分资源，故整链纳入）。
+ *   3) 兜底（旧格式）：resourceType + scanJobId 同时命中，向后兼容。
  */
 function matchesTarget(
   entry: Record<string, unknown>,
+  scanJobId: string,
   scanTaskId: string,
   attemptIds: Set<string>,
   resourceType: string,
 ): boolean {
-  if (entry.scanTaskId === scanTaskId) return true;
-  const jobItemId = entry.job_item_id;
-  if (typeof jobItemId === "string" && attemptIds.has(jobItemId)) return true;
-  const attemptId = entry.scanTaskAttemptId;
-  if (typeof attemptId === "string" && attemptIds.has(attemptId)) return true;
-  // 兜底：processor 显式带 resourceType 且同属该扫描的行（较宽松，仅当上面均未命中时无效果）
-  if (entry.resourceType === resourceType && entry.scanTaskId === scanTaskId) {
+  // 1) 进度条级：命中某个 scan_task_attempt 的标识
+  const attemptKeys = ["job_item_id", "jobId", "scanTaskAttemptId", "scanTaskId"];
+  for (const k of attemptKeys) {
+    const v = entry[k];
+    if (typeof v === "string" && attemptIds.has(v)) return true;
+  }
+  // 2) 运行级：仅绑定 scanJobId 的派发/发布记录（scan-start / publish-scan / scan-run.start）
+  if (typeof entry.scanJobId === "string" && entry.scanJobId === scanJobId) {
+    return true;
+  }
+  // 3) 兜底（旧格式）：resourceType 绑定，新格式已不带，保留兼容
+  if (entry.resourceType === resourceType && entry.scanJobId === scanJobId) {
     return true;
   }
   return false;
+}
+
+/** pino 数字 level → 名称（worker.log 现以数字落盘） */
+const PINO_LEVELS: Record<number, string> = {
+  10: "trace",
+  20: "debug",
+  30: "info",
+  40: "warn",
+  50: "error",
+  60: "fatal",
+};
+
+function levelName(lv: unknown): string {
+  if (typeof lv === "number") return PINO_LEVELS[lv] ?? String(lv);
+  return typeof lv === "string" ? lv : String(lv ?? "");
+}
+
+/** 日志内模块缺省时，回退展示 queue / job_name，便于定位来源 */
+function moduleOf(entry: Record<string, unknown>): string {
+  const m = entry.module ?? entry.queue ?? entry.job_name;
+  return typeof m === "string" ? m : "";
 }
 
 async function run(): Promise<void> {
@@ -256,6 +298,9 @@ async function run(): Promise<void> {
     [];
   let total = 0;
   let unparsable = 0;
+  // worker.log 每次新扫描开始会 truncate，故文件内仅保留最近一次 scanJobId 的链路。
+  // 记录文件中出现的 scan-run.start 对应的 scanJobId，用于覆盖检测。
+  let lastRunScanJobId: string | null = null;
 
   const rl = createInterface({
     input: createReadStream(logPath, { encoding: "utf8" }),
@@ -273,7 +318,13 @@ async function run(): Promise<void> {
       unparsable++;
       continue;
     }
-    if (matchesTarget(entry, task.id, attemptIds, task.resource_type)) {
+    // 记录扫描运行起点（scan-run.start）所归属的 scanJobId
+    if (entry.msg === "scan-run.start" && typeof entry.scanJobId === "string") {
+      lastRunScanJobId = entry.scanJobId;
+    }
+    if (
+      matchesTarget(entry, scanJobId, task.id, attemptIds, task.resource_type)
+    ) {
       const t =
         typeof entry.time === "number"
           ? entry.time
@@ -284,8 +335,19 @@ async function run(): Promise<void> {
     }
   }
 
-  // 按时间升序输出（覆盖 scan-start 派发 → parse-bulk → derive-scan 全链路）
+  // 按时间升序输出（覆盖 scan-start 派发 → parse-bulk → derive-scan → publish-scan 全链路）
   matched.sort((a, b) => a.time - b.time);
+
+  // 覆盖检测：worker.log 仅保留最近一次扫描，若与请求不一致则说明已被新扫描覆盖
+  if (lastRunScanJobId && lastRunScanJobId !== scanJobId) {
+    console.log("");
+    console.log(
+      `⚠️ worker.log 当前仅保留最近一次扫描的链路日志，其 scanJobId=${lastRunScanJobId} 与请求的 ${scanJobId} 不一致。`,
+    );
+    console.log(
+      "   该扫描的 worker 日志已被后续扫描的「每次 scan-start 清空」覆盖，无法从文件中追溯。",
+    );
+  }
 
   console.log("");
   console.log(
@@ -297,8 +359,8 @@ async function run(): Promise<void> {
       typeof m.entry.time === "number"
         ? new Date(m.entry.time).toISOString().replace("T", " ").slice(0, 23)
         : String(m.entry.time ?? "");
-    const level = m.entry.level ?? "";
-    const mod = m.entry.module ?? "";
+    const level = levelName(m.entry.level);
+    const mod = moduleOf(m.entry);
     const msg = m.entry.msg ?? "";
     console.log(`[${ts}] (${level}) ${mod} :: ${msg}`);
     console.log(m.raw);
@@ -307,7 +369,7 @@ async function run(): Promise<void> {
 
   if (matched.length === 0) {
     console.log(
-      "⚠️ 日志文件中未匹配到该进度条的任何行。可能原因：该扫描早于落盘开启，或日志已按 count 被 BullMQ/轮转清理。",
+      "⚠️ 日志文件中未匹配到该进度条的任何行。可能原因：该扫描早于落盘开启、已被后续扫描覆盖（见上方覆盖提示），或日志已按 count 被 BullMQ/轮转清理。",
     );
   }
 }

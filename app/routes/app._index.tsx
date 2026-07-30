@@ -10,10 +10,9 @@ import { useState, useEffect, useCallback } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getBootstrapData } from "../../server/modules/bootstrap/bootstrap.service";
-import { GroupStatsCard, type GroupStats } from "../components/dashboard/GroupStatsCard";
+import { ImageStatusPie, type ImageGroupStats } from "../components/dashboard/ImageStatusPie";
 import { QuotaSummary } from "../components/dashboard/QuotaSummary";
 import { ScanProgressFloat } from "../components/dashboard/ScanProgressFloat";
-import dashboardGridStyles from "../components/dashboard/DashboardGrid.module.css";
 import { formatRelativeTime } from "../lib/format";
 import { useTimezone } from "../lib/timezone";
 import { DEFAULT_SCOPE_FLAG_STATE } from "../lib/scope-utils";
@@ -30,7 +29,7 @@ interface DashboardLoaderData {
 
 /** GET /api/dashboard 响应体（与 DashboardData 对齐） */
 interface DashboardData {
-  groups: GroupStats[];
+  groups: ImageGroupStats[];
   lastPublishedAt: string | null;
   isScanning: boolean;
   /** 当前运行中的扫描任务 ID */
@@ -391,25 +390,8 @@ function DashboardContent() {
             </s-text>
           </s-stack>
 
-          {/* 分组统计卡片网格（响应式：桌面四列 / 平板两列 / 手机单列） */}
-          {groups.length > 0 ? (
-            <div className={dashboardGridStyles.dashboardGrid}>
-              {groups.map((group) => (
-                <GroupStatsCard key={group.groupType} stats={group} />
-              ))}
-            </div>
-          ) : (
-            <s-box
-              padding="base"
-              borderRadius="base"
-              background="subdued"
-              borderWidth="base"
-            >
-              <s-text tone="neutral">
-                暂无统计数据。请完成首次扫描后查看仪表盘。
-              </s-text>
-            </s-box>
-          )}
+          {/* 图片状态分布饼状图（汇总所有分组的 4 类图片数据） */}
+          <ImageStatusPie groups={groups} />
 
           {/* 当前额度卡片 */}
           <QuotaSummary />

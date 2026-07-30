@@ -37,6 +37,18 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * 同一 shop 的多个 Bulk 查询并行提交时, 对相邻请求做错峰, 降低瞬时连接突发
+ * （避免 Shopify 在连接层对超额并发做 shedding, 表现为偶发 connect timeout）。
+ */
+const BULK_SUBMIT_STAGGER_BASE_MS = 60;
+
+/** 第 index 个任务在批量提交中错开 index * 基数 + 随机抖动, 抖动上限 40ms 避免规律性。 */
+function staggerForIndex(index: number): Promise<void> {
+  const jitter = Math.floor(Math.random() * 40);
+  return delay(index * BULK_SUBMIT_STAGGER_BASE_MS + jitter);
+}
+
 const bulkFinishWebhookPayloadSchema = z.object({
   admin_graphql_api_id: z.string().min(1),
   status: z.string().min(1),
@@ -219,7 +231,11 @@ export async function trySubmitNextBatch(
     }
 
     const results = await Promise.all(
-      pendingTasks.map((task) => scanStartServiceDependencies.submitTask(task.id)),
+      pendingTasks.map((task, index) =>
+        staggerForIndex(index).then(() =>
+          scanStartServiceDependencies.submitTask(task.id),
+        ),
+      ),
     );
 
     const summary = summarizeSubmitResults(results);
