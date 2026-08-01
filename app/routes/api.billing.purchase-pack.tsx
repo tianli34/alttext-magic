@@ -42,15 +42,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shopDomain = session.shop;
 
-  // 3. 查找 shop（含加密 token 字段）
+  // 3. 查找 shop
   const shop = await prisma.shop.findUnique({
     where: { shopDomain },
     select: {
       id: true,
       shopDomain: true,
-      accessTokenEncrypted: true,
-      accessTokenNonce: true,
-      accessTokenTag: true,
       currentPlan: true,
     },
   });
@@ -111,9 +108,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       {
         shopId: shop.id,
         shopDomain: shop.shopDomain,
-        accessTokenEncrypted: shop.accessTokenEncrypted,
-        accessTokenNonce: shop.accessTokenNonce,
-        accessTokenTag: shop.accessTokenTag,
         currentPlan,
         packCode,
         returnUrl,

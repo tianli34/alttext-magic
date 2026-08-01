@@ -2,8 +2,8 @@
  * File: app/routes/webhooks.app.uninstalled.tsx
  * Purpose: APP_UNINSTALLED webhook handler。
  *          Shopify 在商户卸载 App 时发送此 webhook。
- *          流程: 鉴权 → 幂等持久化 → 同步标记 shop 已卸载 + 清空 token → 入列 gdpr-delete → 返 200。
- *          注意: 同步清空 accessToken 是安全措施，防止后续 worker 使用已失效的 token。
+ *          流程: 鉴权 → 幂等持久化 → 同步标记 shop 已卸载 + 清空 legacy token 占位 → 入列 gdpr-delete → 返 200。
+ *          注意: 后台鉴权以 Session 表为准，shops token 字段仅作 legacy 非空占位。
  */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
@@ -35,7 +35,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   if (receipt.isNew) {
-    // 2. 同步: 标记 shop 已卸载 + 清空 accessToken（防止后续 worker 使用失效 token）
+    // 2. 同步: 标记 shop 已卸载 + 清空 legacy token 占位字段。
     const shopRecord = await prisma.shop.findUnique({
       where: { shopDomain: shop },
       select: { id: true },

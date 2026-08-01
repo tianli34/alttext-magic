@@ -13,7 +13,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import type { Session } from "@shopify/shopify-api";
-import { encryptToken } from "../server/crypto/token-encryption";
 import type { WritebackJobData } from "../server/queues/writeback.queue";
 import type {
   MutationExecutor,
@@ -186,8 +185,6 @@ class StaticExecutor implements MutationExecutor {
 }
 
 function createMockPrisma(state: MockState): PrismaClient {
-  const encrypted = encryptToken("offline-token");
-
   const txClient = {
     altCandidate: {
       findFirst: async (args: { where: { id: string; shopId: string } }) => {
@@ -315,15 +312,6 @@ function createMockPrisma(state: MockState): PrismaClient {
         return { count: 1 };
       },
     },
-    shop: {
-      findUnique: async () => ({
-        shopDomain: "example.myshopify.com",
-        accessTokenEncrypted: encrypted.encrypted,
-        accessTokenNonce: encrypted.nonce,
-        accessTokenTag: encrypted.tag,
-        scopes: "write_files",
-      }),
-    },
   };
 
   const client = {
@@ -343,6 +331,15 @@ function createDependencies(state: MockState): WritebackProcessorDependencies {
       candidate.candidateId === "c2"
         ? { isEmpty: false, currentAlt: "Manual alt" }
         : { isEmpty: true, currentAlt: null },
+    getAdminSession: async () =>
+      ({
+        id: "offline_example.myshopify.com",
+        shop: "example.myshopify.com",
+        state: "",
+        isOnline: false,
+        scope: "write_files",
+        accessToken: "offline-token",
+      }) as Session,
     getExecutor: (altPlane) => {
       assert.equal(altPlane, AltPlane.FILE_ALT);
       return new StaticExecutor(

@@ -2,7 +2,7 @@
  * File: worker/processors/writeback.processor.ts
  * Purpose: 处理单条 writeback Job，串联二次读校验、Shopify 写回、审计落库与批次收尾。
  */
-import { Session } from "@shopify/shopify-api";
+import type { Session } from "@shopify/shopify-api";
 import {
   AltCandidateStatus,
   JobBatchStatus,
@@ -11,7 +11,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import { env } from "../../server/config/env";
-import { decryptToken } from "../../server/crypto/token-encryption";
 import prisma from "../../server/db/prisma.server";
 import {
   TruthCheckService,
@@ -25,6 +24,7 @@ import type {
 } from "../../server/modules/writeback/writeback.types";
 import type { WritebackJobData } from "../../server/queues/writeback.queue";
 import { createLogger, type ExtendedLogger } from "../../server/utils/logger";
+import { getOfflineAdminByShopId } from "../../server/shopify/offline-admin.server";
 import { recordMetric } from "../../shared/logger/metrics";
 
 const logger = createLogger({ module: "writeback-processor" });
@@ -45,14 +45,6 @@ type CandidateForWriteback = Prisma.AltCandidateGetPayload<{
   };
 }>;
 
-interface ShopForSession {
-  shopDomain: string;
-  accessTokenEncrypted: string;
-  accessTokenNonce: string;
-  accessTokenTag: string;
-  scopes: string | null;
-}
-
 export interface WritebackProcessorDependencies {
   prisma: PrismaClient;
   truthCheck(candidate: {
@@ -61,6 +53,7 @@ export interface WritebackProcessorDependencies {
     altPlane: WritebackJobData["altPlane"];
     writeTargetId: string;
   }): Promise<TruthCheckResult>;
+  getAdminSession(shopId: string): Promise<Session>;
   getExecutor(altPlane: WritebackJobData["altPlane"]): MutationExecutor;
   releaseLock(shopId: string, lockId: string): Promise<void>;
   now(): Date;
@@ -71,6 +64,10 @@ const defaultRouter = new WritebackRouter();
 const defaultDependencies: WritebackProcessorDependencies = {
   prisma,
   truthCheck: (candidate) => TruthCheckService.checkCurrentAlt(candidate),
+  getAdminSession: async (shopId) => {
+    const { session } = await getOfflineAdminByShopId(shopId);
+    return session;
+  },
   getExecutor: (altPlane) => defaultRouter.getExecutor(altPlane),
   releaseLock: releaseWritebackLock,
   now: () => new Date(),
@@ -123,8 +120,7 @@ export async function processWritebackJob(
   }
 
   const altText = resolveAltText(candidate);
-  const shop = await loadShop(data.shopId, dependencies.prisma);
-  const session = createOfflineSession(shop);
+  const session = await dependencies.getAdminSession(data.shopId);
   const result = await dependencies.getExecutor(candidate.altTarget.altPlane).execute({
     session,
     shopifyGid: candidate.altTarget.writeTargetId,
@@ -295,25 +291,6 @@ async function loadCandidate(
   return candidate;
 }
 
-async function loadShop(shopId: string, client: PrismaClient): Promise<ShopForSession> {
-  const shop = await client.shop.findUnique({
-    where: { id: shopId },
-    select: {
-      shopDomain: true,
-      accessTokenEncrypted: true,
-      accessTokenNonce: true,
-      accessTokenTag: true,
-      scopes: true,
-    },
-  });
-
-  if (!shop) {
-    throw new Error(`[writeback] shop 不存在: ${shopId}`);
-  }
-
-  return shop;
-}
-
 async function claimJobItem(
   data: WritebackJobData,
   client: PrismaClient,
@@ -342,21 +319,6 @@ async function claimJobItem(
   });
 
   return item?.status === JobItemStatus.RUNNING;
-}
-
-function createOfflineSession(shop: ShopForSession): Session {
-  return new Session({
-    id: `offline_${shop.shopDomain}`,
-    shop: shop.shopDomain,
-    state: "",
-    isOnline: false,
-    scope: shop.scopes ?? undefined,
-    accessToken: decryptToken(
-      shop.accessTokenEncrypted,
-      shop.accessTokenNonce,
-      shop.accessTokenTag,
-    ),
-  });
 }
 
 function resolveAltText(candidate: CandidateForWriteback): string {

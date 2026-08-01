@@ -13,7 +13,7 @@
 import type { PrismaClient, BillingSubscriptionStatus, BillingInterval as PrismaBillingInterval } from '@prisma/client';
 
 import { createLogger } from '../../utils/logger.js';
-import { decryptToken } from '../../crypto/token-encryption.js';
+import { getOfflineAccessTokenByDomain } from '../../shopify/offline-admin.server.js';
 import { getBillingAdapter } from '../../shopify/billing-adapter.js';
 import type { BillingAdapter } from '../../shopify/billing-adapter.types.js';
 import type { ActiveSubscription } from '../../shopify/billing-adapter.types.js';
@@ -148,7 +148,7 @@ function mapShopifySubscription(sub: ActiveSubscription): MappedSubscription {
  * 从 Shopify 同步订阅状态到本地。
  *
  * ### 流程
- * 1. 查找 shop（含加密 access token）
+ * 1. 查找 shop
  * 2. 通过 Billing Adapter 查询 Shopify 当前活跃订阅
  * 3. 将 Shopify 订阅映射为本地模型
  * 4. 根据 externalSubscriptionId 查找本地记录
@@ -182,9 +182,6 @@ export async function syncSubscriptionFromShopify(
       id: true,
       shopDomain: true,
       currentPlan: true,
-      accessTokenEncrypted: true,
-      accessTokenNonce: true,
-      accessTokenTag: true,
     },
   });
 
@@ -195,11 +192,7 @@ export async function syncSubscriptionFromShopify(
   log.info({ shopId: shop.id, shopDomain }, '开始从 Shopify 同步订阅状态');
 
   // ---- 2. 查询 Shopify 侧订阅 ----
-  const accessToken = decryptToken(
-    shop.accessTokenEncrypted,
-    shop.accessTokenNonce,
-    shop.accessTokenTag,
-  );
+  const accessToken = await getOfflineAccessTokenByDomain(shopDomain);
 
   const subsResult = await billingAdapter.getCurrentAppSubscriptions({
     shop: shopDomain,

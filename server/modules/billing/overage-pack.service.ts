@@ -25,7 +25,7 @@ import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 
 import { createLogger } from '../../utils/logger.js';
-import { decryptToken } from '../../crypto/token-encryption.js';
+import { getOfflineAccessTokenByDomain } from '../../shopify/offline-admin.server.js';
 import { getPlanConfig } from './plan-config.js';
 import { grantCreditBucket } from './credit/grant-credit.server.js';
 import type { OveragePackConfig, PlanKey } from './billing.types.js';
@@ -47,12 +47,6 @@ export interface InitiateOveragePackPurchaseParams {
   shopId: string;
   /** 店铺域名 */
   shopDomain: string;
-  /** 加密的 access token */
-  accessTokenEncrypted: string;
-  /** access token nonce */
-  accessTokenNonce: string;
-  /** access token tag */
-  accessTokenTag: string;
   /** 当前计划 */
   currentPlan: PlanKey;
   /** 超额包编码（如 OVERAGE_100_299） */
@@ -122,9 +116,6 @@ export async function initiateOveragePackPurchase(
   const {
     shopId,
     shopDomain,
-    accessTokenEncrypted,
-    accessTokenNonce,
-    accessTokenTag,
     currentPlan,
     packCode,
     returnUrl,
@@ -138,12 +129,8 @@ export async function initiateOveragePackPurchase(
     );
   }
 
-  // ---- 2. 解密 access token ----
-  const accessToken = decryptToken(
-    accessTokenEncrypted,
-    accessTokenNonce,
-    accessTokenTag,
-  );
+  // ---- 2. 通过官方 unauthenticated.admin 链路获取 token（含自动续期）----
+  const accessToken = await getOfflineAccessTokenByDomain(shopDomain);
 
   // ---- 3. 查找当前活跃订阅（可选关联） ----
   const activeSubscription = await client.billingSubscription.findFirst({

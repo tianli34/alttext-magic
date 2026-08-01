@@ -5,13 +5,12 @@
  */
 
 import type { Job } from "bullmq";
-import { Session } from "@shopify/shopify-api";
-import { decryptToken } from "../../server/crypto/token-encryption";
 import prisma from "../../server/db/prisma.server";
 import { delayJobForLock } from "../../server/services/gates/lockGate";
 import { checkIncrementalEnabled } from "../../server/services/gates/planGate";
 import { checkScopeForTopic } from "../../server/services/gates/scopeGate";
 import { checkFingerprintChange } from "../../server/services/gates/fingerprintGate";
+import { getOfflineAdminByShopId } from "../../server/shopify/offline-admin.server";
 import { getCollectionImage } from "../../server/shopify/queries/getCollectionImage";
 import { computeCollectionFingerprint } from "../../server/modules/fingerprint/imageFingerprint";
 import { convergeCollection } from "../../server/modules/scan/collectionConvergence";
@@ -87,33 +86,8 @@ export async function processContinuousScanCollectionJob(
       return;
     }
 
-    // 5. 载入 shop 凭证并建立 Shopify Session
-    const shop = await prisma.shop.findUnique({
-      where: { id: shopId },
-      select: {
-        shopDomain: true,
-        accessTokenEncrypted: true,
-        accessTokenNonce: true,
-        accessTokenTag: true,
-        scopes: true,
-      },
-    });
-    if (!shop) {
-      throw new Error(`[集合增量扫描] 店铺记录不存在: ${shopId}`);
-    }
-
-    const session = new Session({
-      id: `offline_${shop.shopDomain}`,
-      shop: shop.shopDomain,
-      state: "",
-      isOnline: false,
-      scope: shop.scopes ?? undefined,
-      accessToken: decryptToken(
-        shop.accessTokenEncrypted,
-        shop.accessTokenNonce,
-        shop.accessTokenTag,
-      ),
-    });
+    // 5. 通过官方 unauthenticated.admin 链路获取 Offline Session（含自动续期）
+    const { session } = await getOfflineAdminByShopId(shopId);
 
     // 6. 调用 8-E1 API 读取当前 collection 封面图
     const collectionImage = await getCollectionImage({

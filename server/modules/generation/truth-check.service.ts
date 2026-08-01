@@ -14,8 +14,7 @@
  */
 
 import { AltPlane } from "@prisma/client";
-import { decryptToken } from "../../crypto/token-encryption";
-import prisma from "../../db/prisma.server";
+import { getOfflineAccessTokenByShopId } from "../../shopify/offline-admin.server";
 import { getShopifyRateLimiter } from "../../shopify/shopify-rate-limiter.server";
 import { createLogger } from "../../utils/logger";
 
@@ -94,28 +93,7 @@ interface ShopAdminContext {
 }
 
 async function getShopAdminContext(shopId: string): Promise<ShopAdminContext> {
-  const shop = await prisma.shop.findUnique({
-    where: { id: shopId },
-    select: {
-      shopDomain: true,
-      accessTokenEncrypted: true,
-      accessTokenNonce: true,
-      accessTokenTag: true,
-    },
-  });
-
-  if (!shop) {
-    throw new Error(`Shop not found: ${shopId}`);
-  }
-
-  return {
-    shopDomain: shop.shopDomain,
-    accessToken: decryptToken(
-      shop.accessTokenEncrypted,
-      shop.accessTokenNonce,
-      shop.accessTokenTag,
-    ),
-  };
+  return getOfflineAccessTokenByShopId(shopId);
 }
 
 // ============================================================

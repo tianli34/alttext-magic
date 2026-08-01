@@ -12,7 +12,7 @@
 import type { PrismaClient } from '@prisma/client';
 
 import { createLogger } from '../../utils/logger.js';
-import { decryptToken } from '../../crypto/token-encryption.js';
+import { getOfflineAccessTokenByDomain } from '../../shopify/offline-admin.server.js';
 import { getPlanConfig } from './plan-config.js';
 import { ANNUAL_TOTAL_PRICE_CENTS } from '../../config/plans.js';
 import type { BillingInterval, PlanKey } from './billing.types.js';
@@ -32,9 +32,6 @@ const log = createLogger({ module: 'plan-change-service' });
 export interface ChangePlanToPaidParams {
   shopId: string;
   shopDomain: string;
-  accessTokenEncrypted: string;
-  accessTokenNonce: string;
-  accessTokenTag: string;
   /** 付费计划标识（不含 FREE） */
   planKey: Exclude<PlanKey, 'FREE'>;
   interval: BillingInterval;
@@ -46,9 +43,6 @@ export interface ChangePlanToPaidParams {
 export interface ChangePlanToFreeParams {
   shopId: string;
   shopDomain: string;
-  accessTokenEncrypted: string;
-  accessTokenNonce: string;
-  accessTokenTag: string;
 }
 
 /** 付费计划变更结果 */
@@ -81,20 +75,12 @@ export async function changePlanToPaid(
   const {
     shopId,
     shopDomain,
-    accessTokenEncrypted,
-    accessTokenNonce,
-    accessTokenTag,
     planKey,
     interval,
     returnUrl,
   } = params;
 
-  // 解密 access token
-  const accessToken = decryptToken(
-    accessTokenEncrypted,
-    accessTokenNonce,
-    accessTokenTag,
-  );
+  const accessToken = await getOfflineAccessTokenByDomain(shopDomain);
 
   // 获取计划配置
   const config = getPlanConfig(planKey);
@@ -165,17 +151,9 @@ export async function changePlanToFree(
   const {
     shopId,
     shopDomain,
-    accessTokenEncrypted,
-    accessTokenNonce,
-    accessTokenTag,
   } = params;
 
-  // 解密 access token
-  const accessToken = decryptToken(
-    accessTokenEncrypted,
-    accessTokenNonce,
-    accessTokenTag,
-  );
+  const accessToken = await getOfflineAccessTokenByDomain(shopDomain);
 
   log.info({ shopId }, '开始降级到 Free 计划');
 

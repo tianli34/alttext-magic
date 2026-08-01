@@ -2,8 +2,7 @@
  * File: server/modules/scan/catalog/shopify-bulk.client.server.ts
  * Purpose: 封装 Shopify Admin GraphQL Bulk 查询相关调用。
  */
-import prisma from "../../../db/prisma.server";
-import { decryptToken } from "../../../crypto/token-encryption";
+import { getOfflineAccessTokenByShopId } from "../../../shopify/offline-admin.server";
 import { createLogger } from "../../../utils/logger";
 
 const logger = createLogger({ module: "shopify-bulk-client" });
@@ -109,28 +108,7 @@ async function getShopAdminContext(shopId: string): Promise<{
   shopDomain: string;
   accessToken: string;
 }> {
-  const shop = await prisma.shop.findUnique({
-    where: { id: shopId },
-    select: {
-      shopDomain: true,
-      accessTokenEncrypted: true,
-      accessTokenNonce: true,
-      accessTokenTag: true,
-    },
-  });
-
-  if (!shop) {
-    throw new Error(`Shop not found: ${shopId}`);
-  }
-
-  return {
-    shopDomain: shop.shopDomain,
-    accessToken: decryptToken(
-      shop.accessTokenEncrypted,
-      shop.accessTokenNonce,
-      shop.accessTokenTag,
-    ),
-  };
+  return getOfflineAccessTokenByShopId(shopId);
 }
 
 async function executeShopifyAdminGraphql<TData>(
