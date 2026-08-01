@@ -267,6 +267,41 @@ export async function publishScanResult(
         candidateCount += convergeResult.candidateCount;
         projectionCount += convergeResult.projectionCount;
       }
+
+      // 1b. Sweep (缺席商品清理)
+      // 找出数据库中已有 PRESENT 商品引用、但本次扫描结果未返回的商品，
+      // 视为已从 Shopify 删除，对其实施空收敛以将其 usages / targets 标记为 NOT_FOUND
+      const scannedProductIds = new Set(usagesByProductId.keys());
+      const existingPresentProductUsageRows = await tx.imageUsage.findMany({
+        where: {
+          shopId: scanJob.shopId,
+          usageType: "PRODUCT",
+          presentStatus: "PRESENT",
+        },
+        select: {
+          usageId: true,
+        },
+      });
+
+      const absentProductIds = new Set(
+        existingPresentProductUsageRows
+          .map((row) => row.usageId)
+          .filter((usageId) => !scannedProductIds.has(usageId)),
+      );
+
+      for (const productId of absentProductIds) {
+        const convergeResult = await convergeProduct(tx, {
+          shopId: scanJob.shopId,
+          productId,
+          mediaImages: [],
+          scanJobId: scanJob.id,
+        });
+
+        publishedTargetCount += convergeResult.publishedTargetCount;
+        publishedUsageCount += convergeResult.publishedUsageCount;
+        candidateCount += convergeResult.candidateCount;
+        projectionCount += convergeResult.projectionCount;
+      }
     }
 
     // 2. 处理 FILES 类型的资源（FILES 无 usage，直接基于 resultTargets）

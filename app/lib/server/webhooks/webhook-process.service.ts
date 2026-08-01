@@ -8,6 +8,7 @@ import { createLogger } from "../../../../server/utils/logger";
 import type { WebhookEvent } from "@prisma/client";
 import { handleBulkOperationsFinishWebhook } from "../../../../server/modules/scan/catalog/scan-start.service";
 import { syncSubscriptionFromShopify } from "../../../../server/modules/billing/subscription.service";
+import { handleProductDeletedWebhook } from "../../../../server/modules/scan/continuous/product-delete.service";
 
 const logger = createLogger({ module: "webhook-process" });
 
@@ -124,9 +125,19 @@ async function dispatchByTopic(event: WebhookEvent, log: typeof logger): Promise
     return;
   }
 
+  // PRODUCTS_DELETE: 商品删除 → 已发布层空收敛 (usages / targets / candidates → NOT_FOUND)
+  if (normalizedTopic === "PRODUCTS_DELETE") {
+    await handleProductDeletedWebhook({
+      shopDomain: event.shopDomain,
+      payload: event.payload,
+    });
+    return;
+  }
+
   // 后续按 topic 路由到具体业务:
   // - PRODUCTS_CREATE / PRODUCTS_UPDATE → continuous scan
   // - COLLECTIONS_CREATE / COLLECTIONS_UPDATE → continuous scan
+  // - COLLECTIONS_DELETE → 集合删除收敛（暂未接入）
   // - APP_SCOPES_UPDATE → scope sync
   // - APP_UNINSTALLED → gdpr / cleanup
   // - CUSTOMERS_DATA_REQUEST / CUSTOMERS_REDACT / SHOP_REDACT → gdpr
