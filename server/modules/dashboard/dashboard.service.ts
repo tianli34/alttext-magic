@@ -71,6 +71,7 @@ export function buildDashboardGroupStatsQuery(
       COUNT(*) FILTER (
         WHERE alt_target.current_alt_empty = true
           AND COALESCE(decorative_mark.is_active, false) = false
+          AND alt_candidate.status <> 'NOT_FOUND'
       )::integer AS "missing",
       COUNT(*) FILTER (
         WHERE decorative_mark.is_active = true
@@ -78,7 +79,7 @@ export function buildDashboardGroupStatsQuery(
       COUNT(*) FILTER (
         WHERE alt_target.current_alt_empty = true
           AND COALESCE(decorative_mark.is_active, false) = false
-          AND alt_candidate.status = ANY(ARRAY['MISSING','GENERATING','GENERATION_FAILED_RETRYABLE','NOT_FOUND']::"AltCandidateStatus"[])
+          AND alt_candidate.status = ANY(ARRAY['MISSING','GENERATING','GENERATION_FAILED_RETRYABLE']::"AltCandidateStatus"[])
       )::integer AS "pending",
       COUNT(*) FILTER (
         WHERE alt_target.current_alt_empty = true
