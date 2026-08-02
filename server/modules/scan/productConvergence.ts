@@ -11,6 +11,7 @@ import {
 } from "@prisma/client";
 import {
   computeNextCandidateState,
+  deactivateMarkIfAltFilled,
   rebuildTargetProjections
 } from "./catalog/publish.service";
 
@@ -297,6 +298,13 @@ export async function convergeProduct(
 
   const candidateByTargetId = new Map<string, string>();
   for (const target of impactedTargets) {
+    // 若 alt 已非空而装饰标记仍激活,先同事务内自动取消标记,恢复互斥不变式
+    await deactivateMarkIfAltFilled(tx, {
+      shopId: input.shopId,
+      target,
+      now,
+    });
+
     const nextCandidate = computeNextCandidateState({
       target,
       now

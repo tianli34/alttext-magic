@@ -9,7 +9,7 @@ config();
 
 async function run(): Promise<void> {
   const [
-    { computeNextCandidateState, resolveFileAltPresentStatus },
+    { computeNextCandidateState, resolveFileAltPresentStatus, shouldDeactivateMarkOnAltFilled },
     {
       processPublishScanJob,
       resetPublishProcessorDependenciesForTests,
@@ -98,6 +98,42 @@ async function run(): Promise<void> {
       missingReason: null,
     },
     "装饰性标记激活时应收敛为 DECORATIVE_SKIPPED",
+  );
+
+  assert.equal(
+    shouldDeactivateMarkOnAltFilled({
+      currentAltEmpty: false,
+      decorativeMark: { isActive: true },
+    }),
+    true,
+    "alt 已非空且装饰标记仍激活时,应自动取消标记",
+  );
+
+  assert.equal(
+    shouldDeactivateMarkOnAltFilled({
+      currentAltEmpty: true,
+      decorativeMark: { isActive: true },
+    }),
+    false,
+    "alt 仍为空时不应取消标记",
+  );
+
+  assert.equal(
+    shouldDeactivateMarkOnAltFilled({
+      currentAltEmpty: false,
+      decorativeMark: null,
+    }),
+    false,
+    "无装饰标记时无需处理",
+  );
+
+  assert.equal(
+    shouldDeactivateMarkOnAltFilled({
+      currentAltEmpty: false,
+      decorativeMark: { isActive: false },
+    }),
+    false,
+    "标记已停用时无需处理",
   );
 
   assert.deepEqual(

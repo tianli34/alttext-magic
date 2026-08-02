@@ -450,6 +450,13 @@ export async function publishScanResult(
     const candidateByTargetId = new Map<string, string>();
 
     for (const target of impactedTargets) {
+      // 若 alt 已非空而装饰标记仍激活,先同事务内自动取消标记,恢复互斥不变式
+      await deactivateMarkIfAltFilled(tx, {
+        shopId: scanJob.shopId,
+        target,
+        now,
+      });
+
       const nextCandidate = computeNextCandidateState({
         target,
         now,
@@ -842,6 +849,54 @@ export function computeNextCandidateState(input: {
         : "MISSING",
     missingReason: "EMPTY",
   };
+}
+
+/**
+ * 判定是否需要自动取消装饰性标记:
+ * alt 已非空(外部写入)且装饰标记仍激活时,互斥不变式被破坏,应清除标记。
+ * 纯函数,便于单测。
+ */
+export function shouldDeactivateMarkOnAltFilled(target: {
+  currentAltEmpty: boolean;
+  decorativeMark: { isActive: boolean } | null;
+}): boolean {
+  return !target.currentAltEmpty && target.decorativeMark?.isActive === true;
+}
+
+/**
+ * 在扫描收敛事务内,当 alt 已非空而装饰标记仍激活时自动 deactivate 标记,
+ * 恢复 "有 alt" 与 "有装饰标记" 的互斥不变式。
+ * 幂等:仅对 isActive=true 的记录生效;调用方需在事务内调用。
+ */
+export async function deactivateMarkIfAltFilled(
+  tx: Prisma.TransactionClient,
+  input: { shopId: string; target: ImpactedTargetSummary; now: Date },
+): Promise<void> {
+  if (!shouldDeactivateMarkOnAltFilled(input.target)) {
+    return;
+  }
+
+  const result = await tx.decorativeMark.updateMany({
+    where: {
+      shopId: input.shopId,
+      altTargetId: input.target.id,
+      isActive: true,
+    },
+    data: {
+      isActive: false,
+      unmarkedAt: input.now,
+    },
+  });
+
+  if (result.count > 0) {
+    logger.info(
+      {
+        shopId: input.shopId,
+        altTargetId: input.target.id,
+      },
+      "publish.decorative-mark-auto-deactivated",
+    );
+  }
 }
 
 export function resolveFileAltPresentStatus(

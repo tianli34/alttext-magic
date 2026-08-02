@@ -10,6 +10,7 @@
 import { AltPlane, PresentStatus, Prisma } from "@prisma/client";
 import {
   computeNextCandidateState,
+  deactivateMarkIfAltFilled,
   rebuildTargetProjections,
 } from "./catalog/publish.service";
 
@@ -191,6 +192,13 @@ export async function convergeCollection(
   result.upserted = true;
 
   // 5. 重算 / upsert alt_candidate (重算并更新插入备选 Alt)
+  //    若 alt 已非空而装饰标记仍激活,先同事务内自动取消标记,恢复互斥不变式
+  await deactivateMarkIfAltFilled(tx, {
+    shopId: input.shopId,
+    target: altTarget,
+    now,
+  });
+
   const nextCandidate = computeNextCandidateState({ target: altTarget, now });
 
   const candidate = await tx.altCandidate.upsert({
