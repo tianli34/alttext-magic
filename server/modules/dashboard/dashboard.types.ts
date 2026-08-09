@@ -8,7 +8,7 @@ export interface DashboardGroupStats {
   groupType: CandidateGroupType;
   total: number;
   hasAlt: number;
-  missing: number;
+  altGap: number;
   decorative: number;
   pending: number;
   generated: number;

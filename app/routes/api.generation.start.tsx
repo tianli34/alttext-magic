@@ -41,7 +41,7 @@ const startBodySchema = z.object({
 });
 
 const GENERATABLE_STATUSES = [
-  AltCandidateStatus.MISSING,
+  AltCandidateStatus.INITIAL,
   AltCandidateStatus.GENERATION_FAILED_RETRYABLE,
 ] as const;
 const GENERATABLE_STATUS_SET = new Set<AltCandidateStatus>(GENERATABLE_STATUSES);
@@ -320,7 +320,7 @@ function validateCandidateSet(
   if (invalidStatusIds.length > 0) {
     throw new StartValidationError(
       "INVALID_CANDIDATE_STATUS",
-      "Candidates must be MISSING or GENERATION_FAILED_RETRYABLE",
+      "Candidates must be INITIAL or GENERATION_FAILED_RETRYABLE",
       invalidStatusIds,
     );
   }

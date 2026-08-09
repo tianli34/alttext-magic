@@ -91,7 +91,7 @@ enum PresentStatus {
 }
 
 enum AltCandidateStatus {
-  MISSING
+  INITIAL
   GENERATING
   GENERATION_FAILED_RETRYABLE
   GENERATED
@@ -914,7 +914,7 @@ model AltCandidate {
   id                String                     @id @default(cuid())
   shopId            String                     @map("shop_id")
   altTargetId       String                     @unique @map("alt_target_id")
-  status            AltCandidateStatus         @default(MISSING)
+  status            AltCandidateStatus         @default(INITIAL)
   missingReason     AltCandidateMissingReason? @map("missing_reason")
   riskFlags         Json                       @default("[]") @map("risk_flags")
   firstSeenAt       DateTime                   @default(now()) @map("first_seen_at") @db.Timestamptz(3)

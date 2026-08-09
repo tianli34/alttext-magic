@@ -5,12 +5,12 @@ import { createArticleRowHandler } from "../../server/modules/scan/catalog/parse
 import { createCollectionRowHandler } from "../../server/modules/scan/catalog/parsers/collection.parser";
 import { createFilesRowHandler } from "../../server/modules/scan/catalog/parsers/files.parser";
 import { createProductMediaRowHandler } from "../../server/modules/scan/catalog/parsers/product-media.parser";
-import { flushArticleStaging, flushCollectionStaging, flushMediaFileStaging, flushProductMediaStaging, countStagingRows, } from "../../server/modules/scan/catalog/staging.service";
+import { flushArticleStaging, flushCollectionStaging, flushMediaFileStaging, flushProductMediaStaging, countStagingRows, countMediaImages, } from "../../server/modules/scan/catalog/staging.service";
 import { enqueueDeriveScan } from "../../server/queues/derive-scan.queue";
 import { bulkSubmitService } from "../../server/modules/scan/catalog/bulk-submit.service";
 import { finalizeScanJobIfTerminal as finalizeScanJobIfTerminalInDb, markScanTaskFailed, resetScanTaskToPendingForRetry, } from "../../server/modules/scan/catalog/scan-task.service";
 import { enqueuePublishScanResult } from "../../server/queues/publish-scan.queue";
-import { updateScanProgressPhase } from "../../server/sse/progress-publisher";
+import { updateScanProgressPhase, addScanTotalImages, addScanResourceTotalImages } from "../../server/sse/progress-publisher";
 import { SCAN_PHASE } from "../../server/modules/scan/scan.constants";
 const logger = createLogger({ module: "parse-bulk-processor" });
 const defaultDependencies = {
@@ -42,12 +42,14 @@ const defaultDependencies = {
     },
     parseByResourceType,
     countStagingRows,
+    countMediaImages,
     async markAttemptSuccess(input) {
         await prisma.scanTaskAttempt.update({
             where: { id: input.scanTaskAttemptId },
             data: {
                 status: "SUCCESS",
                 parsedRows: input.parsedRows,
+                totalImages: input.totalImages,
                 finishedAt: input.finishedAt,
                 lastParseError: null,
             },
@@ -154,13 +156,19 @@ export async function processParseBulkJob(data) {
     try {
         // 3. 根据资源类型选择 parser 并执行流式解析
         await parseBulkProcessorDependencies.parseByResourceType(shopId, scanTaskAttemptId, resourceType, attempt.bulkResultUrl);
-        // 4. 统计已写入行数
+        // 4. 统计已写入行数 + 图片（原料）总数
         const parsedRows = await parseBulkProcessorDependencies.countStagingRows(scanTaskAttemptId, resourceType);
+        const totalImages = await parseBulkProcessorDependencies.countMediaImages(scanTaskAttemptId, resourceType);
         const finishedAt = new Date();
-        // 5. 标记 attempt 为 SUCCESS
+        // 5. 累加图片总数到 Redis 进度（供图片级百分比使用）
+        await addScanTotalImages(scanJobId, totalImages);
+        // 5.1 按资源类型累加图片总数（供每类独立进度条使用）
+        await addScanResourceTotalImages(scanJobId, resourceType, totalImages);
+        // 6. 标记 attempt 为 SUCCESS
         await parseBulkProcessorDependencies.markAttemptSuccess({
             scanTaskAttemptId,
             parsedRows,
+            totalImages,
             finishedAt,
         });
         jobLogger.info({ shopId, scanTaskId, scanTaskAttemptId, resourceType, parsedRows }, "parse-bulk.success");

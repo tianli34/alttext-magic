@@ -145,7 +145,7 @@ function makeState(totalCount: number): MockState {
       id: candidateId,
       shopId: "shop-1",
       altTargetId: targetId,
-      status: AltCandidateStatus.MISSING,
+      status: AltCandidateStatus.INITIAL,
       errorCode: null,
       errorMessage: null,
     });

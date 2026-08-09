@@ -17,7 +17,7 @@ import { useTimezone } from "../lib/timezone";
 
 type GroupType = "PRODUCT_MEDIA" | "FILES" | "COLLECTION" | "ARTICLE";
 type CandidateStatus =
-  | "MISSING"
+  | "INITIAL"
   | "PENDING"
   | "HAS_ALT"
   | "DECORATIVE_SKIPPED"
@@ -35,7 +35,7 @@ interface DashboardGroup {
   groupType: GroupType;
   total: number;
   hasAlt: number;
-  missing: number;
+  altGap: number;
   decorative: number;
   pending: number;
   generated: number;
@@ -112,7 +112,7 @@ const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
 ];
 
 const STATUS_LABELS: Record<CandidateStatus, string> = {
-  MISSING: "Missing",
+  INITIAL: "Initial",
   PENDING: "Pending",
   HAS_ALT: "Has Alt",
   DECORATIVE_SKIPPED: "Decorative",
@@ -128,7 +128,7 @@ const STATUS_LABELS: Record<CandidateStatus, string> = {
 /** 可选中的候选状态（用于生成 Alt Text） */
 const SELECTABLE_STATUSES: ReadonlySet<CandidateStatus> = new Set([
   "PENDING",
-  "MISSING",
+  "INITIAL",
   "GENERATION_FAILED_RETRYABLE",
 ]);
 
@@ -161,7 +161,7 @@ function isGroupType(value: string | null): value is GroupType {
 }
 
 function getStatusToneClass(status: CandidateStatus): string {
-  if (status === "MISSING" || status === "PENDING") return styles.badgeCritical;
+  if (status === "INITIAL" || status === "PENDING") return styles.badgeCritical;
   if (status === "HAS_ALT") return styles.badgeSuccess;
   if (status === "DECORATIVE_SKIPPED") return styles.badgeCaution;
   return "";
@@ -357,7 +357,7 @@ export default function AppCandidatesPage() {
     const activeGroups = selectedGroup
       ? groups.filter((g) => g.groupType === selectedGroup)
       : groups;
-    const sum = (...keys: Array<"total" | "hasAlt" | "missing" | "decorative" | "pending" | "generated">) =>
+    const sum = (...keys: Array<"total" | "hasAlt" | "altGap" | "decorative" | "pending" | "generated">) =>
       keys.reduce((s, key) => s + activeGroups.reduce((sg, g) => sg + g[key], 0), 0);
     return {
       all: sum("total"),
@@ -753,7 +753,7 @@ export default function AppCandidatesPage() {
 
                       <div className={styles.rowAction}>
                         {/* 装饰性标记 / 取消标记 */}
-                        {(item.status === "MISSING" ||
+                        {(item.status === "INITIAL" ||
                           item.status === "PENDING" ||
                           item.status === "DECORATIVE_SKIPPED") && (
                           <>
@@ -768,7 +768,7 @@ export default function AppCandidatesPage() {
                                   onClick={() =>
                                     void handleDecorativeConfirm(
                                       item,
-                                      item.status === "PENDING" || item.status === "MISSING"
+                                      item.status === "PENDING" || item.status === "INITIAL"
                                         ? "mark"
                                         : "unmark",
                                     )
@@ -799,7 +799,7 @@ export default function AppCandidatesPage() {
                               >
                                 {markingIds.has(item.altCandidateId)
                                   ? "处理中…"
-                                  : item.status === "PENDING" || item.status === "MISSING"
+                                  : item.status === "PENDING" || item.status === "INITIAL"
                                     ? "标记为装饰性"
                                     : "取消装饰性标记"}
                               </button>

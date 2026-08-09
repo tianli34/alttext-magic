@@ -22,7 +22,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '../../utils/logger.js';
-import { decryptToken } from '../../crypto/token-encryption.js';
+import { getOfflineAccessTokenByDomain } from '../../shopify/offline-admin.server.js';
 import { getPlanConfig } from './plan-config.js';
 import { grantCreditBucket } from './credit/grant-credit.server.js';
 // ----------------------------------------------------------------------------
@@ -57,14 +57,14 @@ export function findOveragePackConfig(planKey, packCode) {
  * @param client   PrismaClient 实例
  */
 export async function initiateOveragePackPurchase(params, adapter, client) {
-    const { shopId, shopDomain, accessTokenEncrypted, accessTokenNonce, accessTokenTag, currentPlan, packCode, returnUrl, } = params;
+    const { shopId, shopDomain, currentPlan, packCode, returnUrl, } = params;
     // ---- 1. 校验超额包配置 ----
     const packConfig = findOveragePackConfig(currentPlan, packCode);
     if (!packConfig) {
         throw new Error(`[overage-pack] 计划 ${currentPlan} 不支持超额包 ${packCode}`);
     }
-    // ---- 2. 解密 access token ----
-    const accessToken = decryptToken(accessTokenEncrypted, accessTokenNonce, accessTokenTag);
+    // ---- 2. 通过官方 unauthenticated.admin 链路获取 token（含自动续期）----
+    const accessToken = await getOfflineAccessTokenByDomain(shopDomain);
     // ---- 3. 查找当前活跃订阅（可选关联） ----
     const activeSubscription = await client.billingSubscription.findFirst({
         where: { shopId, status: 'ACTIVE' },

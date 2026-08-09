@@ -161,6 +161,35 @@ export async function publishScanResult(input) {
                 candidateCount += convergeResult.candidateCount;
                 projectionCount += convergeResult.projectionCount;
             }
+            // 1b. Sweep (缺席商品清理)
+            // 找出数据库中已有 PRESENT 商品引用、但本次扫描结果未返回的商品，
+            // 视为已从 Shopify 删除，对其实施空收敛以将其 usages / targets 标记为 NOT_FOUND
+            const scannedProductIds = new Set(usagesByProductId.keys());
+            const existingPresentProductUsageRows = await tx.imageUsage.findMany({
+                where: {
+                    shopId: scanJob.shopId,
+                    usageType: "PRODUCT",
+                    presentStatus: "PRESENT",
+                },
+                select: {
+                    usageId: true,
+                },
+            });
+            const absentProductIds = new Set(existingPresentProductUsageRows
+                .map((row) => row.usageId)
+                .filter((usageId) => !scannedProductIds.has(usageId)));
+            for (const productId of absentProductIds) {
+                const convergeResult = await convergeProduct(tx, {
+                    shopId: scanJob.shopId,
+                    productId,
+                    mediaImages: [],
+                    scanJobId: scanJob.id,
+                });
+                publishedTargetCount += convergeResult.publishedTargetCount;
+                publishedUsageCount += convergeResult.publishedUsageCount;
+                candidateCount += convergeResult.candidateCount;
+                projectionCount += convergeResult.projectionCount;
+            }
         }
         // 2. 处理 FILES 类型的资源（FILES 无 usage，直接基于 resultTargets）
         const fileTargetRows = resultTargets.filter((target) => target.resourceType === "FILES");
@@ -278,6 +307,12 @@ export async function publishScanResult(input) {
             : [];
         const candidateByTargetId = new Map();
         for (const target of impactedTargets) {
+            // 若 alt 已非空而装饰标记仍激活,先同事务内自动取消标记,恢复互斥不变式
+            await deactivateMarkIfAltFilled(tx, {
+                shopId: scanJob.shopId,
+                target,
+                now,
+            });
             const nextCandidate = computeNextCandidateState({
                 target,
                 now,
@@ -577,9 +612,44 @@ export function computeNextCandidateState(input) {
     return {
         status: input.target.altCandidate?.status === "GENERATION_FAILED_RETRYABLE"
             ? "GENERATION_FAILED_RETRYABLE"
-            : "MISSING",
+            : "INITIAL",
         missingReason: "EMPTY",
     };
+}
+/**
+ * 判定是否需要自动取消装饰性标记:
+ * alt 已非空(外部写入)且装饰标记仍激活时,互斥不变式被破坏,应清除标记。
+ * 纯函数,便于单测。
+ */
+export function shouldDeactivateMarkOnAltFilled(target) {
+    return !target.currentAltEmpty && target.decorativeMark?.isActive === true;
+}
+/**
+ * 在扫描收敛事务内,当 alt 已非空而装饰标记仍激活时自动 deactivate 标记,
+ * 恢复 "有 alt" 与 "有装饰标记" 的互斥不变式。
+ * 幂等:仅对 isActive=true 的记录生效;调用方需在事务内调用。
+ */
+export async function deactivateMarkIfAltFilled(tx, input) {
+    if (!shouldDeactivateMarkOnAltFilled(input.target)) {
+        return;
+    }
+    const result = await tx.decorativeMark.updateMany({
+        where: {
+            shopId: input.shopId,
+            altTargetId: input.target.id,
+            isActive: true,
+        },
+        data: {
+            isActive: false,
+            unmarkedAt: input.now,
+        },
+    });
+    if (result.count > 0) {
+        logger.info({
+            shopId: input.shopId,
+            altTargetId: input.target.id,
+        }, "publish.decorative-mark-auto-deactivated");
+    }
 }
 export function resolveFileAltPresentStatus(presentStatuses) {
     return presentStatuses.includes("PRESENT") ? "PRESENT" : "NOT_FOUND";

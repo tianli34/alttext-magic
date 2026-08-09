@@ -37,7 +37,7 @@ export const candidateListStatusValues = [
 
 export type CandidateListStatus =
   | (typeof candidateListStatusValues)[number]
-  | "MISSING";
+  | "INITIAL";
 
 export interface CandidateListQuery {
   group?: CandidateGroupType;
@@ -173,7 +173,7 @@ function deriveStatus(row: CandidateListRow): CandidateListStatus {
 }
 
 const PENDING_STATUSES = [
-  "MISSING",
+  "INITIAL",
   "GENERATING",
   "GENERATION_FAILED_RETRYABLE",
 ] as const;

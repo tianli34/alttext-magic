@@ -1,5 +1,5 @@
 import { createLogger } from '../../utils/logger.js';
-import { decryptToken } from '../../crypto/token-encryption.js';
+import { getOfflineAccessTokenByDomain } from '../../shopify/offline-admin.server.js';
 import { getPlanConfig } from './plan-config.js';
 import { ANNUAL_TOTAL_PRICE_CENTS } from '../../config/plans.js';
 // ----------------------------------------------------------------------------
@@ -17,9 +17,8 @@ const log = createLogger({ module: 'plan-change-service' });
  * @param adapter  BillingAdapter 实例
  */
 export async function changePlanToPaid(params, adapter) {
-    const { shopId, shopDomain, accessTokenEncrypted, accessTokenNonce, accessTokenTag, planKey, interval, returnUrl, } = params;
-    // 解密 access token
-    const accessToken = decryptToken(accessTokenEncrypted, accessTokenNonce, accessTokenTag);
+    const { shopId, shopDomain, planKey, interval, returnUrl, } = params;
+    const accessToken = await getOfflineAccessTokenByDomain(shopDomain);
     // 获取计划配置
     const config = getPlanConfig(planKey);
     // 根据计费周期确定价格
@@ -69,9 +68,8 @@ export async function changePlanToPaid(params, adapter) {
  * @param client   PrismaClient 实例
  */
 export async function changePlanToFree(params, adapter, client) {
-    const { shopId, shopDomain, accessTokenEncrypted, accessTokenNonce, accessTokenTag, } = params;
-    // 解密 access token
-    const accessToken = decryptToken(accessTokenEncrypted, accessTokenNonce, accessTokenTag);
+    const { shopId, shopDomain, } = params;
+    const accessToken = await getOfflineAccessTokenByDomain(shopDomain);
     log.info({ shopId }, '开始降级到 Free 计划');
     // ---- 1. 查询 Shopify 侧活跃订阅并取消 ----
     const subsResult = await adapter.getCurrentAppSubscriptions({

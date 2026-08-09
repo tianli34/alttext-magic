@@ -3,13 +3,12 @@
  * Purpose: continuous_scan_product job 处理器。
  *          处理单个 Product 的增量扫描逻辑。
  */
-import { Session } from "@shopify/shopify-api";
-import { decryptToken } from "../../server/crypto/token-encryption";
 import prisma from "../../server/db/prisma.server";
 import { delayJobForLock } from "../../server/services/gates/lockGate";
 import { checkIncrementalEnabled } from "../../server/services/gates/planGate";
 import { checkScopeForTopic } from "../../server/services/gates/scopeGate";
 import { checkFingerprintChange } from "../../server/services/gates/fingerprintGate";
+import { getOfflineAdminByShopId } from "../../server/shopify/offline-admin.server";
 import { getProductMedia } from "../../server/shopify/queries/getProductMedia";
 import { computeProductFingerprint } from "../../server/modules/fingerprint/imageFingerprint";
 import { convergeProduct } from "../../server/modules/scan/productConvergence";
@@ -57,28 +56,8 @@ export async function processContinuousScanProductJob(job) {
             await markSkipped(latestWebhookEventId, "SCOPE");
             return;
         }
-        // 5. 载入 shop 凭证并建立 Shopify Session
-        const shop = await prisma.shop.findUnique({
-            where: { id: shopId },
-            select: {
-                shopDomain: true,
-                accessTokenEncrypted: true,
-                accessTokenNonce: true,
-                accessTokenTag: true,
-                scopes: true,
-            },
-        });
-        if (!shop) {
-            throw new Error(`[产品增量扫描] 店铺记录不存在: ${shopId}`);
-        }
-        const session = new Session({
-            id: `offline_${shop.shopDomain}`,
-            shop: shop.shopDomain,
-            state: "",
-            isOnline: false,
-            scope: shop.scopes ?? undefined,
-            accessToken: decryptToken(shop.accessTokenEncrypted, shop.accessTokenNonce, shop.accessTokenTag),
-        });
+        // 5. 通过官方 unauthenticated.admin 链路获取 Offline Session（含自动续期）
+        const { session } = await getOfflineAdminByShopId(shopId);
         // 6. 调用 8-D1 API 读取当前 product media
         const mediaImages = await getProductMedia({
             session,

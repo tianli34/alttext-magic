@@ -16,14 +16,14 @@ function dashboardData(): Record<string, unknown> {
         groupType: "PRODUCT_MEDIA",
         total: 3,
         hasAlt: 1,
-        missing: 1,
+        altGap: 1,
         decorative: 1,
       },
       {
         groupType: "FILES",
         total: 2,
         hasAlt: 0,
-        missing: 2,
+        altGap: 2,
         decorative: 0,
       },
     ],
@@ -63,7 +63,7 @@ async function run(): Promise<void> {
     assert.equal(data.groups[0].groupType, "PRODUCT_MEDIA", "groupType 应稳定返回");
     assert.equal(typeof data.groups[0].total, "number", "total 应为 number");
     assert.equal(typeof data.groups[0].hasAlt, "number", "hasAlt 应为 number");
-    assert.equal(typeof data.groups[0].missing, "number", "missing 应为 number");
+    assert.equal(typeof data.groups[0].altGap, "number", "altGap 应为 number");
     assert.equal(typeof data.groups[0].decorative, "number", "decorative 应为 number");
     assert.equal(
       data.lastPublishedAt,

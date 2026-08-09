@@ -10,7 +10,7 @@
  * - 无额度发放：订阅同步仅更新订阅状态，额度发放由独立的 grant-credit 流程负责。
  */
 import { createLogger } from '../../utils/logger.js';
-import { decryptToken } from '../../crypto/token-encryption.js';
+import { getOfflineAccessTokenByDomain } from '../../shopify/offline-admin.server.js';
 import { getBillingAdapter } from '../../shopify/billing-adapter.js';
 import { getPlanConfig } from './plan-config.js';
 import { isValidPlanKey } from './plan-config.js';
@@ -107,7 +107,7 @@ function mapShopifySubscription(sub) {
  * 从 Shopify 同步订阅状态到本地。
  *
  * ### 流程
- * 1. 查找 shop（含加密 access token）
+ * 1. 查找 shop
  * 2. 通过 Billing Adapter 查询 Shopify 当前活跃订阅
  * 3. 将 Shopify 订阅映射为本地模型
  * 4. 根据 externalSubscriptionId 查找本地记录
@@ -135,9 +135,6 @@ export async function syncSubscriptionFromShopify(shopDomain, adapter, client) {
             id: true,
             shopDomain: true,
             currentPlan: true,
-            accessTokenEncrypted: true,
-            accessTokenNonce: true,
-            accessTokenTag: true,
         },
     });
     if (!shop) {
@@ -145,7 +142,7 @@ export async function syncSubscriptionFromShopify(shopDomain, adapter, client) {
     }
     log.info({ shopId: shop.id, shopDomain }, '开始从 Shopify 同步订阅状态');
     // ---- 2. 查询 Shopify 侧订阅 ----
-    const accessToken = decryptToken(shop.accessTokenEncrypted, shop.accessTokenNonce, shop.accessTokenTag);
+    const accessToken = await getOfflineAccessTokenByDomain(shopDomain);
     const subsResult = await billingAdapter.getCurrentAppSubscriptions({
         shop: shopDomain,
         accessToken,

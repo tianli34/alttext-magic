@@ -46,7 +46,7 @@ function createRow(
     usageCountPresent: 1,
     impactScopeSummary: {},
     contextMode: null,
-    candidateStatus: AltCandidateStatus.MISSING,
+    candidateStatus: AltCandidateStatus.INITIAL,
     currentAltEmpty: true,
     decorativeActive: false,
     currentAlt: null,
@@ -145,7 +145,7 @@ async function run(): Promise<void> {
     );
 
     assert.equal(capture.status, "PENDING", "PENDING 过滤条件应传入查询层");
-    assert.equal(data.items[0].status, "MISSING");
+    assert.equal(data.items[0].status, "INITIAL");
     assert.equal(data.items[0].currentAlt, null);
   }
 

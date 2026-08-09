@@ -44,7 +44,7 @@ const TERMINAL_STATUSES = new Set<AltCandidateStatus>([
 ]);
 
 const PROCESSABLE_STATUSES = [
-  AltCandidateStatus.MISSING,
+  AltCandidateStatus.INITIAL,
   AltCandidateStatus.GENERATING,
   AltCandidateStatus.GENERATION_FAILED_RETRYABLE,
 ];

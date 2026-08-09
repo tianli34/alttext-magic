@@ -4,7 +4,7 @@ import prisma from "../../server/db/prisma.server";
 import { finalizeScanJobIfTerminal as finalizeScanJobIfTerminalInDb, markScanTaskFailed, markScanTaskSucceeded, } from "../../server/modules/scan/catalog/scan-task.service";
 import { enqueuePublishScanResult } from "../../server/queues/publish-scan.queue";
 import { releaseLockByType } from "../../server/modules/lock/operation-lock.service";
-import { updateScanProgressPhase, incrementScanProgress, setScanProgressStatus, } from "../../server/sse/progress-publisher";
+import { updateScanProgressPhase, incrementScanProcessedImages, addScanResourceProcessedImages, setScanProgressStatus, } from "../../server/sse/progress-publisher";
 import { SCAN_PHASE } from "../../server/modules/scan/scan.constants";
 const logger = createLogger({ module: "derive-scan-processor" });
 const defaultDependencies = {
@@ -24,6 +24,20 @@ const defaultDependencies = {
             },
         });
         return task?.successfulAttemptId ?? null;
+    },
+    async getAttemptTotalImages(scanTaskAttemptId) {
+        const attempt = await prisma.scanTaskAttempt.findUnique({
+            where: { id: scanTaskAttemptId },
+            select: { totalImages: true },
+        });
+        return attempt?.totalImages ?? 0;
+    },
+    async getScanTaskResourceType(scanTaskId) {
+        const task = await prisma.scanTask.findUnique({
+            where: { id: scanTaskId },
+            select: { resourceType: true },
+        });
+        return task?.resourceType ?? null;
     },
 };
 const deriveProcessorDependencies = {
@@ -87,8 +101,14 @@ export async function processDeriveScanJob(data) {
             scanTaskAttemptId,
             finishedAt,
         });
-        // 递增 Redis 进度已完成任务数
-        await incrementScanProgress(scanJobId);
+        // 递增 Redis 进度：任务数 + 已处理图片数
+        const attemptTotalImages = await deriveProcessorDependencies.getAttemptTotalImages(scanTaskAttemptId);
+        await incrementScanProcessedImages(scanJobId, attemptTotalImages);
+        const resourceType = result.resourceType ??
+            (await deriveProcessorDependencies.getScanTaskResourceType(scanTaskId));
+        if (resourceType) {
+            await addScanResourceProcessedImages(scanJobId, resourceType, attemptTotalImages);
+        }
         const finalizeResult = await deriveProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
         if (finalizeResult?.transitioned &&
             (finalizeResult.status === "SUCCESS" ||
@@ -124,7 +144,12 @@ export async function processDeriveScanJob(data) {
             finishedAt,
         });
         // 递增 Redis 进度（即使是失败的 task 也算"处理完毕"）
-        await incrementScanProgress(scanJobId);
+        const failedAttemptImages = await deriveProcessorDependencies.getAttemptTotalImages(scanTaskAttemptId);
+        await incrementScanProcessedImages(scanJobId, 0, failedAttemptImages);
+        const failedResourceType = await deriveProcessorDependencies.getScanTaskResourceType(scanTaskId);
+        if (failedResourceType) {
+            await addScanResourceProcessedImages(scanJobId, failedResourceType, 0, failedAttemptImages);
+        }
         const finalizeResult = await deriveProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
         if (finalizeResult?.transitioned &&
             (finalizeResult.status === "SUCCESS" ||

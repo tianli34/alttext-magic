@@ -177,3 +177,35 @@ export async function countStagingRows(scanTaskAttemptId, resourceType) {
             return 0;
     }
 }
+/**
+ * 统计指定 attempt 覆盖的**图片（原料）总数**，用于扫描进度的图片级百分比。
+ *
+ * 口径以"媒体图数"为准（扫描工作对象即原料，而非 derive 后的产出 target）：
+ * - PRODUCT_MEDIA：stg_media_image_product 行数
+ * - FILES：stg_media_image_file 行数
+ * - COLLECTION_IMAGE：有 image_url 的 stg_collection 行数
+ * - ARTICLE_IMAGE：有 image_url 的 stg_article 行数
+ */
+export async function countMediaImages(scanTaskAttemptId, resourceType) {
+    switch (resourceType) {
+        case "ARTICLE_IMAGE":
+            return prisma.stgArticle.count({
+                where: { scanTaskAttemptId, imageUrl: { not: null } },
+            });
+        case "COLLECTION_IMAGE":
+            return prisma.stgCollection.count({
+                where: { scanTaskAttemptId, imageUrl: { not: null } },
+            });
+        case "FILES":
+            return prisma.stgMediaImageFile.count({
+                where: { scanTaskAttemptId },
+            });
+        case "PRODUCT_MEDIA":
+            return prisma.stgMediaImageProduct.count({
+                where: { scanTaskAttemptId },
+            });
+        default:
+            logger.warn({ resourceType }, "staging.unknown-resource-type");
+            return 0;
+    }
+}

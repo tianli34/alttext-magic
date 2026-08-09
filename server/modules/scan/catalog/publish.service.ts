@@ -846,7 +846,7 @@ export function computeNextCandidateState(input: {
     status:
       input.target.altCandidate?.status === "GENERATION_FAILED_RETRYABLE"
         ? "GENERATION_FAILED_RETRYABLE"
-        : "MISSING",
+        : "INITIAL",
     missingReason: "EMPTY",
   };
 }

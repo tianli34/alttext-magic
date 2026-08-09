@@ -8,7 +8,7 @@ import { getScanProgress } from "./progress-publisher";
 import { createLogger } from "../utils/logger";
 const logger = createLogger({ module: "sse-service" });
 /** SSE 轮询间隔（毫秒） */
-const SSE_POLL_INTERVAL_MS = 2000;
+const SSE_POLL_INTERVAL_MS = 1000;
 /** 终态集合，到达终态后停止轮询 */
 const TERMINAL_PHASES = new Set(["done", "failed"]);
 /**
@@ -43,8 +43,12 @@ export function startSSEProgressStream(scanJobId, writer) {
                 if (progress) {
                     const event = {
                         type: "progress",
-                        completedTasks: progress.completedTasks,
-                        totalTasks: progress.totalTasks,
+                        totalImages: progress.totalImages,
+                        processedImages: progress.processedImages,
+                        failedImages: progress.failedImages,
+                        discoveredObjects: progress.discoveredObjects,
+                        resourceTotals: progress.resourceTotals,
+                        etaSeconds: progress.etaSeconds,
                         status: progress.status,
                         phase: progress.phase,
                         message: progress.message,
@@ -62,8 +66,12 @@ export function startSSEProgressStream(scanJobId, writer) {
                     // Redis 键已过期或不存在
                     const event = {
                         type: "progress",
-                        completedTasks: 0,
-                        totalTasks: 0,
+                        totalImages: 0,
+                        processedImages: 0,
+                        failedImages: 0,
+                        discoveredObjects: 0,
+                        resourceTotals: {},
+                        etaSeconds: null,
                         status: "UNKNOWN",
                         phase: "unknown",
                         message: "进度数据已过期",

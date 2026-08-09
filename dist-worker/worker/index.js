@@ -30,7 +30,9 @@ import { registerBillingSyncScheduler } from "./schedulers/billing-sync.schedule
 import { registerCleanupScheduler } from "./schedulers/cleanup.scheduler.js";
 import { registerLockReaperScheduler } from "./schedulers/lock-timeout.scheduler.js";
 import { DEFAULT_BULK_ATTEMPT_REAPER_INTERVAL_MS, runBulkAttemptReaperOnce, } from "./schedulers/bulk-attempt-reaper.scheduler.js";
+import { DEFAULT_DISCOVERY_PROGRESS_INTERVAL_MS, runDiscoveryProgressPollOnce, } from "./schedulers/discovery-progress.scheduler.js";
 import { withJobLogger } from "./utils/job-logger.js";
+import { writeScanLog } from "./utils/scan-run-logger.js";
 const logger = createLogger({ module: "worker-runtime" });
 const webhookConnection = createRedisConnection();
 const scanStartConnection = createRedisConnection();
@@ -76,6 +78,21 @@ const bulkAttemptReaperInterval = setInterval(() => {
     });
 }, DEFAULT_BULK_ATTEMPT_REAPER_INTERVAL_MS);
 bulkAttemptReaperInterval.unref();
+let discoveryProgressRunning = false;
+const discoveryProgressInterval = setInterval(() => {
+    if (discoveryProgressRunning) {
+        return;
+    }
+    discoveryProgressRunning = true;
+    void runDiscoveryProgressPollOnce()
+        .catch((error) => {
+        logger.error({ err: error }, "discovery-progress-scheduler.failed");
+    })
+        .finally(() => {
+        discoveryProgressRunning = false;
+    });
+}, DEFAULT_DISCOVERY_PROGRESS_INTERVAL_MS);
+discoveryProgressInterval.unref();
 const webhookWorker = new Worker(WEBHOOK_QUEUE_NAME, async (job) => {
     await withJobLogger(job, async () => {
         await processWebhookEvent(job.data.webhookEventId);
@@ -87,7 +104,7 @@ const webhookWorker = new Worker(WEBHOOK_QUEUE_NAME, async (job) => {
 const scanStartWorker = new Worker(SCAN_START_QUEUE_NAME, async (job) => {
     await withJobLogger(job, async () => {
         await processScanStartJob(job.data.scanJobId);
-    });
+    }, SCAN_START_QUEUE_NAME);
 }, {
     connection: scanStartConnection,
     concurrency: 2,
@@ -95,7 +112,7 @@ const scanStartWorker = new Worker(SCAN_START_QUEUE_NAME, async (job) => {
 const parseBulkWorker = new Worker(PARSE_BULK_QUEUE_NAME, async (job) => {
     await withJobLogger(job, async () => {
         await processParseBulkJob(job.data);
-    });
+    }, PARSE_BULK_QUEUE_NAME);
 }, {
     connection: parseBulkConnection,
     concurrency: 2,
@@ -103,7 +120,7 @@ const parseBulkWorker = new Worker(PARSE_BULK_QUEUE_NAME, async (job) => {
 const deriveScanWorker = new Worker(DERIVE_SCAN_QUEUE_NAME, async (job) => {
     await withJobLogger(job, async () => {
         await processDeriveScanJob(job.data);
-    });
+    }, DERIVE_SCAN_QUEUE_NAME);
 }, {
     connection: deriveScanConnection,
     concurrency: 2,
@@ -111,7 +128,7 @@ const deriveScanWorker = new Worker(DERIVE_SCAN_QUEUE_NAME, async (job) => {
 const publishScanWorker = new Worker(PUBLISH_SCAN_QUEUE_NAME, async (job) => {
     await withJobLogger(job, async () => {
         await processPublishScanJob(job.data);
-    });
+    }, PUBLISH_SCAN_QUEUE_NAME);
 }, {
     connection: publishScanConnection,
     concurrency: 1,
@@ -143,7 +160,7 @@ const reservationReaperWorker = new Worker(RESERVATION_REAPER_QUEUE_NAME, async 
 const generateAltWorker = new Worker(GENERATE_ALT_QUEUE_NAME, async (job) => {
     await withJobLogger(job, async () => {
         await processGenerateAltJob(job.data);
-    });
+    }, GENERATE_ALT_QUEUE_NAME);
 }, {
     connection: generateAltConnection,
     concurrency: generateAltConcurrency,
@@ -151,7 +168,7 @@ const generateAltWorker = new Worker(GENERATE_ALT_QUEUE_NAME, async (job) => {
 const writebackWorker = new Worker(WRITEBACK_QUEUE_NAME, async (job) => {
     await withJobLogger(job, async () => {
         await processWritebackJob(job.data);
-    });
+    }, WRITEBACK_QUEUE_NAME);
 }, {
     connection: writebackConnection,
     concurrency: writebackConcurrency,
@@ -348,6 +365,12 @@ scanStartWorker.on("completed", (job) => {
         scanJobId: job.data.scanJobId,
         shopId: job.data.shopId,
     }, "worker.completed");
+    writeScanLog("worker.completed", {
+        queue: SCAN_START_QUEUE_NAME,
+        jobId: job.id,
+        scanJobId: job.data.scanJobId,
+        shopId: job.data.shopId,
+    });
 });
 parseBulkWorker.on("completed", (job) => {
     logger.info({
@@ -356,6 +379,12 @@ parseBulkWorker.on("completed", (job) => {
         scanTaskAttemptId: job.data.scanTaskAttemptId,
         shopId: job.data.shopId,
     }, "worker.completed");
+    writeScanLog("worker.completed", {
+        queue: PARSE_BULK_QUEUE_NAME,
+        jobId: job.id,
+        scanTaskAttemptId: job.data.scanTaskAttemptId,
+        shopId: job.data.shopId,
+    });
 });
 deriveScanWorker.on("completed", (job) => {
     logger.info({
@@ -364,6 +393,12 @@ deriveScanWorker.on("completed", (job) => {
         scanTaskAttemptId: job.data.scanTaskAttemptId,
         shopId: job.data.shopId,
     }, "worker.completed");
+    writeScanLog("worker.completed", {
+        queue: DERIVE_SCAN_QUEUE_NAME,
+        jobId: job.id,
+        scanTaskAttemptId: job.data.scanTaskAttemptId,
+        shopId: job.data.shopId,
+    });
 });
 publishScanWorker.on("completed", (job) => {
     logger.info({
@@ -372,6 +407,12 @@ publishScanWorker.on("completed", (job) => {
         scanJobId: job.data.scanJobId,
         shopId: job.data.shopId,
     }, "worker.completed");
+    writeScanLog("worker.completed", {
+        queue: PUBLISH_SCAN_QUEUE_NAME,
+        jobId: job.id,
+        scanJobId: job.data.scanJobId,
+        shopId: job.data.shopId,
+    });
 });
 quotaGrantWorker.on("completed", (job) => {
     logger.info({
@@ -396,6 +437,13 @@ generateAltWorker.on("completed", (job) => {
         candidateId: job.data.candidateId,
         shopId: job.data.shopId,
     }, "worker.completed");
+    writeScanLog("worker.completed", {
+        queue: GENERATE_ALT_QUEUE_NAME,
+        jobId: job.id,
+        batchId: job.data.batchId,
+        candidateId: job.data.candidateId,
+        shopId: job.data.shopId,
+    });
 });
 writebackWorker.on("completed", (job) => {
     logger.info({
@@ -405,6 +453,13 @@ writebackWorker.on("completed", (job) => {
         candidateId: job.data.candidateId,
         shopId: job.data.shopId,
     }, "worker.completed");
+    writeScanLog("worker.completed", {
+        queue: WRITEBACK_QUEUE_NAME,
+        jobId: job.id,
+        batchId: job.data.batchId,
+        candidateId: job.data.candidateId,
+        shopId: job.data.shopId,
+    });
 });
 continuousScanDebounceWorker.on("completed", (job) => {
     logger.info({
@@ -469,6 +524,13 @@ scanStartWorker.on("failed", (job, error) => {
         shopId: job?.data.shopId,
         err: error,
     }, "worker.failed");
+    writeScanLog("worker.failed", {
+        queue: SCAN_START_QUEUE_NAME,
+        jobId: job?.id,
+        scanJobId: job?.data.scanJobId,
+        shopId: job?.data.shopId,
+        err: error,
+    });
 });
 parseBulkWorker.on("failed", (job, error) => {
     logger.error({
@@ -478,6 +540,13 @@ parseBulkWorker.on("failed", (job, error) => {
         shopId: job?.data.shopId,
         err: error,
     }, "worker.failed");
+    writeScanLog("worker.failed", {
+        queue: PARSE_BULK_QUEUE_NAME,
+        jobId: job?.id,
+        scanTaskAttemptId: job?.data.scanTaskAttemptId,
+        shopId: job?.data.shopId,
+        err: error,
+    });
 });
 deriveScanWorker.on("failed", (job, error) => {
     logger.error({
@@ -487,6 +556,13 @@ deriveScanWorker.on("failed", (job, error) => {
         shopId: job?.data.shopId,
         err: error,
     }, "worker.failed");
+    writeScanLog("worker.failed", {
+        queue: DERIVE_SCAN_QUEUE_NAME,
+        jobId: job?.id,
+        scanTaskAttemptId: job?.data.scanTaskAttemptId,
+        shopId: job?.data.shopId,
+        err: error,
+    });
 });
 publishScanWorker.on("failed", (job, error) => {
     logger.error({
@@ -496,6 +572,13 @@ publishScanWorker.on("failed", (job, error) => {
         shopId: job?.data.shopId,
         err: error,
     }, "worker.failed");
+    writeScanLog("worker.failed", {
+        queue: PUBLISH_SCAN_QUEUE_NAME,
+        jobId: job?.id,
+        scanJobId: job?.data.scanJobId,
+        shopId: job?.data.shopId,
+        err: error,
+    });
 });
 quotaGrantWorker.on("failed", (job, error) => {
     logger.error({
@@ -523,6 +606,14 @@ generateAltWorker.on("failed", (job, error) => {
         shopId: job?.data.shopId,
         err: error,
     }, "worker.failed");
+    writeScanLog("worker.failed", {
+        queue: GENERATE_ALT_QUEUE_NAME,
+        jobId: job?.id,
+        batchId: job?.data.batchId,
+        candidateId: job?.data.candidateId,
+        shopId: job?.data.shopId,
+        err: error,
+    });
 });
 writebackWorker.on("failed", (job, error) => {
     logger.error({
@@ -535,6 +626,16 @@ writebackWorker.on("failed", (job, error) => {
         attempts: job?.opts.attempts,
         err: error,
     }, "worker.failed");
+    writeScanLog("worker.failed", {
+        queue: WRITEBACK_QUEUE_NAME,
+        jobId: job?.id,
+        batchId: job?.data.batchId,
+        candidateId: job?.data.candidateId,
+        shopId: job?.data.shopId,
+        attemptsMade: job?.attemptsMade,
+        attempts: job?.opts.attempts,
+        err: error,
+    });
     if (!job)
         return;
     const attempts = job.opts.attempts ?? 1;
@@ -655,6 +756,7 @@ async function shutdown(signal) {
     logger.info({ signal }, "worker.shutdown");
     clearInterval(scanTimeoutSweepInterval);
     clearInterval(bulkAttemptReaperInterval);
+    clearInterval(discoveryProgressInterval);
     await Promise.all([
         webhookWorker.close(),
         scanStartWorker.close(),

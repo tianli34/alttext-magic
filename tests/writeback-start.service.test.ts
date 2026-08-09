@@ -177,7 +177,7 @@ async function run(): Promise<void> {
   {
     const { deps, enqueued } = createDependencies([
       candidate({ id: "valid" }),
-      candidate({ id: "bad-status", status: AltCandidateStatus.MISSING }),
+      candidate({ id: "bad-status", status: AltCandidateStatus.INITIAL }),
       candidate({ id: "decorative", isDecorative: true }),
       candidate({ id: "no-draft", hasDraft: false }),
     ]);

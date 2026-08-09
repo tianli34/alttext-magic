@@ -53,7 +53,7 @@ function createCandidate(
   return {
     id: "candidate-1",
     altTargetId: "target-1",
-    status: AltCandidateStatus.MISSING,
+    status: AltCandidateStatus.INITIAL,
     currentAltEmpty: true,
     hasDraft: false,
     updatedAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -172,14 +172,14 @@ async function run(): Promise<void> {
     );
 
     assert.equal(capture.deactivateCount, 1, "unmark 应取消 active 标记");
-    assert.deepEqual(capture.updateStatuses, [AltCandidateStatus.MISSING]);
-    assert.equal(data.status, AltCandidateStatus.MISSING);
+    assert.deepEqual(capture.updateStatuses, [AltCandidateStatus.INITIAL]);
+    assert.equal(data.status, AltCandidateStatus.INITIAL);
     assert.equal(data.decorativeActive, false);
   }
 
   {
     const candidate = createCandidate({
-      status: AltCandidateStatus.MISSING,
+      status: AltCandidateStatus.INITIAL,
       decorativeActive: false,
     });
     const capture = createCapture();
@@ -191,7 +191,7 @@ async function run(): Promise<void> {
 
     assert.equal(capture.deactivateCount, 1, "重复 unmark 不应报错");
     assert.deepEqual(capture.updateStatuses, [], "未激活标记时不应改写状态");
-    assert.equal(data.status, AltCandidateStatus.MISSING);
+    assert.equal(data.status, AltCandidateStatus.INITIAL);
   }
 
   {

@@ -26,7 +26,7 @@ interface DashboardGroupStatsRow {
   groupType: CandidateGroupType;
   total: number;
   hasAlt: number;
-  missing: number;
+  altGap: number;
   decorative: number;
   pending: number;
   generated: number;
@@ -72,14 +72,14 @@ export function buildDashboardGroupStatsQuery(
         WHERE alt_target.current_alt_empty = true
           AND COALESCE(decorative_mark.is_active, false) = false
           AND alt_candidate.status <> 'NOT_FOUND'
-      )::integer AS "missing",
+      )::integer AS "altGap",
       COUNT(*) FILTER (
         WHERE decorative_mark.is_active = true
       )::integer AS "decorative",
       COUNT(*) FILTER (
         WHERE alt_target.current_alt_empty = true
           AND COALESCE(decorative_mark.is_active, false) = false
-          AND alt_candidate.status = ANY(ARRAY['MISSING','GENERATING','GENERATION_FAILED_RETRYABLE']::"AltCandidateStatus"[])
+          AND alt_candidate.status = ANY(ARRAY['INITIAL','GENERATING','GENERATION_FAILED_RETRYABLE']::"AltCandidateStatus"[])
       )::integer AS "pending",
       COUNT(*) FILTER (
         WHERE alt_target.current_alt_empty = true
@@ -147,7 +147,7 @@ function normalizeGroupStatsRows(
     groupType: row.groupType,
     total: Number(row.total),
     hasAlt: Number(row.hasAlt),
-    missing: Number(row.missing),
+    altGap: Number(row.altGap),
     decorative: Number(row.decorative),
     pending: Number(row.pending),
     generated: Number(row.generated),

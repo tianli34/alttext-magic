@@ -73,7 +73,7 @@ const scopeFlagToGroupType: Record<keyof ScanScopeFlags, CandidateGroupType> = {
 };
 
 const markableStatuses = new Set<AltCandidateStatus>([
-  AltCandidateStatus.MISSING,
+  AltCandidateStatus.INITIAL,
   AltCandidateStatus.GENERATION_FAILED_RETRYABLE,
   AltCandidateStatus.GENERATED,
   AltCandidateStatus.WRITEBACK_FAILED_RETRYABLE,
@@ -102,7 +102,7 @@ function restoreStatusAfterUnmark(
     return AltCandidateStatus.GENERATION_FAILED_RETRYABLE;
   }
 
-  return AltCandidateStatus.MISSING;
+  return AltCandidateStatus.INITIAL;
 }
 
 function assertCandidateInScope(

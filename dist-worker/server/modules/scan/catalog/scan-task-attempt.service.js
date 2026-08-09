@@ -122,7 +122,9 @@ export async function markAttemptFinishedFromWebhook(input) {
         },
     });
     if (!attempt) {
-        logger.warn({ bulkOperationId: input.bulkOperationId }, "scan-task-attempt.bulk-operation-not-found");
+        if (!input.silentNotFound) {
+            logger.warn({ bulkOperationId: input.bulkOperationId }, "scan-task-attempt.bulk-operation-not-found");
+        }
         return null;
     }
     if (["READY_TO_PARSE", "SUCCESS", "FAILED"].includes(attempt.status)) {

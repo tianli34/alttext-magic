@@ -1,18 +1,18 @@
 /**
  * File: server/modules/shop/shop.service.ts
- * Purpose: Persist the canonical shop installation record and encrypted
- * offline access token after Shopify authentication completes。
+ * Purpose: Persist the canonical shop installation record after Shopify
+ * authentication completes. Offline access token 由 Session 表托管。
  * 计费与额度初始化已迁移至 bootstrapShopBilling 服务。
  */
 import { randomUUID } from "node:crypto";
 import prisma from "../../db/prisma.server";
-import { encryptToken } from "../../crypto/token-encryption";
 import { createLogger } from "../../utils/logger";
 import { DEFAULT_SCAN_SCOPE_FLAGS } from "./scope.service";
 import { executeShopifyGraphql } from "../writeback/mutations/mutation-utils";
 import { SHOP_TIMEZONE_QUERY } from "../../shopify/queries/shop.query";
 const logger = createLogger({ module: "shop-service" });
 const DEFAULT_PLAN = "FREE";
+const LEGACY_TOKEN_PLACEHOLDER = "";
 function assertOfflineSession(session) {
     if (session.isOnline) {
         throw new Error("Expected an offline Shopify session");
@@ -20,7 +20,6 @@ function assertOfflineSession(session) {
     if (!session.accessToken) {
         throw new Error("Offline Shopify session is missing an access token");
     }
-    return session.accessToken;
 }
 /**
  * 持久化店铺安装记录（upsert）。
@@ -32,8 +31,7 @@ export async function persistOfflineShopSession({ session, }) {
         logger.debug({ shop: session.shop, sessionId: session.id }, "Skipping shop persistence for online session");
         throw new Error("Online session not supported");
     }
-    const accessToken = assertOfflineSession(session);
-    const encryptedToken = encryptToken(accessToken);
+    assertOfflineSession(session);
     const installedAt = new Date();
     const serializedScanScopeFlags = JSON.stringify(DEFAULT_SCAN_SCOPE_FLAGS);
     const shopId = await prisma.$transaction(async (tx) => {
@@ -55,9 +53,9 @@ export async function persistOfflineShopSession({ session, }) {
       VALUES (
         ${randomUUID()},
         ${session.shop},
-        ${encryptedToken.encrypted},
-        ${encryptedToken.nonce},
-        ${encryptedToken.tag},
+        ${LEGACY_TOKEN_PLACEHOLDER},
+        ${LEGACY_TOKEN_PLACEHOLDER},
+        ${LEGACY_TOKEN_PLACEHOLDER},
         ${session.scope ?? null},
         ${DEFAULT_PLAN},
         ${serializedScanScopeFlags}::jsonb,
@@ -68,9 +66,6 @@ export async function persistOfflineShopSession({ session, }) {
       )
       ON CONFLICT ("shop_domain") DO UPDATE
       SET
-        "access_token_encrypted" = EXCLUDED."access_token_encrypted",
-        "access_token_nonce" = EXCLUDED."access_token_nonce",
-        "access_token_tag" = EXCLUDED."access_token_tag",
         "scopes" = EXCLUDED."scopes",
         "uninstalled_at" = NULL,
         "updated_at" = EXCLUDED."updated_at"
