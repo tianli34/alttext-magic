@@ -29,6 +29,7 @@ interface DashboardGroupStatsRow {
   altGap: number;
   decorative: number;
   pending: number;
+  generating: number;
   generated: number;
 }
 
@@ -79,8 +80,13 @@ export function buildDashboardGroupStatsQuery(
       COUNT(*) FILTER (
         WHERE alt_target.current_alt_empty = true
           AND COALESCE(decorative_mark.is_active, false) = false
-          AND alt_candidate.status = ANY(ARRAY['INITIAL','GENERATING','GENERATION_FAILED_RETRYABLE']::"AltCandidateStatus"[])
+          AND alt_candidate.status = ANY(ARRAY['INITIAL','GENERATION_FAILED_RETRYABLE']::"AltCandidateStatus"[])
       )::integer AS "pending",
+      COUNT(*) FILTER (
+        WHERE alt_target.current_alt_empty = true
+          AND COALESCE(decorative_mark.is_active, false) = false
+          AND alt_candidate.status = 'GENERATING'
+      )::integer AS "generating",
       COUNT(*) FILTER (
         WHERE alt_target.current_alt_empty = true
           AND COALESCE(decorative_mark.is_active, false) = false
@@ -150,6 +156,7 @@ function normalizeGroupStatsRows(
     altGap: Number(row.altGap),
     decorative: Number(row.decorative),
     pending: Number(row.pending),
+    generating: Number(row.generating),
     generated: Number(row.generated),
   }));
 }

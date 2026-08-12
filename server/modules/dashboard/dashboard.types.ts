@@ -11,6 +11,7 @@ export interface DashboardGroupStats {
   altGap: number;
   decorative: number;
   pending: number;
+  generating: number;
   generated: number;
 }
 

@@ -59,6 +59,7 @@ async function run(): Promise<void> {
             altGap: 1,
             decorative: 1,
             pending: 1,
+            generating: 0,
             generated: 0,
           },
           {
@@ -68,6 +69,7 @@ async function run(): Promise<void> {
             altGap: 2,
             decorative: 0,
             pending: 1,
+            generating: 1,
             generated: 1,
           },
         ];

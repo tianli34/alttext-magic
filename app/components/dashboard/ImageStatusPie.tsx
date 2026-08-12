@@ -1,8 +1,9 @@
 /**
  * File: app/components/dashboard/ImageStatusPie.tsx
  * Purpose: 仪表盘图片状态分布饼状图。
- *          汇总所有分组的 4 类图片数据：
- *            - PENDING（待生成）
+ *          汇总所有分组的 5 类图片数据：
+ *            - PENDING_GENERATION（待生成）
+ *            - GENERATING（生成中）
  *            - WRITEBACK_PENDING（待写回）
  *            - HAS_ALT（已有 Alt）
  *            - DECORATIVE_SKIPPED（装饰性跳过）
@@ -20,12 +21,14 @@ export interface ImageGroupStats {
   altGap: number;
   decorative: number;
   pending: number;
+  generating: number;
   generated: number;
 }
 
-/** 4 类状态元信息（数组顺序即图例与扇区顺序） */
+/** 5 类状态元信息（数组顺序即图例与扇区顺序） */
 const STATUS_META = [
-  { key: "PENDING", label: "待生成", color: "#ffc453" },
+  { key: "PENDING_GENERATION", label: "待生成", color: "#ffc453" },
+  { key: "GENERATING", label: "生成中", color: "#8a5cf6" },
   { key: "WRITEBACK_PENDING", label: "待写回", color: "#2c6ecb" },
   { key: "HAS_ALT", label: "已有 Alt", color: "#50b83c" },
   { key: "DECORATIVE_SKIPPED", label: "装饰性跳过", color: "#919eab" },
@@ -81,16 +84,18 @@ function buildSlicePath(
 /* ---------------------------------------------------------------- */
 
 export function ImageStatusPie({ groups }: ImageStatusPieProps) {
-  // 汇总 4 类数量
+  // 汇总 5 类数量
   const totals = useMemo(() => {
     const acc: Record<StatusKey, number> = {
-      PENDING: 0,
+      PENDING_GENERATION: 0,
+      GENERATING: 0,
       WRITEBACK_PENDING: 0,
       HAS_ALT: 0,
       DECORATIVE_SKIPPED: 0,
     };
     for (const g of groups) {
-      acc.PENDING += g.pending;
+      acc.PENDING_GENERATION += g.pending;
+      acc.GENERATING += g.generating;
       acc.WRITEBACK_PENDING += g.generated;
       acc.HAS_ALT += g.hasAlt;
       acc.DECORATIVE_SKIPPED += g.decorative;
@@ -99,7 +104,11 @@ export function ImageStatusPie({ groups }: ImageStatusPieProps) {
   }, [groups]);
 
   const total =
-    totals.PENDING + totals.WRITEBACK_PENDING + totals.HAS_ALT + totals.DECORATIVE_SKIPPED;
+    totals.PENDING_GENERATION +
+    totals.GENERATING +
+    totals.WRITEBACK_PENDING +
+    totals.HAS_ALT +
+    totals.DECORATIVE_SKIPPED;
 
   // 无数据兜底
   if (total === 0) {
