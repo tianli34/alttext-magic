@@ -7,15 +7,10 @@
 import type { ScanResourceType } from "@prisma/client";
 import prisma from "../../../db/prisma.server";
 import { createLogger } from "../../../utils/logger";
-import {
-  deleteScanProgress,
-  getScanProgress,
-  getScanProgressKey,
-} from "../../../sse/progress-publisher";
+import { deleteScanProgress, getScanProgress, getScanProgressKey } from "../../../sse/progress-publisher";
 import { queueConnection } from "../../../queues/connection";
-import { releaseLockByType } from "../../lock/operation-lock.service";
 import { RUNNING_SCAN_STALE_TIMEOUT_MS } from "../scan.constants";
-import { finalizeScanJobIfTerminal } from "./scan-task.service";
+import { reconcileScanJobLifecycle } from "./scan-lifecycle.service";
 
 const logger = createLogger({ module: "scan-timeout-service" });
 
@@ -99,8 +94,13 @@ export async function timeoutStaleRunningScans(
     }
 
     timedOutCount += 1;
+    await reconcileScanJobLifecycle({
+      scanJobId: timedOutScanJob.id,
+      shopId: timedOutScanJob.shopId,
+    });
+
+    // 终态写入进度后清理 Redis 进度缓存, 避免页面残留运行中状态
     redisDeletedCount += await deleteScanProgress(timedOutScanJob.id);
-    await releaseLockByType(timedOutScanJob.shopId, "SCAN");
 
     logger.warn(
       {
@@ -182,7 +182,7 @@ async function markRunningScanJobTimedOut(
   }
 
   // 先把仍处于运行中的 attempt / task 收敛为 FAILED，并补记 job 错误，
-  // 再交由 finalizeScanJobIfTerminal 统一计算终态——
+  // 再交由 reconcileScanJobLifecycle 统一计算终态并执行后续动作——
   // 部分 resource type 成功时应标记为 PARTIAL_SUCCESS（而非整单 FAILED）。
   await prisma.$transaction(async (tx) => {
     await tx.scanTaskAttempt.updateMany({
@@ -226,16 +226,6 @@ async function markRunningScanJobTimedOut(
     });
   });
 
-  const finalizeResult = await finalizeScanJobIfTerminal(scanJobId);
-  if (!finalizeResult || !finalizeResult.transitioned) {
-    logger.warn(
-      {
-        scanJobId,
-        expectedFailedResourceTypes: failedResourceTypes,
-      },
-      "scan-timeout.finalize-skipped",
-    );
-  }
 
   return {
     id: scanJob.id,

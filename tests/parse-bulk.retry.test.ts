@@ -18,7 +18,7 @@ async function run(): Promise<void> {
     {
       const attemptFailures: string[] = [];
       const taskResets: string[] = [];
-      const submitCalls: string[] = [];
+      const requeueCalls: string[] = [];
       let finalizeCount = 0;
 
       setParseBulkProcessorDependenciesForTests({
@@ -59,16 +59,10 @@ async function run(): Promise<void> {
         async resetScanTaskToPendingForRetry(input) {
           taskResets.push(input.scanTaskId);
         },
-        async submitTask(scanTaskId) {
-          submitCalls.push(scanTaskId);
-          return {
-            status: "submitted",
-            taskId: scanTaskId,
-            attemptId: "attempt-2",
-            bulkOperationId: "bulk-2",
-          };
+        async enqueueScanStartRetry(input) {
+          requeueCalls.push(input.scanJobId);
         },
-        async finalizeScanJobIfTerminal() {
+        async reconcileScanJobLifecycle() {
           finalizeCount += 1;
           return null;
         },
@@ -88,7 +82,7 @@ async function run(): Promise<void> {
         "403 应归类为 Bulk URL 过期/失效",
       );
       assert.deepEqual(taskResets, ["task-1"], "重试前应把 task 放回 PENDING");
-      assert.deepEqual(submitCalls, ["task-1"], "应自动重新提交同一 task");
+      assert.deepEqual(requeueCalls, ["scan-job-1"], "应重新入列 scan-start 由其统一提交");
       assert.equal(finalizeCount, 0, "成功转入重试时不应提前 finalize scan_job");
     }
 
@@ -97,7 +91,7 @@ async function run(): Promise<void> {
     {
       const attemptFailures: string[] = [];
       const taskFailures: string[] = [];
-      let submitCount = 0;
+      let requeueCount = 0;
       let finalizeCount = 0;
 
       setParseBulkProcessorDependenciesForTests({
@@ -138,11 +132,11 @@ async function run(): Promise<void> {
         async resetScanTaskToPendingForRetry() {
           throw new Error("达到上限后不应再回到 PENDING");
         },
-        async submitTask() {
-          submitCount += 1;
-          throw new Error("达到上限后不应再次提交");
+        async enqueueScanStartRetry() {
+          requeueCount += 1;
+          throw new Error("达到上限后不应再次入列重试");
         },
-        async finalizeScanJobIfTerminal() {
+        async reconcileScanJobLifecycle() {
           finalizeCount += 1;
           return null;
         },
@@ -161,7 +155,7 @@ async function run(): Promise<void> {
         /\[BULK_DOWNLOAD_TIMEOUT\]/,
         "超时应归类为下载超时",
       );
-      assert.equal(submitCount, 0, "达到上限后不能再次提交");
+      assert.equal(requeueCount, 0, "达到上限后不能再次入列重试");
       assert.equal(taskFailures.length, 1, "达到上限后 task 应进入 FAILED");
       assert.match(
         taskFailures[0] ?? "",

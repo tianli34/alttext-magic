@@ -1,11 +1,11 @@
 /**
- * File: app/lib/server/webhooks/webhook.queue.ts
+ * File: server/modules/webhook/webhook.queue.ts
  * Purpose: 将已持久化的 WebhookEvent 入列 BullMQ，供 Worker 异步消费。
  */
 import { Queue } from "bullmq";
-import { queueConnection } from "../../../../server/queues/connection";
-import { WEBHOOK_QUEUE_NAME } from "../../../../server/config/queue-names";
-import { createLogger } from "../../../../server/utils/logger";
+import { queueConnection } from "../../queues/connection";
+import { WEBHOOK_QUEUE_NAME } from "../../config/queue-names";
+import { createLogger } from "../../utils/logger";
 import type { WebhookQueueJobData } from "./webhook.types";
 
 const logger = createLogger({ module: "webhook-queue" });

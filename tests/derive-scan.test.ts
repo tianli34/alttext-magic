@@ -268,15 +268,12 @@ async function run(): Promise<void> {
         async markScanTaskFailed() {
           throw new Error("此用例不应标记 task 失败");
         },
-        async finalizeScanJobIfTerminal() {
+        async reconcileScanJobLifecycle() {
           finalizeCount += 1;
           return null;
         },
         async getTaskSuccessfulAttemptId() {
           return null;
-        },
-        async releaseLockByType() {
-          throw new Error("此用例不应释放锁");
         },
       });
 
@@ -298,8 +295,7 @@ async function run(): Promise<void> {
     resetDeriveProcessorDependenciesForTests();
 
     {
-      const releasedLocks: string[] = [];
-      let enqueueCount = 0;
+      const reconcileCalls: string[] = [];
 
       setDeriveProcessorDependenciesForTests({
         async deriveAndPersistScanResults() {
@@ -311,25 +307,16 @@ async function run(): Promise<void> {
         async markScanTaskFailed() {
           return;
         },
-        async finalizeScanJobIfTerminal() {
+        async reconcileScanJobLifecycle(input) {
+          reconcileCalls.push(`${input.scanJobId}:${input.shopId}`);
           return {
             status: "FAILED",
+            publishStatus: "PENDING",
             transitioned: true,
           };
         },
-        async enqueuePublishScanResult() {
-          enqueueCount += 1;
-        },
         async getTaskSuccessfulAttemptId() {
           return null;
-        },
-        async releaseLockByType(shopId, operationType) {
-          releasedLocks.push(`${shopId}:${operationType}`);
-          return {
-            released: true,
-            reason: "RELEASED",
-            lock: null,
-          };
         },
       });
 
@@ -343,11 +330,10 @@ async function run(): Promise<void> {
       );
 
       assert.deepEqual(
-        releasedLocks,
-        ["shop-1:SCAN"],
-        "scan_job 收敛为 FAILED 时应立即释放 SCAN 锁",
+        reconcileCalls,
+        ["scan-job-1:shop-1"],
+        "derive 失败后应统一交由 lifecycle 服务收敛终态(FAILED 时由其释放 SCAN 锁)",
       );
-      assert.equal(enqueueCount, 0, "FAILED 不应再投递 publish");
     }
 
     resetDeriveProcessorDependenciesForTests();
@@ -396,10 +382,10 @@ async function run(): Promise<void> {
         async resetScanTaskToPendingForRetry() {
           throw new Error("成功重试补投 derive 时不应重置 task");
         },
-        async submitTask() {
-          throw new Error("成功重试补投 derive 时不应重新提交 bulk");
+        async enqueueScanStartRetry() {
+          throw new Error("成功重试补投 derive 时不应重新入列 scan-start");
         },
-        async finalizeScanJobIfTerminal() {
+        async reconcileScanJobLifecycle() {
           finalizeCount += 1;
           return null;
         },

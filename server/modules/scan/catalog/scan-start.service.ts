@@ -1,12 +1,11 @@
 /**
  * File: server/modules/scan/catalog/scan-start.service.ts
- * Purpose: scan_start job 协调入口，以及 BULK_OPERATIONS_FINISH 后的补位提交。
+ * Purpose: scan_start job 协调入口: 槽位锁内选取 pending task 并提交 Shopify Bulk Query。
+ * BULK_OPERATIONS_FINISH 的 webhook 业务处理见 bulk-finish.service.ts。
  */
 import { randomUUID } from "node:crypto";
 import type { ScanJobStatus } from "@prisma/client";
-import { z } from "zod";
 import prisma from "../../../db/prisma.server";
-import { enqueueParseBulkToStaging } from "../../../queues/parse-bulk.queue";
 import { createLogger } from "../../../utils/logger";
 import {
   BULK_SLOT_LOCK_TTL_MS,
@@ -15,23 +14,10 @@ import {
 } from "./bulk-slot-lock.server";
 import { bulkSlotManager } from "./bulk-slot-manager.service";
 import { bulkSubmitService, type BulkSubmitResult } from "./bulk-submit.service";
-import {
-  finalizeScanJobIfTerminal,
-  getPendingScanTasksOrdered,
-  type FinalizeScanJobResult,
-} from "./scan-task.service";
-import { getBulkOperationById } from "./shopify-bulk.client.server";
-import { markAttemptFinishedFromWebhook } from "./scan-task-attempt.service";
-import { updateScanProgressPhase } from "../../../sse/progress-publisher";
-import { SCAN_PHASE } from "../scan.constants";
+import { getPendingScanTasksOrdered } from "./scan-task.service";
+import { reconcileScanJobLifecycle } from "./scan-lifecycle.service";
 
 const logger = createLogger({ module: "scan-start-service" });
-
-/**
- * finish webhook 早于 bulkSubmitService.markAttemptSubmitted 把 bulkOperationId 落库到达时的
- * 竞态兜底重试延迟。开发店小数据量下 bulk op 秒级完成, 竞态窗口实测约 2-3s, 取 5s 留余量。
- */
-const WEBHOOK_NOT_FOUND_RETRY_DELAY_MS = 5_000;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,13 +35,6 @@ function staggerForIndex(index: number): Promise<void> {
   return delay(index * BULK_SUBMIT_STAGGER_BASE_MS + jitter);
 }
 
-const bulkFinishWebhookPayloadSchema = z.object({
-  admin_graphql_api_id: z.string().min(1),
-  status: z.string().min(1),
-  error_code: z.string().nullable().optional(),
-  completed_at: z.string().nullable().optional(),
-});
-
 export interface TrySubmitNextBatchResult {
   scanJobId: string;
   shopId: string;
@@ -70,14 +49,10 @@ export interface TrySubmitNextBatchResult {
 
 interface ScanStartServiceDependencies {
   findScanJob(scanJobId: string): Promise<{ id: string; shopId: string } | null>;
-  findShopByDomain(shopDomain: string): Promise<{ id: string } | null>;
   getAvailableSlots(shopId: string): Promise<number>;
   getPendingScanTasksOrdered: typeof getPendingScanTasksOrdered;
   submitTask(scanTaskId: string): Promise<BulkSubmitResult>;
-  finalizeScanJobIfTerminal(scanJobId: string): Promise<FinalizeScanJobResult | null>;
-  getBulkOperationById: typeof getBulkOperationById;
-  markAttemptFinishedFromWebhook: typeof markAttemptFinishedFromWebhook;
-  enqueueParseBulkToStaging: typeof enqueueParseBulkToStaging;
+  reconcileScanJobLifecycle: typeof reconcileScanJobLifecycle;
   acquireBulkSlotLock(
     shopId: string,
     ownerToken: string,
@@ -96,12 +71,6 @@ const defaultDependencies: ScanStartServiceDependencies = {
       },
     });
   },
-  async findShopByDomain(shopDomain) {
-    return prisma.shop.findUnique({
-      where: { shopDomain },
-      select: { id: true },
-    });
-  },
   getAvailableSlots(shopId) {
     return bulkSlotManager.availableSlots(shopId);
   },
@@ -109,10 +78,7 @@ const defaultDependencies: ScanStartServiceDependencies = {
   submitTask(scanTaskId) {
     return bulkSubmitService.submitTask(scanTaskId);
   },
-  finalizeScanJobIfTerminal,
-  getBulkOperationById,
-  markAttemptFinishedFromWebhook,
-  enqueueParseBulkToStaging,
+  reconcileScanJobLifecycle,
   acquireBulkSlotLock,
   releaseBulkSlotLock,
 };
@@ -148,22 +114,6 @@ function createEmptySubmitResult(
     failedCount: 0,
     skippedCount: 0,
   };
-}
-
-function normalizeBulkTerminalStatus(
-  status: string,
-): "COMPLETED" | "FAILED" | "CANCELED" {
-  const normalizedStatus = status.toUpperCase();
-
-  if (
-    normalizedStatus === "COMPLETED" ||
-    normalizedStatus === "FAILED" ||
-    normalizedStatus === "CANCELED"
-  ) {
-    return normalizedStatus;
-  }
-
-  return "FAILED";
 }
 
 function summarizeSubmitResults(results: BulkSubmitResult[]) {
@@ -221,7 +171,10 @@ export async function trySubmitNextBatch(
       availableSlots,
     );
     if (pendingTasks.length === 0) {
-      await scanStartServiceDependencies.finalizeScanJobIfTerminal(scanJobId);
+      await scanStartServiceDependencies.reconcileScanJobLifecycle({
+        scanJobId,
+        shopId: scanJob.shopId,
+      });
       return createEmptySubmitResult(
         scanJobId,
         scanJob.shopId,
@@ -239,7 +192,10 @@ export async function trySubmitNextBatch(
     );
 
     const summary = summarizeSubmitResults(results);
-    await scanStartServiceDependencies.finalizeScanJobIfTerminal(scanJobId);
+    await scanStartServiceDependencies.reconcileScanJobLifecycle({
+      scanJobId,
+      shopId: scanJob.shopId,
+    });
 
     jobLogger.info(
       {
@@ -266,116 +222,4 @@ export async function trySubmitNextBatch(
     );
   }
 }
-export async function processScanStartJob(scanJobId: string): Promise<void> {
-  await trySubmitNextBatch(scanJobId);
-  // 批量查询已提交，更新进度阶段
-  await updateScanProgressPhase(
-    scanJobId,
-    SCAN_PHASE.BULK_SUBMITTED,
-    "批量查询已提交，等待 Shopify 返回数据…",
-  );
-}
 
-export async function handleBulkOperationsFinishWebhook(input: {
-  shopDomain: string;
-  payload: unknown;
-}): Promise<void> {
-  const payload = bulkFinishWebhookPayloadSchema.parse(input.payload);
-  const shop = await scanStartServiceDependencies.findShopByDomain(
-    input.shopDomain,
-  );
-
-  const webhookLogger = logger.withContext({
-    shop_domain: input.shopDomain,
-  });
-
-  if (!shop) {
-    webhookLogger.warn(
-      { payload },
-      "scan-start.bulk-finish-shop-not-found",
-    );
-    return;
-  }
-
-  const bulkOperation = await scanStartServiceDependencies.getBulkOperationById(
-    shop.id,
-    payload.admin_graphql_api_id,
-  );
-
-  const normalizedStatus = normalizeBulkTerminalStatus(
-    bulkOperation?.status ?? payload.status,
-  );
-  const finishedAt = bulkOperation?.completedAt
-    ? new Date(bulkOperation.completedAt)
-    : payload.completed_at
-      ? new Date(payload.completed_at)
-      : new Date();
-
-  const markInput = {
-    bulkOperationId: payload.admin_graphql_api_id,
-    bulkOperationStatus: normalizedStatus,
-    bulkResultUrl: bulkOperation?.url ?? bulkOperation?.partialDataUrl ?? null,
-    finishedAt,
-    errorCode: bulkOperation?.errorCode ?? payload.error_code ?? null,
-    errorMessage:
-      normalizedStatus === "COMPLETED" ? null : "Bulk operation finished with terminal error",
-  };
-
-  // 首查静默: 开发店小数据量时 bulk op 可能秒级完成, 其 finish webhook 会早于
-  // bulkSubmitService.markAttemptSubmitted 把 bulkOperationId 落库而到达(提交竞态)。
-  let completion = await scanStartServiceDependencies.markAttemptFinishedFromWebhook({
-    ...markInput,
-    silentNotFound: true,
-  });
-
-  if (!completion) {
-    // 竞态兜底: 延迟一次重试, 覆盖落库窗口; 仍查不到视为无关 bulk op / 脏数据,
-    // 后续调用按默认(silentNotFound=false)打 warn 暴露事件。
-    await delay(WEBHOOK_NOT_FOUND_RETRY_DELAY_MS);
-    webhookLogger.info(
-      { bulkOperationId: payload.admin_graphql_api_id, retryDelayMs: WEBHOOK_NOT_FOUND_RETRY_DELAY_MS },
-      "scan-start.bulk-operation-not-found-retry",
-    );
-    completion = await scanStartServiceDependencies.markAttemptFinishedFromWebhook(markInput);
-  }
-
-  if (!completion) {
-    // 未匹配到任何 scanTaskAttempt: 提交竞态下的脏 webhook / 无关 bulk op,
-    // 不记录 "finished", 避免与上方 not-found 告警形成矛盾日志。
-    return;
-  }
-
-  webhookLogger.info(
-    {
-      shopId: shop.id,
-      bulkOperationId: payload.admin_graphql_api_id,
-      status: normalizedStatus,
-      completedAt: finishedAt.toISOString(),
-      bulkResultUrl: bulkOperation?.url ?? bulkOperation?.partialDataUrl ?? null,
-      errorCode: bulkOperation?.errorCode ?? payload.error_code ?? null,
-    },
-    "scan-start.bulk-operation-finished",
-  );
-
-  const completeLogger = webhookLogger.withContext({
-    batch_id: completion.scanJobId,
-  });
-
-  if (completion.shouldEnqueueParse) {
-    await scanStartServiceDependencies.enqueueParseBulkToStaging({
-      shopId: completion.shopId,
-      scanJobId: completion.scanJobId,
-      scanTaskId: completion.scanTaskId,
-      scanTaskAttemptId: completion.scanTaskAttemptId,
-    });
-  }
-
-  if (completion.alreadyTerminal) {
-    return;
-  }
-
-  await trySubmitNextBatch(completion.scanJobId);
-  await scanStartServiceDependencies.finalizeScanJobIfTerminal(
-    completion.scanJobId,
-  );
-}

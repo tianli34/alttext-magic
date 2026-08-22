@@ -1,14 +1,14 @@
 /**
- * File: app/lib/server/webhooks/webhook-process.service.ts
+ * File: server/modules/webhook/webhook-process.service.ts
  * Purpose: Worker 端消费 WebhookEvent 的业务处理入口。
  * 根据 topic 分发到对应的业务模块（scan / gdpr / scope / billing 等）。
  */
-import prisma from "../../../../server/db/prisma.server";
-import { createLogger } from "../../../../server/utils/logger";
+import prisma from "../../db/prisma.server";
+import { createLogger } from "../../utils/logger";
 import type { WebhookEvent } from "@prisma/client";
-import { handleBulkOperationsFinishWebhook } from "../../../../server/modules/scan/catalog/scan-start.service";
-import { syncSubscriptionFromShopify } from "../../../../server/modules/billing/subscription.service";
-import { handleProductDeletedWebhook } from "../../../../server/modules/scan/continuous/product-delete.service";
+import { handleBulkOperationsFinishWebhook } from "../scan/catalog/bulk-finish.service";
+import { syncSubscriptionFromShopify } from "../billing/subscription.service";
+import { handleProductDeletedWebhook } from "../scan/continuous/product-delete.service";
 
 const logger = createLogger({ module: "webhook-process" });
 

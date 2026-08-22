@@ -1,5 +1,5 @@
 /**
- * File: app/lib/server/webhooks/webhook.types.ts
+ * File: server/modules/webhook/webhook.types.ts
  * Purpose: Define types shared across webhook receive / process / queue layers.
  */
 import type { WebhookEventStatus } from "@prisma/client";

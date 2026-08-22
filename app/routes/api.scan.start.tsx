@@ -28,7 +28,7 @@ import {
 import { isWritebackLocked } from "../../server/modules/lock/writeback-lock.service";
 import { createScanJobWithTasks } from "../../server/modules/scan/catalog/scan-job.service";
 import { scopeFlagsToResourceTypes } from "../../server/modules/scan/scan.constants";
-import { initScanProgress } from "../../server/sse/progress-publisher";
+import { deleteScanProgress, initScanProgress } from "../../server/sse/progress-publisher";
 import { createLogger } from "../../server/utils/logger";
 import {
   scopeFlagStateSchema,
@@ -197,6 +197,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
+  // job 创建成功后若投递失败, 需在 catch 中将 job 收敛为 FAILED, 避免留下 RUNNING 孤儿
+  let createdScanJobId: string | null = null;
+
   try {
     // 10. 写入 notice 确认（幂等）
     await ackNotice({
@@ -217,6 +220,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       noticeVersion,
       enabledResourceTypes,
     });
+    createdScanJobId = scanJobResult.scanJobId;
 
     // 13. 初始化 Redis 进度键
     await initScanProgress(scanJobResult.scanJobId);
@@ -247,6 +251,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } catch (err) {
     // 创建失败时释放锁
     logger.error({ shopId: shop.id, err }, "Failed to start scan");
+
+    // job 已落库但投递(进度初始化/入队)失败: 事务性收敛为 FAILED, 避免孤儿 RUNNING 等 10 分钟超时兜底
+    if (createdScanJobId) {
+      const scanJobIdToConverge = createdScanJobId;
+      const failureReason =
+        err instanceof Error ? err.message : "scan start delivery failed";
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.scanTask.updateMany({
+            where: { scanJobId: scanJobIdToConverge, status: "PENDING" },
+            data: {
+              status: "FAILED",
+              error: `[SCAN_DELIVERY_FAILED] ${failureReason}`,
+              finishedAt: new Date(),
+            },
+          });
+          await tx.scanJob.updateMany({
+            where: { id: scanJobIdToConverge, status: "RUNNING" },
+            data: {
+              status: "FAILED",
+              error: `[SCAN_DELIVERY_FAILED] ${failureReason}`,
+              finishedAt: new Date(),
+            },
+          });
+        });
+        await deleteScanProgress(scanJobIdToConverge);
+      } catch (convergeErr) {
+        // 收敛失败仅记录日志, 仍交由超时巡检兜底
+        logger.error(
+          { shopId: shop.id, scanJobId: scanJobIdToConverge, err: convergeErr },
+          "Failed to converge undelivered scan job to FAILED",
+        );
+      }
+    }
 
     try {
       await releaseLock(shop.id, lockOwner);

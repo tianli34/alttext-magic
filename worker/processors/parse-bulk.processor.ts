@@ -29,13 +29,9 @@ import {
 import { enqueueDeriveScan } from "../../server/queues/derive-scan.queue";
 import type { ProductMediaFlushItem } from "../../server/modules/scan/catalog/parsers/staging.types";
 import type { ScanResourceType, ScanTaskAttemptStatus } from "@prisma/client";
-import { bulkSubmitService, type BulkSubmitResult } from "../../server/modules/scan/catalog/bulk-submit.service";
-import {
-  finalizeScanJobIfTerminal as finalizeScanJobIfTerminalInDb,
-  markScanTaskFailed,
-  resetScanTaskToPendingForRetry,
-} from "../../server/modules/scan/catalog/scan-task.service";
-import { enqueuePublishScanResult } from "../../server/queues/publish-scan.queue";
+import { enqueueScanStart } from "../../server/queues/scan-start.queue";
+import { markScanTaskFailed, resetScanTaskToPendingForRetry } from "../../server/modules/scan/catalog/scan-task.service";
+import { reconcileScanJobLifecycle } from "../../server/modules/scan/catalog/scan-lifecycle.service";
 import { updateScanProgressPhase, addScanTotalImages, addScanResourceTotalImages } from "../../server/sse/progress-publisher";
 import { SCAN_PHASE } from "../../server/modules/scan/scan.constants";
 
@@ -93,11 +89,11 @@ interface ParseBulkProcessorDependencies {
   enqueueDeriveScan: typeof enqueueDeriveScan;
   markScanTaskFailed: typeof markScanTaskFailed;
   resetScanTaskToPendingForRetry: typeof resetScanTaskToPendingForRetry;
-  submitTask(scanTaskId: string): Promise<BulkSubmitResult>;
-  finalizeScanJobIfTerminal(
-    scanJobId: string,
-  ): Promise<{ status: "SUCCESS" | "PARTIAL_SUCCESS" | "FAILED" | "RUNNING"; transitioned: boolean } | null>;
-  enqueuePublishScanResult: typeof enqueuePublishScanResult;
+  enqueueScanStartRetry(input: {
+    shopId: string;
+    scanJobId: string;
+  }): Promise<void>;
+  reconcileScanJobLifecycle: typeof reconcileScanJobLifecycle;
 }
 
 const defaultDependencies: ParseBulkProcessorDependencies = {
@@ -155,13 +151,19 @@ const defaultDependencies: ParseBulkProcessorDependencies = {
   enqueueDeriveScan,
   markScanTaskFailed,
   resetScanTaskToPendingForRetry,
-  submitTask(scanTaskId) {
-    return bulkSubmitService.submitTask(scanTaskId);
+  async enqueueScanStartRetry({ shopId, scanJobId }) {
+    // 重试提交交由 scan_start 作业统一负责: 读取 scanJob 的 scopeFlags 后入列
+    const scanJob = await prisma.scanJob.findUnique({
+      where: { id: scanJobId },
+      select: { scopeFlags: true },
+    });
+    await enqueueScanStart({
+      shopId,
+      scanJobId,
+      scopeFlags: (scanJob?.scopeFlags ?? {}) as Record<string, boolean>,
+    });
   },
-  async finalizeScanJobIfTerminal(scanJobId) {
-    return finalizeScanJobIfTerminalInDb(scanJobId);
-  },
-  enqueuePublishScanResult,
+  reconcileScanJobLifecycle,
 };
 
 const parseBulkProcessorDependencies: ParseBulkProcessorDependencies = {
@@ -369,13 +371,16 @@ export async function processParseBulkJob(
       failure.retryable &&
       attempt.attemptNo < attempt.scanTask.maxParseAttempts
     ) {
+      // 重试不直接重新提交 bulk query: 回退 PENDING 后交由 scan_start 作业
+      // 统一负责提交与槽位调度(其内部含终态收敛 reconcileScanJobLifecycle)
       await parseBulkProcessorDependencies.resetScanTaskToPendingForRetry({
         scanTaskId,
       });
 
-      const retrySubmitResult = await parseBulkProcessorDependencies.submitTask(
-        scanTaskId,
-      );
+      await parseBulkProcessorDependencies.enqueueScanStartRetry({
+        shopId,
+        scanJobId,
+      });
 
       jobLogger.warn(
         {
@@ -387,42 +392,10 @@ export async function processParseBulkJob(
           nextAttemptNo: attempt.attemptNo + 1,
           maxParseAttempts: attempt.scanTask.maxParseAttempts,
           errorCategory: failure.category,
-          submitStatus: retrySubmitResult.status,
         },
-        "parse-bulk.retry-submitted",
+        "parse-bulk.retry-requeued-scan-start",
       );
 
-      if (retrySubmitResult.status === "submitted") {
-        return;
-      }
-
-      if (retrySubmitResult.status === "slot_exhausted") {
-        return;
-      }
-
-      const terminalErrorMessage =
-        retrySubmitResult.status === "failed"
-          ? `[PARSE_RETRY_SUBMIT_FAILED] ${retrySubmitResult.errorMessage}`
-          : `[PARSE_RETRY_SUBMIT_SKIPPED] scan task is not pending`;
-
-      await parseBulkProcessorDependencies.markScanTaskFailed({
-        scanTaskId,
-        errorMessage: terminalErrorMessage,
-        finishedAt: new Date(),
-      });
-      const finalizeResult =
-        await parseBulkProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
-
-      if (
-        finalizeResult?.transitioned &&
-        (finalizeResult.status === "SUCCESS" ||
-          finalizeResult.status === "PARTIAL_SUCCESS")
-      ) {
-        await parseBulkProcessorDependencies.enqueuePublishScanResult({
-          shopId,
-          scanJobId,
-        });
-      }
       return;
     }
 
@@ -431,19 +404,7 @@ export async function processParseBulkJob(
       errorMessage,
       finishedAt,
     });
-    const finalizeResult =
-      await parseBulkProcessorDependencies.finalizeScanJobIfTerminal(scanJobId);
-
-    if (
-      finalizeResult?.transitioned &&
-      (finalizeResult.status === "SUCCESS" ||
-        finalizeResult.status === "PARTIAL_SUCCESS")
-    ) {
-      await parseBulkProcessorDependencies.enqueuePublishScanResult({
-        shopId,
-        scanJobId,
-      });
-    }
+    await parseBulkProcessorDependencies.reconcileScanJobLifecycle({ scanJobId, shopId });
   }
 }
 

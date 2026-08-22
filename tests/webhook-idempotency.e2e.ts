@@ -61,13 +61,13 @@ async function runTests() {
 
   // ── Import service ────────────────────────────────────────────
   const { createWebhookEventIfAbsent } = await import(
-    "../app/lib/server/webhooks/webhook.repository.js"
+    "../server/modules/webhook/webhook.repository.js"
   );
   const { enqueueWebhookEvent } = await import(
-    "../app/lib/server/webhooks/webhook.queue.js"
+    "../server/modules/webhook/webhook.queue.js"
   );
   const { receiveWebhook } = await import(
-    "../app/lib/server/webhooks/webhook-receive.service.js"
+    "../server/modules/webhook/webhook-receive.service.js"
   );
 
   try {

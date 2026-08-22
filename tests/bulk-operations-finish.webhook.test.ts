@@ -11,6 +11,10 @@ config();
 async function run(): Promise<void> {
   const {
     handleBulkOperationsFinishWebhook,
+    resetBulkFinishServiceDependenciesForTests,
+    setBulkFinishServiceDependenciesForTests,
+  } = await import("../server/modules/scan/catalog/bulk-finish.service.js");
+  const {
     resetScanStartServiceDependenciesForTests,
     setScanStartServiceDependenciesForTests,
     trySubmitNextBatch,
@@ -22,7 +26,7 @@ async function run(): Promise<void> {
       let parseQueueCount = 0;
       let finalizeCount = 0;
 
-      setScanStartServiceDependenciesForTests({
+      setBulkFinishServiceDependenciesForTests({
         async findShopByDomain() {
           return { id: "shop-1" };
         },
@@ -52,6 +56,16 @@ async function run(): Promise<void> {
         async enqueueParseBulkToStaging() {
           parseQueueCount += 1;
         },
+        async reconcileScanJobLifecycle() {
+          finalizeCount += 1;
+          return {
+            status: "SUCCESS",
+            publishStatus: "PENDING",
+            transitioned: true,
+          };
+        },
+      });
+      setScanStartServiceDependenciesForTests({
         async acquireBulkSlotLock() {
           return true;
         },
@@ -70,13 +84,8 @@ async function run(): Promise<void> {
         async submitTask() {
           throw new Error("此用例不应触发 submitTask");
         },
-        async finalizeScanJobIfTerminal() {
-          finalizeCount += 1;
-          return {
-            status: "SUCCESS",
-            publishStatus: "PENDING",
-            transitioned: true,
-          };
+        async reconcileScanJobLifecycle() {
+          throw new Error("此用例不应触发 scan-start 内的终态收敛");
         },
       });
 
@@ -103,6 +112,7 @@ async function run(): Promise<void> {
       assert.equal(markCallCount, 2, "重复 webhook 仍应先查询 attempt 状态");
     }
 
+    resetBulkFinishServiceDependenciesForTests();
     resetScanStartServiceDependenciesForTests();
 
     {
@@ -172,7 +182,7 @@ async function run(): Promise<void> {
             bulkOperationId: `bulk-${scanTaskId}`,
           };
         },
-        async finalizeScanJobIfTerminal() {
+        async reconcileScanJobLifecycle() {
           finalizeCount += 1;
           return {
             status: "SUCCESS",
@@ -202,9 +212,11 @@ async function run(): Promise<void> {
       );
     }
 
+    resetBulkFinishServiceDependenciesForTests();
     resetScanStartServiceDependenciesForTests();
     console.log("✅ bulk-operations-finish webhook 测试全部通过");
   } finally {
+    resetBulkFinishServiceDependenciesForTests();
     resetScanStartServiceDependenciesForTests();
 
     const [{ queueConnection }, { default: prisma }] = await Promise.all([

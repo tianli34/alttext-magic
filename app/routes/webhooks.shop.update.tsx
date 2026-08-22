@@ -7,7 +7,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { webhookLogger } from "../../server/utils/logger.js";
-import { createWebhookEventIfAbsent } from "../lib/server/webhooks/webhook.repository.js";
+import { createWebhookEventIfAbsent } from "../../server/modules/webhook/webhook.repository.js";
 import prisma from "../../server/db/prisma.server";
 
 interface ShopUpdatePayload {

@@ -3,7 +3,7 @@
  * Purpose: 启动 BullMQ worker，注册 webhook、扫描、生成、写回、计费与清理等队列处理器。
  */
 import { Worker, Job } from "bullmq";
-import { processWebhookEvent } from "../app/lib/server/webhooks/webhook-process.service.js";
+import { processWebhookEvent } from "../server/modules/webhook/webhook-process.service.js";
 import {
   BILLING_SYNC_QUEUE_NAME,
   CLEANUP_QUEUE_NAME,
@@ -25,7 +25,7 @@ import {
   getRedisConnectionSummary,
 } from "../server/queues/connection.js";
 import { createLogger } from "../server/utils/logger.js";
-import type { WebhookQueueJobData } from "../app/lib/server/webhooks/webhook.types.js";
+import type { WebhookQueueJobData } from "../server/modules/webhook/webhook.types.js";
 import type { ScanStartJobData } from "../server/queues/scan-start.queue.js";
 import type { ParseBulkJobData } from "../server/queues/parse-bulk.queue.js";
 import type { DeriveScanJobData } from "../server/queues/derive-scan.queue.js";
@@ -38,7 +38,7 @@ import type { WritebackJobData } from "../server/queues/writeback.queue.js";
 import type { CleanupJobData } from "../server/queues/cleanup.queue.js";
 import type { GdprDeleteJobData } from "../server/queues/gdpr-delete.queue.js";
 import type { LockReaperJobData } from "../server/queues/lock-reaper.queue.js";
-import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.service.js";
+import { processScanStartJob } from "./processors/scan-start.processor.js";
 import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
 import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
 import { processPublishScanJob } from "./processors/publish-scan.processor.js";

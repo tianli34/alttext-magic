@@ -1,11 +1,11 @@
 /**
- * File: app/lib/server/webhooks/webhook.repository.ts
+ * File: server/modules/webhook/webhook.repository.ts
  * Purpose: 幂等持久化 WebhookEvent 到数据库。
  * 仅执行: 按 shopifyWebhookId 唯一约束去重 → insert 或返回已有行。
  */
 import type { Prisma } from "@prisma/client";
-import prisma from "../../../../server/db/prisma.server";
-import { createLogger } from "../../../../server/utils/logger";
+import prisma from "../../db/prisma.server";
+import { createLogger } from "../../utils/logger";
 import type {
   ReceiveWebhookEnvelope,
   WebhookReceipt,

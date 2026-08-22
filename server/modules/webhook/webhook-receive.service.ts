@@ -1,17 +1,17 @@
 /**
- * File: app/lib/server/webhooks/webhook-receive.service.ts
+ * File: server/modules/webhook/webhook-receive.service.ts
  * Purpose: Webhook 接收入口 —— 鉴权后由 route handler 调用。
  * 仅执行: 幂等持久化 → 按 topic 路由（debounce / 通用队列）→ 返回收据。
  * 严禁在此写业务逻辑，业务全交由 Worker 异步处理。
  */
 import { createWebhookEventIfAbsent } from "./webhook.repository";
 import { enqueueWebhookEvent } from "./webhook.queue";
-import { createLogger } from "../../../../server/utils/logger";
+import { createLogger } from "../../utils/logger";
 import type { ReceiveWebhookEnvelope, WebhookReceipt } from "./webhook.types";
 import {
   isDebounceTopic,
   routeDebounceWebhook,
-} from "../../../../server/modules/scan/continuous/webhook-event.service";
+} from "../scan/continuous/webhook-event.service";
 
 const logger = createLogger({ module: "webhook-receive" });
 

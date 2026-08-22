@@ -3,7 +3,7 @@
  * Purpose: Verify Shopify webhook requests and hand off durable processing to the queue pipeline.
  */
 import type { ActionFunctionArgs } from "react-router";
-import { receiveWebhook } from "../lib/server/webhooks/webhook-receive.service.js";
+import { receiveWebhook } from "../../server/modules/webhook/webhook-receive.service.js";
 import { authenticate } from "../shopify.server";
 import { webhookLogger } from "../../server/utils/logger.js";
 
