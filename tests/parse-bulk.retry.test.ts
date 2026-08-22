@@ -9,10 +9,10 @@ config();
 
 async function run(): Promise<void> {
   const {
-    processParseBulkJob,
-    resetParseBulkProcessorDependenciesForTests,
-    setParseBulkProcessorDependenciesForTests,
-  } = await import("../worker/processors/parse-bulk.processor.js");
+    processParseBulk,
+    resetParseBulkServiceDependenciesForTests,
+    setParseBulkServiceDependenciesForTests,
+  } = await import("../server/modules/scan/catalog/parse-bulk.service.js");
 
   try {
     {
@@ -21,7 +21,7 @@ async function run(): Promise<void> {
       const requeueCalls: string[] = [];
       let finalizeCount = 0;
 
-      setParseBulkProcessorDependenciesForTests({
+      setParseBulkServiceDependenciesForTests({
         async findAttempt() {
           return {
             id: "attempt-1",
@@ -68,7 +68,7 @@ async function run(): Promise<void> {
         },
       });
 
-      await processParseBulkJob({
+      await processParseBulk({
         shopId: "shop-1",
         scanJobId: "scan-job-1",
         scanTaskId: "task-1",
@@ -86,7 +86,7 @@ async function run(): Promise<void> {
       assert.equal(finalizeCount, 0, "成功转入重试时不应提前 finalize scan_job");
     }
 
-    resetParseBulkProcessorDependenciesForTests();
+    resetParseBulkServiceDependenciesForTests();
 
     {
       const attemptFailures: string[] = [];
@@ -94,7 +94,7 @@ async function run(): Promise<void> {
       let requeueCount = 0;
       let finalizeCount = 0;
 
-      setParseBulkProcessorDependenciesForTests({
+      setParseBulkServiceDependenciesForTests({
         async findAttempt() {
           return {
             id: "attempt-3",
@@ -142,7 +142,7 @@ async function run(): Promise<void> {
         },
       });
 
-      await processParseBulkJob({
+      await processParseBulk({
         shopId: "shop-2",
         scanJobId: "scan-job-2",
         scanTaskId: "task-2",
@@ -165,10 +165,10 @@ async function run(): Promise<void> {
       assert.equal(finalizeCount, 1, "终态失败后应触发 scan_job 汇总收敛");
     }
 
-    resetParseBulkProcessorDependenciesForTests();
+    resetParseBulkServiceDependenciesForTests();
     console.log("✅ parse-bulk retry 测试全部通过");
   } finally {
-    resetParseBulkProcessorDependenciesForTests();
+    resetParseBulkServiceDependenciesForTests();
 
     const [{ queueConnection }, { default: prisma }] = await Promise.all([
       import("../server/queues/connection.js"),

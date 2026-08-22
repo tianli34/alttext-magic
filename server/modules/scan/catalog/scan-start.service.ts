@@ -16,6 +16,8 @@ import { bulkSlotManager } from "./bulk-slot-manager.service";
 import { bulkSubmitService, type BulkSubmitResult } from "./bulk-submit.service";
 import { getPendingScanTasksOrdered } from "./scan-task.service";
 import { reconcileScanJobLifecycle } from "./scan-lifecycle.service";
+import { updateScanProgressPhase } from "../../../sse/progress-publisher";
+import { SCAN_PHASE } from "../scan.constants";
 
 const logger = createLogger({ module: "scan-start-service" });
 
@@ -221,5 +223,24 @@ export async function trySubmitNextBatch(
       ownerToken,
     );
   }
+}
+
+/**
+ * scan_start 作业的完整编排: 提交批量查询后更新 Redis 进度阶段。
+ * worker 处理器只调用本入口, 不直接触碰进度发布。
+ */
+export async function submitNextBatchAndNotify(
+  scanJobId: string,
+): Promise<TrySubmitNextBatchResult | null> {
+  const result = await trySubmitNextBatch(scanJobId);
+
+  // 批量查询已提交，更新进度阶段
+  await updateScanProgressPhase(
+    scanJobId,
+    SCAN_PHASE.BULK_SUBMITTED,
+    "批量查询已提交，等待 Shopify 返回数据…",
+  );
+
+  return result;
 }
 

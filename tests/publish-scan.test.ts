@@ -11,16 +11,17 @@ async function run(): Promise<void> {
   const [
     { computeNextCandidateState, resolveFileAltPresentStatus, shouldDeactivateMarkOnAltFilled },
     {
-      processPublishScanJob,
-      resetPublishProcessorDependenciesForTests,
-      setPublishProcessorDependenciesForTests,
+      executePublishScan,
+      resetPublishFlowDependenciesForTests,
+      setPublishFlowDependenciesForTests,
     },
   ] =
     await Promise.all([
       import("../server/modules/scan/catalog/publish.service.js"),
-      import("../worker/processors/publish-scan.processor.js"),
+      import("../server/modules/scan/catalog/scan-lifecycle.service.js"),
     ]);
 
+  try {
   assert.equal(
     resolveFileAltPresentStatus(["NOT_FOUND", "PRESENT"]),
     "PRESENT",
@@ -193,7 +194,7 @@ async function run(): Promise<void> {
   {
     const releasedLocks: string[] = [];
 
-    setPublishProcessorDependenciesForTests({
+    setPublishFlowDependenciesForTests({
       async publishScanResult() {
         return {
           skipped: false,
@@ -213,7 +214,7 @@ async function run(): Promise<void> {
       },
     });
 
-    await processPublishScanJob({
+    await executePublishScan({
       shopId: "shop-1",
       scanJobId: "scan-job-1",
     });
@@ -225,12 +226,12 @@ async function run(): Promise<void> {
     );
   }
 
-  resetPublishProcessorDependenciesForTests();
+  resetPublishFlowDependenciesForTests();
 
   {
     const releasedLocks: string[] = [];
 
-    setPublishProcessorDependenciesForTests({
+    setPublishFlowDependenciesForTests({
       async publishScanResult() {
         throw new Error("publish failed");
       },
@@ -245,7 +246,7 @@ async function run(): Promise<void> {
     });
 
     await assert.rejects(
-      processPublishScanJob({
+      executePublishScan({
         shopId: "shop-1",
         scanJobId: "scan-job-2",
       }),
@@ -258,9 +259,18 @@ async function run(): Promise<void> {
     );
   }
 
-  resetPublishProcessorDependenciesForTests();
+  resetPublishFlowDependenciesForTests();
 
   console.log("✅ publish-scan 测试全部通过");
+  } finally {
+    resetPublishFlowDependenciesForTests();
+
+    const [{ queueConnection }, { default: prisma }] = await Promise.all([
+      import("../server/queues/connection.js"),
+      import("../server/db/prisma.server.js"),
+    ]);
+    await Promise.allSettled([queueConnection.quit(), prisma.$disconnect()]);
+  }
 }
 
 void run().catch((error: unknown) => {

@@ -10,14 +10,14 @@ config();
 async function run(): Promise<void> {
   const [
     deriveService,
-    deriveProcessor,
-    parseProcessor,
+    lifecycleService,
+    parseBulkService,
     { queueConnection },
     { default: prisma },
   ] = await Promise.all([
     import("../server/modules/scan/catalog/derive.service.js"),
-    import("../worker/processors/derive-scan.processor.js"),
-    import("../worker/processors/parse-bulk.processor.js"),
+    import("../server/modules/scan/catalog/scan-lifecycle.service.js"),
+    import("../server/modules/scan/catalog/parse-bulk.service.js"),
     import("../server/queues/connection.js"),
     import("../server/db/prisma.server.js"),
   ]);
@@ -29,15 +29,15 @@ async function run(): Promise<void> {
     setDerivePersistenceForTests,
   } = deriveService;
   const {
-    processDeriveScanJob,
-    resetDeriveProcessorDependenciesForTests,
-    setDeriveProcessorDependenciesForTests,
-  } = deriveProcessor;
+    processDeriveScanTask,
+    resetDeriveFlowDependenciesForTests,
+    setDeriveFlowDependenciesForTests,
+  } = lifecycleService;
   const {
-    processParseBulkJob,
-    resetParseBulkProcessorDependenciesForTests,
-    setParseBulkProcessorDependenciesForTests,
-  } = parseProcessor;
+    processParseBulk,
+    resetParseBulkServiceDependenciesForTests,
+    setParseBulkServiceDependenciesForTests,
+  } = parseBulkService;
 
   try {
     {
@@ -252,7 +252,7 @@ async function run(): Promise<void> {
       const taskSuccesses: string[] = [];
       let finalizeCount = 0;
 
-      setDeriveProcessorDependenciesForTests({
+      setDeriveFlowDependenciesForTests({
         async deriveAndPersistScanResults() {
           return {
             skipped: false,
@@ -277,7 +277,7 @@ async function run(): Promise<void> {
         },
       });
 
-      await processDeriveScanJob({
+      await processDeriveScanTask({
         shopId: "shop-1",
         scanJobId: "scan-job-1",
         scanTaskId: "task-1",
@@ -292,12 +292,12 @@ async function run(): Promise<void> {
       assert.equal(finalizeCount, 1, "derive 成功后应触发 scan_job 汇总收敛");
     }
 
-    resetDeriveProcessorDependenciesForTests();
+    resetDeriveFlowDependenciesForTests();
 
     {
       const reconcileCalls: string[] = [];
 
-      setDeriveProcessorDependenciesForTests({
+      setDeriveFlowDependenciesForTests({
         async deriveAndPersistScanResults() {
           throw new Error("derive failed");
         },
@@ -321,7 +321,7 @@ async function run(): Promise<void> {
       });
 
       await assert.rejects(
-        processDeriveScanJob({
+        processDeriveScanTask({
           shopId: "shop-1",
           scanJobId: "scan-job-1",
           scanTaskId: "task-3",
@@ -336,13 +336,13 @@ async function run(): Promise<void> {
       );
     }
 
-    resetDeriveProcessorDependenciesForTests();
+    resetDeriveFlowDependenciesForTests();
 
     {
       const deriveEnqueues: string[] = [];
       let finalizeCount = 0;
 
-      setParseBulkProcessorDependenciesForTests({
+      setParseBulkServiceDependenciesForTests({
         async findAttempt() {
           return {
             id: "attempt-2",
@@ -391,7 +391,7 @@ async function run(): Promise<void> {
         },
       });
 
-      await processParseBulkJob({
+      await processParseBulk({
         shopId: "shop-1",
         scanJobId: "scan-job-1",
         scanTaskId: "task-2",
@@ -406,12 +406,12 @@ async function run(): Promise<void> {
       assert.equal(finalizeCount, 0, "补投 derive 前不应提前 finalize scan_job");
     }
 
-    resetParseBulkProcessorDependenciesForTests();
+    resetParseBulkServiceDependenciesForTests();
     console.log("✅ derive-scan 测试全部通过");
   } finally {
     resetDerivePersistenceForTests();
-    resetDeriveProcessorDependenciesForTests();
-    resetParseBulkProcessorDependenciesForTests();
+    resetDeriveFlowDependenciesForTests();
+    resetParseBulkServiceDependenciesForTests();
     await Promise.allSettled([queueConnection.quit(), prisma.$disconnect()]);
   }
 }

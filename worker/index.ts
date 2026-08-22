@@ -4,6 +4,7 @@
  */
 import { Worker, Job } from "bullmq";
 import { processWebhookEvent } from "../server/modules/webhook/webhook-process.service.js";
+import { registerWebhookTopicHandlers } from "./register-webhook-handlers.js";
 import {
   BILLING_SYNC_QUEUE_NAME,
   CLEANUP_QUEUE_NAME,
@@ -92,6 +93,8 @@ import { withJobLogger } from "./utils/job-logger.js";
 import { writeScanLog } from "./utils/scan-run-logger.js";
 
 const logger = createLogger({ module: "worker-runtime" });
+// 注册各业务模块的 webhook topic 处理器（webhook 模块依赖反转的绑定点）
+registerWebhookTopicHandlers();
 const webhookConnection = createRedisConnection();
 const scanStartConnection = createRedisConnection();
 const parseBulkConnection = createRedisConnection();

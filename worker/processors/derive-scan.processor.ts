@@ -1,91 +1,14 @@
 /**
  * File: worker/processors/derive-scan.processor.ts
- * Purpose: derive-scan Job 处理器 — 将 staging 数据推导为待发布结果层。
- *
- * 流程:
- * 1. 读取成功 attempt 的 staging 数据
- * 2. derive 为 `scan_result_target` / `scan_result_usage`
- * 3. derive 成功后再把 scan_task 标记为 SUCCESS
- * 4. 触发 scan_job 终态收敛
+ * Purpose: derive-scan Job 处理器（薄壳）— 将 staging 数据推导为待发布结果层，
+ * 编排见 server/modules/scan/catalog/scan-lifecycle.service.ts 的 processDeriveScanTask。
  */
 import type { Worker } from "bullmq";
 import { createLogger } from "../../server/utils/logger";
 import type { DeriveScanJobData } from "../../server/queues/derive-scan.queue";
-import {
-  deriveAndPersistScanResults,
-} from "../../server/modules/scan/catalog/derive.service";
-import prisma from "../../server/db/prisma.server";
-import { markScanTaskFailed, markScanTaskSucceeded } from "../../server/modules/scan/catalog/scan-task.service";
-import { reconcileScanJobLifecycle } from "../../server/modules/scan/catalog/scan-lifecycle.service";
-import {
-  updateScanProgressPhase,
-  incrementScanProcessedImages,
-  addScanResourceProcessedImages,
-} from "../../server/sse/progress-publisher";
-import { SCAN_PHASE } from "../../server/modules/scan/scan.constants";
+import { processDeriveScanTask } from "../../server/modules/scan/catalog/scan-lifecycle.service";
 
 const logger = createLogger({ module: "derive-scan-processor" });
-
-interface DeriveProcessorDependencies {
-  deriveAndPersistScanResults: typeof deriveAndPersistScanResults;
-  markScanTaskSucceeded: typeof markScanTaskSucceeded;
-  markScanTaskFailed: typeof markScanTaskFailed;
-  reconcileScanJobLifecycle: typeof reconcileScanJobLifecycle;
-  getTaskSuccessfulAttemptId(scanTaskId: string): Promise<string | null>;
-  getAttemptTotalImages(scanTaskAttemptId: string): Promise<number>;
-  getScanTaskResourceType(scanTaskId: string): Promise<string | null>;
-}
-
-const defaultDependencies: DeriveProcessorDependencies = {
-  deriveAndPersistScanResults,
-  markScanTaskSucceeded,
-  markScanTaskFailed,
-  reconcileScanJobLifecycle,
-  async getTaskSuccessfulAttemptId(scanTaskId) {
-    const task = await prisma.scanTask.findUnique({
-      where: { id: scanTaskId },
-      select: {
-        successfulAttemptId: true,
-      },
-    });
-
-    return task?.successfulAttemptId ?? null;
-  },
-  async getAttemptTotalImages(scanTaskAttemptId) {
-    const attempt = await prisma.scanTaskAttempt.findUnique({
-      where: { id: scanTaskAttemptId },
-      select: { totalImages: true },
-    });
-
-    return attempt?.totalImages ?? 0;
-  },
-  async getScanTaskResourceType(scanTaskId) {
-    const task = await prisma.scanTask.findUnique({
-      where: { id: scanTaskId },
-      select: { resourceType: true },
-    });
-
-    return task?.resourceType ?? null;
-  },
-};
-
-const deriveProcessorDependencies: DeriveProcessorDependencies = {
-  ...defaultDependencies,
-};
-
-export function setDeriveProcessorDependenciesForTests(
-  overrides: Partial<DeriveProcessorDependencies>,
-): void {
-  Object.assign(deriveProcessorDependencies, overrides);
-}
-
-export function resetDeriveProcessorDependenciesForTests(): void {
-  Object.assign(deriveProcessorDependencies, defaultDependencies);
-}
-
-/* ------------------------------------------------------------------ */
-/*  Processor 工厂                                                     */
-/* ------------------------------------------------------------------ */
 
 export default function createDeriveScanProcessor(
   worker: Worker<DeriveScanJobData>,
@@ -102,119 +25,8 @@ export default function createDeriveScanProcessor(
   });
 }
 
-/* ------------------------------------------------------------------ */
-/*  核心处理函数（供 worker/index.ts 直接调用）                          */
-/* ------------------------------------------------------------------ */
-
-/**
- * 处理 derive-scan Job。
- *
- * @param data - Job 数据（shopId, scanJobId, scanTaskId, scanTaskAttemptId）
- */
 export async function processDeriveScanJob(
   data: DeriveScanJobData,
 ): Promise<void> {
-  const { shopId, scanJobId, scanTaskId, scanTaskAttemptId } = data;
-
-  const jobLogger = logger.withContext({
-    shop_domain: shopId,
-    batch_id: scanJobId,
-    job_item_id: scanTaskAttemptId,
-  });
-
-  jobLogger.info(
-    { shopId, scanTaskId, scanTaskAttemptId },
-    "derive-scan.start",
-  );
-
-  // 更新 Redis 进度阶段为 derive
-  await updateScanProgressPhase(
-    scanJobId,
-    SCAN_PHASE.DERIVE,
-    "正在推导扫描结果…",
-  );
-
-  try {
-    const result = await deriveProcessorDependencies.deriveAndPersistScanResults({
-      scanTaskAttemptId,
-    });
-
-    if (result.skipped) {
-      const successfulAttemptId =
-        await deriveProcessorDependencies.getTaskSuccessfulAttemptId(scanTaskId);
-
-      if (successfulAttemptId !== scanTaskAttemptId) {
-        jobLogger.warn(
-          {
-            shopId,
-            scanJobId,
-            scanTaskId,
-            scanTaskAttemptId,
-            reason: result.reason,
-          },
-          "derive-scan.skipped",
-        );
-      }
-
-      return;
-    }
-
-    const finishedAt = new Date();
-    await deriveProcessorDependencies.markScanTaskSucceeded({
-      scanTaskId,
-      scanTaskAttemptId,
-      finishedAt,
-    });
-
-    // 递增 Redis 进度：任务数 + 已处理图片数
-    const attemptTotalImages =
-      await deriveProcessorDependencies.getAttemptTotalImages(scanTaskAttemptId);
-    await incrementScanProcessedImages(scanJobId, attemptTotalImages);
-    const resourceType =
-      result.resourceType ??
-      (await deriveProcessorDependencies.getScanTaskResourceType(scanTaskId));
-    if (resourceType) {
-      await addScanResourceProcessedImages(scanJobId, resourceType, attemptTotalImages);
-    }
-
-    await deriveProcessorDependencies.reconcileScanJobLifecycle({ scanJobId, shopId });
-
-    jobLogger.info(
-      {
-        shopId,
-        scanJobId,
-        scanTaskId,
-        scanTaskAttemptId,
-        resourceType: result.resourceType,
-        targetCount: result.targetCount,
-        usageCount: result.usageCount,
-        warningCount: result.warnings.length,
-      },
-      "derive-scan.success",
-    );
-  } catch (error) {
-    const finishedAt = new Date();
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
-
-    await deriveProcessorDependencies.markScanTaskFailed({
-      scanTaskId,
-      errorMessage: `[DERIVE_FAILED] ${errorMessage}`,
-      finishedAt,
-    });
-
-    // 递增 Redis 进度（即使是失败的 task 也算"处理完毕"）
-    const failedAttemptImages =
-      await deriveProcessorDependencies.getAttemptTotalImages(scanTaskAttemptId);
-    await incrementScanProcessedImages(scanJobId, 0, failedAttemptImages);
-    const failedResourceType =
-      await deriveProcessorDependencies.getScanTaskResourceType(scanTaskId);
-    if (failedResourceType) {
-      await addScanResourceProcessedImages(scanJobId, failedResourceType, 0, failedAttemptImages);
-    }
-
-    await deriveProcessorDependencies.reconcileScanJobLifecycle({ scanJobId, shopId });
-
-    throw error;
-  }
+  await processDeriveScanTask(data);
 }

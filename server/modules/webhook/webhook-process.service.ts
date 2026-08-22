@@ -6,9 +6,10 @@
 import prisma from "../../db/prisma.server";
 import { createLogger } from "../../utils/logger";
 import type { WebhookEvent } from "@prisma/client";
-import { handleBulkOperationsFinishWebhook } from "../scan/catalog/bulk-finish.service";
-import { syncSubscriptionFromShopify } from "../billing/subscription.service";
-import { handleProductDeletedWebhook } from "../scan/continuous/product-delete.service";
+import {
+  getWebhookTopicHandler,
+  normalizeWebhookTopic,
+} from "./webhook-topic-registry";
 
 const logger = createLogger({ module: "webhook-process" });
 
@@ -92,11 +93,18 @@ export async function processWebhookEvent(webhookEventId: string): Promise<void>
 }
 
 /**
- * 根据 topic 分发到对应业务处理器。
- * TODO: 接入各业务模块（scan-continuous / gdpr / scope-update 等）
+ * 根据 topic 从注册表分发到对应业务处理器。
+ * 业务模块不在此处 import，由 worker 启动时调用 registerWebhookTopicHandlers 绑定。
+ * 后续按 topic 路由到具体业务:
+ * - PRODUCTS_CREATE / PRODUCTS_UPDATE → continuous scan
+ * - COLLECTIONS_CREATE / COLLECTIONS_UPDATE → continuous scan
+ * - COLLECTIONS_DELETE → 集合删除收敛（暂未接入）
+ * - APP_SCOPES_UPDATE → scope sync
+ * - APP_UNINSTALLED → gdpr / cleanup
+ * - CUSTOMERS_DATA_REQUEST / CUSTOMERS_REDACT / SHOP_REDACT → gdpr
  */
 async function dispatchByTopic(event: WebhookEvent, log: typeof logger): Promise<void> {
-  const normalizedTopic = event.topic.toUpperCase().replace(/\//g, "_");
+  const normalizedTopic = normalizeWebhookTopic(event.topic);
 
   log.info(
     {
@@ -107,38 +115,18 @@ async function dispatchByTopic(event: WebhookEvent, log: typeof logger): Promise
     "webhook.process.dispatch",
   );
 
-  if (normalizedTopic === "BULK_OPERATIONS_FINISH") {
-    await handleBulkOperationsFinishWebhook({
-      shopDomain: event.shopDomain,
-      payload: event.payload,
-    });
-    return;
-  }
+  const handler = getWebhookTopicHandler(normalizedTopic);
 
-  // APP_SUBSCRIPTIONS_UPDATE: 订阅状态变化 → 调用统一订阅同步服务
-  if (normalizedTopic === "APP_SUBSCRIPTIONS_UPDATE") {
-    log.info(
-      { webhookEventId: event.id, shopDomain: event.shopDomain },
-      "webhook.process.billing-sync",
+  if (!handler) {
+    log.warn(
+      { webhookEventId: event.id, topic: event.topic },
+      "webhook.process.no-handler",
     );
-    await syncSubscriptionFromShopify(event.shopDomain);
     return;
   }
 
-  // PRODUCTS_DELETE: 商品删除 → 已发布层空收敛 (usages / targets / candidates → NOT_FOUND)
-  if (normalizedTopic === "PRODUCTS_DELETE") {
-    await handleProductDeletedWebhook({
-      shopDomain: event.shopDomain,
-      payload: event.payload,
-    });
-    return;
-  }
-
-  // 后续按 topic 路由到具体业务:
-  // - PRODUCTS_CREATE / PRODUCTS_UPDATE → continuous scan
-  // - COLLECTIONS_CREATE / COLLECTIONS_UPDATE → continuous scan
-  // - COLLECTIONS_DELETE → 集合删除收敛（暂未接入）
-  // - APP_SCOPES_UPDATE → scope sync
-  // - APP_UNINSTALLED → gdpr / cleanup
-  // - CUSTOMERS_DATA_REQUEST / CUSTOMERS_REDACT / SHOP_REDACT → gdpr
+  await handler({
+    shopDomain: event.shopDomain,
+    payload: event.payload,
+  });
 }

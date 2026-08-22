@@ -3,11 +3,12 @@
  * Purpose: 启动 BullMQ worker，注册 webhook、扫描、生成、写回、计费与清理等队列处理器。
  */
 import { Worker } from "bullmq";
-import { processWebhookEvent } from "../app/lib/server/webhooks/webhook-process.service.js";
+import { processWebhookEvent } from "../server/modules/webhook/webhook-process.service.js";
+import { registerWebhookTopicHandlers } from "./register-webhook-handlers.js";
 import { BILLING_SYNC_QUEUE_NAME, CLEANUP_QUEUE_NAME, DERIVE_SCAN_QUEUE_NAME, GDPR_DELETE_QUEUE_NAME, GENERATE_ALT_QUEUE_NAME, LOCK_REAPER_QUEUE_NAME, PARSE_BULK_QUEUE_NAME, PUBLISH_SCAN_QUEUE_NAME, QUOTA_GRANT_QUEUE_NAME, RESERVATION_REAPER_QUEUE_NAME, SCAN_START_QUEUE_NAME, WEBHOOK_QUEUE_NAME, WRITEBACK_QUEUE_NAME, CONTINUOUS_SCAN_QUEUE_NAME, } from "../server/config/queue-names.js";
 import { createRedisConnection, getRedisConnectionSummary, } from "../server/queues/connection.js";
 import { createLogger } from "../server/utils/logger.js";
-import { processScanStartJob } from "../server/modules/scan/catalog/scan-start.service.js";
+import { processScanStartJob } from "./processors/scan-start.processor.js";
 import { processParseBulkJob } from "./processors/parse-bulk.processor.js";
 import { processDeriveScanJob } from "./processors/derive-scan.processor.js";
 import { processPublishScanJob } from "./processors/publish-scan.processor.js";
@@ -34,6 +35,8 @@ import { DEFAULT_DISCOVERY_PROGRESS_INTERVAL_MS, runDiscoveryProgressPollOnce, }
 import { withJobLogger } from "./utils/job-logger.js";
 import { writeScanLog } from "./utils/scan-run-logger.js";
 const logger = createLogger({ module: "worker-runtime" });
+// 注册各业务模块的 webhook topic 处理器（webhook 模块依赖反转的绑定点）
+registerWebhookTopicHandlers();
 const webhookConnection = createRedisConnection();
 const scanStartConnection = createRedisConnection();
 const parseBulkConnection = createRedisConnection();

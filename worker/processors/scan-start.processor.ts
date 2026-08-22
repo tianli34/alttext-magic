@@ -1,39 +1,9 @@
 /**
  * File: worker/processors/scan-start.processor.ts
- * Purpose: scan_start Job 处理器: 提交批量查询并更新进度阶段。
+ * Purpose: scan_start Job 处理器（薄壳）— 提交批量查询与进度更新全部由 service 编排。
  */
-import { trySubmitNextBatch } from "../../server/modules/scan/catalog/scan-start.service";
-import { updateScanProgressPhase } from "../../server/sse/progress-publisher";
-import { SCAN_PHASE } from "../../server/modules/scan/scan.constants";
-
-interface ScanStartProcessorDependencies {
-  trySubmitNextBatch: typeof trySubmitNextBatch;
-}
-
-const defaultDependencies: ScanStartProcessorDependencies = {
-  trySubmitNextBatch,
-};
-
-const scanStartProcessorDependencies: ScanStartProcessorDependencies = {
-  ...defaultDependencies,
-};
-
-export function setScanStartProcessorDependenciesForTests(
-  overrides: Partial<ScanStartProcessorDependencies>,
-): void {
-  Object.assign(scanStartProcessorDependencies, overrides);
-}
-
-export function resetScanStartProcessorDependenciesForTests(): void {
-  Object.assign(scanStartProcessorDependencies, defaultDependencies);
-}
+import { submitNextBatchAndNotify } from "../../server/modules/scan/catalog/scan-start.service";
 
 export async function processScanStartJob(scanJobId: string): Promise<void> {
-  await scanStartProcessorDependencies.trySubmitNextBatch(scanJobId);
-  // 批量查询已提交，更新进度阶段
-  await updateScanProgressPhase(
-    scanJobId,
-    SCAN_PHASE.BULK_SUBMITTED,
-    "批量查询已提交，等待 Shopify 返回数据…",
-  );
+  await submitNextBatchAndNotify(scanJobId);
 }
