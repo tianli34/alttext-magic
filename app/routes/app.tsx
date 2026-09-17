@@ -37,7 +37,6 @@ export default function App() {
       <s-app-nav>
         <s-link href={buildAppPath("/app", location.search)}>Dashboard</s-link>
         <s-link href={buildAppPath("/app/candidates", location.search)}>Candidates</s-link>
-        <s-link href={buildAppPath("/app/review", location.search)}>Review</s-link>
         <s-link href={buildAppPath("/app/history", location.search)}>History</s-link>
         {shopId === "fd6e7082-a067-4cc3-9d76-a081c0a3afb9" && (
           <s-link href={buildAppPath("/app/ai-stats", location.search)}>AI 调用统计</s-link>

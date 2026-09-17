@@ -29,6 +29,10 @@ export interface GenerationProgressData {
   failed: number;
   /** 批次状态 */
   status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
+  /** 自动触发的写回批次 ID（尚未触发/无需写回时为 null） */
+  writebackBatchId?: string | null;
+  /** 自动写回未能启动时的错误码（成功时为 null） */
+  writebackError?: string | null;
 }
 
 class SSEUnauthorizedError extends Error {

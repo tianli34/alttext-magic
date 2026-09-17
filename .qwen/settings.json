@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm *)",
+      "Bash(type *)",
+      "Bash(findstr *)",
+      "Bash(curl *)",
+      "Bash(qwen *)",
+      "Read(C:\\Users\\LiSama!\\AppData\\Roaming\\npm\\node_modules\\@qwen-code\\qwen-code/**)",
+      "Bash(dir *)",
+      "Read(C:\\Users\\LiSama!\\AppData\\Roaming\\npm\\node_modules\\@qwen-code\\qwen-code\\chunks/**)",
+      "Read(C:\\Users\\LiSama!\\AppData\\Roaming\\npm\\node_modules\\@qwen-code\\qwen-code\\cli.js/**)",
+      "Read(C:\\Users\\LiSama!\\AppData\\Roaming\\npm\\node_modules\\@qwen-code\\qwen-code\\bundled/**)",
+      "Read(C:\\Users\\LiSama!\\AppData\\Roaming\\npm\\node_modules\\@qwen-code\\qwen-code\\chunks\\chunk-BIRWP6LU.js/**)",
+      "Bash(node *)"
+    ]
+  },
+  "$version": 4
+}

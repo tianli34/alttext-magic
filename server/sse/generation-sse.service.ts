@@ -141,6 +141,8 @@ export function startGenerationSSEStream(
           skipped: snapshot.skippedTasks,
           failed: snapshot.failedTasks,
           status: snapshot.status as GenerationProgressEvent["status"],
+          writebackBatchId: snapshot.writebackBatchId,
+          writebackError: snapshot.writebackError,
         };
         await sendEvent("generation_progress", initialEvent);
 
@@ -154,6 +156,8 @@ export function startGenerationSSEStream(
             skipped: snapshot.skippedTasks,
             failed: snapshot.failedTasks,
             status: snapshot.status as GenerationProgressEvent["status"],
+            writebackBatchId: snapshot.writebackBatchId,
+            writebackError: snapshot.writebackError,
           };
           await sendEvent("generation_completed", completedEvent);
           await sendClose();

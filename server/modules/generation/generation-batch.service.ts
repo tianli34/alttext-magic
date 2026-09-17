@@ -7,6 +7,12 @@ import prisma from "../../db/prisma.server";
 import { releaseGenerateLock } from "../lock/generate-lock.service";
 import { createLogger } from "../../utils/logger";
 import { GenerationCreditService } from "./generation-credit.service";
+import { queueConnection } from "../../queues/connection";
+import { getGenerationProgressKey } from "../../sse/progress-publisher";
+import {
+  startWriteback,
+  WritebackStartError,
+} from "../writeback/writeback.service";
 
 const logger = createLogger({ module: "generation-batch-service" });
 
@@ -107,7 +113,10 @@ function resolveFinalStatus(batch: {
     : GenerationBatchStatus.COMPLETED;
 }
 
-async function runCompletionSideEffects(batch: BatchFinalizeCandidate): Promise<void> {
+async function runCompletionSideEffects(
+  batch: BatchFinalizeCandidate,
+  options?: { autoWriteback?: boolean },
+): Promise<void> {
   if (batch.status === GenerationBatchStatus.IN_PROGRESS) return;
 
   let unusedReleasedAmount = 0;
@@ -140,6 +149,77 @@ async function runCompletionSideEffects(batch: BatchFinalizeCandidate): Promise<
     },
     "generation-batch.finalized",
   );
+
+  // 审阅环节已砍掉：生成收尾后自动触发写回，无需人工确认。
+  // 超时兜底路径不自动写回（批次已 stale，由运维关注）。
+  if (options?.autoWriteback === false) return;
+
+  try {
+    await triggerAutoWriteback(batch);
+  } catch (error) {
+    // 自动写回失败不影响生成批次本身的终态，仅记录日志。
+    logger.error(
+      { shopId: batch.shopId, batchId: batch.batchId, err: error },
+      "generation-batch.auto-writeback.failed",
+    );
+  }
+}
+
+/**
+ * 生成完成后自动触发写回，并将写回批次 ID 回写到生成进度 Redis hash，
+ * 供前端 SSE 快照透传展示写回进度/结果。
+ */
+async function triggerAutoWriteback(batch: BatchFinalizeCandidate): Promise<string | null> {
+  const progressKey = getGenerationProgressKey(batch.batchId);
+
+  const drafts = await prisma.altDraft.findMany({
+    where: { batchId: batch.batchId },
+    select: { altCandidateId: true },
+  });
+
+  if (drafts.length === 0) {
+    await queueConnection.hset(progressKey, {
+      writebackBatchId: "",
+      writebackError: "",
+    });
+    logger.info(
+      { shopId: batch.shopId, batchId: batch.batchId },
+      "generation-batch.auto-writeback.skipped-empty",
+    );
+    return null;
+  }
+
+  const candidateIds = drafts.map((draft) => draft.altCandidateId);
+
+  try {
+    const result = await startWriteback(batch.shopId, candidateIds);
+    await queueConnection.hset(progressKey, {
+      writebackBatchId: result.batchId,
+      writebackError: "",
+    });
+    logger.info(
+      {
+        shopId: batch.shopId,
+        batchId: batch.batchId,
+        writebackBatchId: result.batchId,
+        totalQueued: result.totalQueued,
+        rejectedCount: result.rejected.length,
+      },
+      "generation-batch.auto-writeback.started",
+    );
+    return result.batchId;
+  } catch (error) {
+    const code = error instanceof WritebackStartError ? error.code : "UNKNOWN";
+    await queueConnection.hset(progressKey, {
+      writebackBatchId: "",
+      writebackError: code,
+    });
+    logger.warn(
+      { shopId: batch.shopId, batchId: batch.batchId, code, err: error },
+      "generation-batch.auto-writeback.rejected",
+    );
+    return null;
+  }
 }
 
 export async function createBatch(
@@ -313,7 +393,7 @@ export async function finalizeTimedOutBatches(
       completedCount: batch.completedCount,
       skippedCount: batch.skippedCount,
       failedCount: batch.failedCount,
-    });
+    }, { autoWriteback: false });
   }
 
   return batches.length;

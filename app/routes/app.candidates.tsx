@@ -28,7 +28,7 @@ type CandidateStatus =
   | "RESOLVED"
   | "NOT_FOUND"
   | "SKIPPED_ALREADY_FILLED";
-type StatusFilter = "" | "PENDING" | "GENERATED" | "HAS_ALT" | "DECORATIVE_SKIPPED";
+type StatusFilter = "" | "PENDING" | "HAS_ALT" | "DECORATIVE_SKIPPED";
 type ContextMode = "SHARED" | "SINGLE" | string;
 
 interface DashboardGroup {
@@ -106,7 +106,6 @@ const GROUP_LABELS: Record<GroupType, string> = {
 const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "", label: "All" },
   { value: "PENDING", label: "Pending" },
-  { value: "GENERATED", label: "Generated" },
   { value: "HAS_ALT", label: "Has Alt" },
   { value: "DECORATIVE_SKIPPED", label: "Decorative" },
 ];
@@ -135,9 +134,11 @@ const SELECTABLE_STATUSES: ReadonlySet<CandidateStatus> = new Set([
 function normalizeStatusFilter(value: string | null): StatusFilter {
   if (value === "ALL") return "";
 
+  // 独立审阅页已砍掉：GENERATED 为瞬态中间态，不再作为筛选条件，历史参数回落为全部。
+  if (value === "GENERATED") return "";
+
   if (
     value === "PENDING" ||
-    value === "GENERATED" ||
     value === "HAS_ALT" ||
     value === "DECORATIVE_SKIPPED"
   ) {
@@ -245,8 +246,8 @@ export default function AppCandidatesPage() {
     [items],
   );
 
-  // 是否正在生成中（禁用选择交互）
-  const isGenerating = flow.phase === "STARTING" || flow.phase === "GENERATING";
+  // 是否正在生成/写回中（禁用选择交互）
+  const isGenerating = flow.phase === "STARTING" || flow.phase === "GENERATING" || flow.phase === "WRITEBACK";
 
   const toggleSelect = useCallback(
     (id: string) => {
@@ -357,12 +358,11 @@ export default function AppCandidatesPage() {
     const activeGroups = selectedGroup
       ? groups.filter((g) => g.groupType === selectedGroup)
       : groups;
-    const sum = (...keys: Array<"total" | "hasAlt" | "altGap" | "decorative" | "pending" | "generated">) =>
+    const sum = (...keys: Array<"total" | "hasAlt" | "altGap" | "decorative" | "pending">) =>
       keys.reduce((s, key) => s + activeGroups.reduce((sg, g) => sg + g[key], 0), 0);
     return {
       all: sum("total"),
       pending: sum("pending"),
-      generated: sum("generated"),
       hasAlt: sum("hasAlt"),
       decorative: sum("decorative"),
     };
@@ -508,18 +508,11 @@ export default function AppCandidatesPage() {
   }, [selectedCount, selectedIds, flow]);
 
   /* ---- 生成完成后刷新列表及分组计数 ---- */
+  // 独立审阅页已砍掉：汇总已包含自动写回结果，关闭后统一刷新列表及分组计数。
   const handleCloseSummary = useCallback(() => {
-    const summary = flow.summary;
     flow.closeSummary();
     clearSelection();
 
-    // 100% 成功（无失败）→ 跳转到 Generated 分类
-    if (summary && summary.failed === 0) {
-      updateFilter({ status: "GENERATED" });
-      return;
-    }
-
-    // 否则（存在失败）→ 仅关闭汇总并重新加载以反映最新状态
     // 重新加载候选列表 + 分组计数以反映最新状态
     const controller = new AbortController();
 
@@ -546,7 +539,7 @@ export default function AppCandidatesPage() {
     }
 
     void reload();
-  }, [flow, clearSelection, selectedGroup, selectedStatus, updateFilter]);
+  }, [flow, clearSelection, selectedGroup, selectedStatus]);
 
   // 判断是否所有可选项都已选中
   const allSelectableSelected = selectableItems.length > 0 &&
@@ -583,7 +576,7 @@ export default function AppCandidatesPage() {
                   const countKey = option.value === "" ? "all"
                     : option.value === "DECORATIVE_SKIPPED" ? "decorative"
                     : option.value === "HAS_ALT" ? "hasAlt"
-                    : option.value.toLowerCase() as "all" | "pending" | "generated" | "hasAlt" | "decorative";
+                    : option.value.toLowerCase() as "all" | "pending" | "hasAlt" | "decorative";
                   const count = filterCounts[countKey];
                   return (
                     <button
@@ -875,6 +868,10 @@ export default function AppCandidatesPage() {
       preflightLoading={flow.preflightLoading}
       connected={flow.connected}
       percent={flow.percent}
+      writebackProgress={flow.writebackProgress}
+      writebackConnected={flow.writebackConnected}
+      writebackPercent={flow.writebackPercent}
+      writebackError={flow.writebackError}
       onConfirmAndStart={flow.confirmAndStart}
       onCancel={flow.cancel}
       onCloseSummary={handleCloseSummary}

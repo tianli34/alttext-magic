@@ -1,7 +1,7 @@
 /**
  * File: app/components/generation/GenerationFlow.tsx
  * Purpose: 生成触发交互流程组件。
- *          包含预检确认 Modal、进度展示 Modal、完成汇总 Modal。
+ *          包含预检确认 Modal、生成进度展示 Modal、自动写回进度展示 Modal、完成汇总 Modal。
  *          由外部传入 useGenerationFlow 返回值驱动渲染。
  */
 import { useLocation, useNavigate } from "react-router";
@@ -13,6 +13,7 @@ import type {
   GenerationSummary,
 } from "../../hooks/useGenerationFlow";
 import type { GenerationProgressData } from "../../hooks/useGenerationSSE";
+import type { WritebackProgressData } from "../../hooks/useWritebackSSE";
 
 // ============================================================================
 // 类型定义
@@ -37,6 +38,14 @@ interface GenerationFlowProps {
   connected: boolean;
   /** 进度百分比 0-100 */
   percent: number;
+  /** 写回 SSE 实时进度数据 */
+  writebackProgress: WritebackProgressData | null;
+  /** 写回 SSE 是否已连接 */
+  writebackConnected: boolean;
+  /** 写回进度百分比 0-100 */
+  writebackPercent: number;
+  /** 写回 SSE 连接错误 */
+  writebackError: string | null;
   /** 确认并启动生成 */
   onConfirmAndStart: () => void;
   /** 取消 */
@@ -59,6 +68,10 @@ export function GenerationFlow({
   preflightLoading,
   connected,
   percent,
+  writebackProgress,
+  writebackConnected,
+  writebackPercent,
+  writebackError,
   onConfirmAndStart,
   onCancel,
   onCloseSummary,
@@ -101,6 +114,17 @@ export function GenerationFlow({
         connected={connected}
         percent={percent}
         error={error}
+      />
+    );
+  }
+
+  if (phase === "WRITEBACK") {
+    return (
+      <WritebackProgressView
+        progress={writebackProgress}
+        connected={writebackConnected}
+        percent={writebackPercent}
+        error={writebackError}
       />
     );
   }
@@ -322,6 +346,92 @@ function ProgressModal({
 }
 
 // ============================================================================
+// 自动写回进度展示
+// ============================================================================
+
+interface WritebackProgressViewProps {
+  progress: WritebackProgressData | null;
+  connected: boolean;
+  percent: number;
+  error: string | null;
+}
+
+function WritebackProgressView({
+  progress,
+  connected,
+  percent,
+  error,
+}: WritebackProgressViewProps) {
+  const total = progress?.total ?? 0;
+  const done = (progress?.success ?? 0) + (progress?.fail ?? 0) + (progress?.skip ?? 0);
+
+  return (
+    <div className={styles.overlay}>
+      <div className={styles.modal}>
+        <s-stack direction="block" gap="base">
+          <s-heading>正在自动写回 Alt Text…</s-heading>
+
+          {/* 进度条 */}
+          <div className={styles.progressContainer}>
+            <div className={styles.progressBarTrack}>
+              <div
+                className={`${styles.progressBarFill} ${
+                  percent >= 100 ? styles.progressBarFillComplete : ""
+                }`}
+                style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
+              />
+            </div>
+            <div className={styles.progressCount}>
+              <s-text tone="neutral">
+                {connected ? "已连接" : "连接中…"}
+              </s-text>
+              <s-text>
+                {done} / {total} 已完成
+              </s-text>
+            </div>
+          </div>
+
+          {/* 成功计数 */}
+          {progress && progress.success > 0 && (
+            <s-text tone="success">
+              {progress.success} 张图片写回成功
+            </s-text>
+          )}
+
+          {/* 失败计数 */}
+          {progress && progress.fail > 0 && (
+            <s-text tone="critical">
+              {progress.fail} 张图片写回失败
+            </s-text>
+          )}
+
+          {/* 跳过计数 */}
+          {progress && progress.skip > 0 && (
+            <s-text tone="caution">
+              {progress.skip} 张图片已跳过（已有 Alt Text）
+            </s-text>
+          )}
+
+          {/* 错误信息 */}
+          {error && (
+            <s-box padding="base" borderRadius="base" background="strong">
+              <s-text tone="critical">{error}</s-text>
+            </s-box>
+          )}
+
+          {/* 处理中提示 */}
+          {!error && percent < 100 && (
+            <s-text tone="neutral">
+              正在将生成的 Alt Text 写回 Shopify，请勿关闭此页面。
+            </s-text>
+          )}
+        </s-stack>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // 完成汇总 Modal
 // ============================================================================
 
@@ -332,18 +442,27 @@ interface SummaryModalProps {
 }
 
 function SummaryModal({ summary, totalCount, onClose }: SummaryModalProps) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const succeeded = summary?.succeeded ?? 0;
   const skipped = summary?.skipped ?? 0;
   const failed = summary?.failed ?? 0;
+  const writeback = summary?.writeback ?? null;
+  const writebackError = summary?.writebackError ?? null;
   const allSuccess = failed === 0 && skipped === 0;
+
+  const handleViewHistory = () => {
+    navigate(buildAppPath("/app/history", location.search));
+  };
 
   return (
     <div className={styles.overlay}>
       <div className={styles.modal}>
         <s-stack direction="block" gap="base">
-          <s-heading>{allSuccess ? "生成完成！" : "生成已结束"}</s-heading>
+          <s-heading>{allSuccess && !writebackError && (writeback === null || writeback.fail === 0) ? "生成完成！" : "生成已结束"}</s-heading>
 
-          {/* 汇总统计卡片 */}
+          {/* 生成汇总统计卡片 */}
+          <s-text tone="neutral">生成结果</s-text>
           <div className={styles.summaryStats}>
             <div className={`${styles.statCard} ${styles.statCardSuccess}`}>
               <span className={`${styles.statNumber} ${styles.statNumberSuccess}`}>
@@ -365,10 +484,50 @@ function SummaryModal({ summary, totalCount, onClose }: SummaryModalProps) {
             </div>
           </div>
 
+          {/* 自动写回结果 */}
+          {writeback ? (
+            <>
+              <s-text tone="neutral">自动写回结果</s-text>
+              <div className={styles.summaryStats}>
+                <div className={`${styles.statCard} ${styles.statCardSuccess}`}>
+                  <span className={`${styles.statNumber} ${styles.statNumberSuccess}`}>
+                    {writeback.success}
+                  </span>
+                  <span className={styles.statLabel}>写回成功</span>
+                </div>
+                <div className={`${styles.statCard} ${styles.statCardCaution}`}>
+                  <span className={`${styles.statNumber} ${styles.statNumberCaution}`}>
+                    {writeback.skip}
+                  </span>
+                  <span className={styles.statLabel}>跳过（已有 Alt）</span>
+                </div>
+                <div className={`${styles.statCard} ${styles.statCardCritical}`}>
+                  <span className={`${styles.statNumber} ${styles.statNumberCritical}`}>
+                    {writeback.fail}
+                  </span>
+                  <span className={styles.statLabel}>写回失败</span>
+                </div>
+              </div>
+            </>
+          ) : writebackError ? (
+            <s-text tone="critical">
+              自动写回未能启动（{writebackError}），已生成的草稿保留，稍后可重新生成或查看历史。
+            </s-text>
+          ) : (
+            <s-text tone="neutral">
+              本次无成功生成项，无需写回。
+            </s-text>
+          )}
+
           {/* 失败提示 */}
           {failed > 0 && (
             <s-text tone="neutral">
-              失败的图片可返回候选列表重新选择生成。
+              生成失败的图片可返回候选列表重新选择生成。
+            </s-text>
+          )}
+          {writeback && writeback.fail > 0 && (
+            <s-text tone="neutral">
+              写回失败明细请前往写回历史查看。
             </s-text>
           )}
 
@@ -378,8 +537,16 @@ function SummaryModal({ summary, totalCount, onClose }: SummaryModalProps) {
               onClick={onClose}
               style={{ display: "inline-block", cursor: "pointer" }}
             >
-              <s-button variant="primary" accessibilityLabel="返回候选列表">
+              <s-button variant="secondary" accessibilityLabel="返回候选列表">
                 返回候选列表
+              </s-button>
+            </div>
+            <div
+              onClick={handleViewHistory}
+              style={{ display: "inline-block", cursor: "pointer" }}
+            >
+              <s-button variant="primary" accessibilityLabel="查看写回历史">
+                查看写回历史
               </s-button>
             </div>
           </div>

@@ -41,6 +41,10 @@ export interface GenerationProgressEvent {
   failed: number;
   /** 批次状态 */
   status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
+  /** 自动触发的写回批次 ID（尚未触发/无需写回时为 null） */
+  writebackBatchId?: string | null;
+  /** 自动写回未能启动时的错误码（成功时为 null） */
+  writebackError?: string | null;
 }
 
 /**
@@ -550,6 +554,8 @@ export async function readGenerationProgress(batchId: string): Promise<{
   status: string;
   phase: string;
   message: string;
+  writebackBatchId: string | null;
+  writebackError: string | null;
 } | null> {
   const key = getGenerationProgressKey(batchId);
   const data = await queueConnection.hgetall(key);
@@ -566,7 +572,35 @@ export async function readGenerationProgress(batchId: string): Promise<{
     status: data.status ?? "UNKNOWN",
     phase: data.phase ?? "generating",
     message: data.message ?? "",
+    writebackBatchId: data.writebackBatchId ? String(data.writebackBatchId) : null,
+    writebackError: data.writebackError ? String(data.writebackError) : null,
   };
+}
+
+/**
+ * 读取生成进度 hash 中的自动写回关联字段。
+ * 空字符串视为未关联（尚未触发或无需写回）。
+ */
+async function readAutoWritebackLink(batchId: string): Promise<{
+  writebackBatchId: string | null;
+  writebackError: string | null;
+}> {
+  try {
+    const fields = await queueConnection.hmget(
+      getGenerationProgressKey(batchId),
+      "writebackBatchId",
+      "writebackError",
+    );
+    const rawBatchId = fields[0] ? String(fields[0]) : "";
+    const rawError = fields[1] ? String(fields[1]) : "";
+    return {
+      writebackBatchId: rawBatchId.length > 0 ? rawBatchId : null,
+      writebackError: rawError.length > 0 ? rawError : null,
+    };
+  } catch (error) {
+    logger.warn({ batchId, err: error }, "generation auto-writeback link read failed");
+    return { writebackBatchId: null, writebackError: null };
+  }
 }
 
 /**
@@ -618,7 +652,10 @@ export async function publishGenerationProgress(batchId: string): Promise<void> 
   );
 
   // 2. 通过 Pub/Sub 推送实时进度事件
+  // 自动写回批次 ID 存放在同一 Redis hash 的独立字段中（hset 合并写入，不会被上面的计数覆盖），
+  // 此处读出后随事件透传给前端，用于生成完成后无缝转入写回进度展示。
   const channel = getGenerationProgressChannel(batchId);
+  const autoWriteback = await readAutoWritebackLink(batchId);
 
   const progressEvent: GenerationProgressEvent = {
     type: "generation_progress",
@@ -628,6 +665,8 @@ export async function publishGenerationProgress(batchId: string): Promise<void> 
     skipped: batch.skippedCount,
     failed: batch.failedCount,
     status: batch.status as GenerationProgressEvent["status"],
+    writebackBatchId: autoWriteback.writebackBatchId,
+    writebackError: autoWriteback.writebackError,
   };
   await queueConnection.publish(channel, JSON.stringify(progressEvent));
 
@@ -641,6 +680,8 @@ export async function publishGenerationProgress(batchId: string): Promise<void> 
       skipped: batch.skippedCount,
       failed: batch.failedCount,
       status: batch.status as GenerationProgressEvent["status"],
+      writebackBatchId: autoWriteback.writebackBatchId,
+      writebackError: autoWriteback.writebackError,
     };
     await queueConnection.publish(channel, JSON.stringify(completedEvent));
   }
