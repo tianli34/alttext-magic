@@ -95,12 +95,12 @@ function itemKey(batchId: string, candidateId: string): string {
   return `${batchId}:${candidateId}`;
 }
 
-function makeJob(candidateId: string): WritebackJobData {
+function makeJob(candidateId: string, batchId = "batch-1", lockId = "lock-1"): WritebackJobData {
   return {
     shopId: "shop-1",
     candidateId,
-    batchId: "batch-1",
-    lockId: "lock-1",
+    batchId,
+    lockId,
     altPlane: AltPlane.FILE_ALT,
     shopifyGid: `gid://shopify/MediaImage/${candidateId}`,
     altText: `queued ${candidateId}`,
@@ -387,6 +387,82 @@ async function run(): Promise<void> {
   assert.equal(batch?.failed, 1);
   assert.equal(batch?.status, JobBatchStatus.PARTIAL_SUCCESS);
   assert.deepEqual(state.releasedLocks, ["shop-1:lock-1"]);
+
+  // ── 并发冲突场景：Shopify 写回成功后、落库前候选被并发方接管 ──
+  //（如用户在此期间标记装饰性图片），落库不得覆盖并发方的状态。
+  const conflictState = makeState();
+  conflictState.targets.set("target-c4", {
+    id: "target-c4",
+    shopId: "shop-1",
+    altPlane: AltPlane.FILE_ALT,
+    writeTargetId: "gid://shopify/MediaImage/c4",
+    currentAltText: null,
+    currentAltEmpty: true,
+  });
+  conflictState.candidates.set("c4", {
+    id: "c4",
+    shopId: "shop-1",
+    altTargetId: "target-c4",
+    status: AltCandidateStatus.GENERATED,
+    writtenAt: null,
+    errorCode: null,
+    errorMessage: null,
+  });
+  conflictState.drafts.set("c4", {
+    id: "draft-c4",
+    shopId: "shop-1",
+    altCandidateId: "c4",
+    modelUsed: "test-model",
+    generatedText: "generated c4",
+    editedText: null,
+    finalText: null,
+  });
+  conflictState.items.set(itemKey("batch-2", "c4"), {
+    id: "item-c4",
+    batchId: "batch-2",
+    altCandidateId: "c4",
+    status: JobItemStatus.PENDING,
+    error: null,
+  });
+  conflictState.batches.set("batch-2", {
+    id: "batch-2",
+    shopId: "shop-1",
+    total: 1,
+    success: 0,
+    failed: 0,
+    skipped: 0,
+    status: JobBatchStatus.RUNNING,
+    finishedAt: null,
+  });
+  const conflictDependencies = createDependencies(conflictState);
+  const flippingExecutor: MutationExecutor = {
+    execute: async () => {
+      conflictState.candidates.get("c4")!.status = AltCandidateStatus.DECORATIVE_SKIPPED;
+      return { success: true };
+    },
+  };
+  await processWritebackJob(makeJob("c4", "batch-2", "lock-2"), {
+    ...conflictDependencies,
+    getExecutor: () => flippingExecutor,
+  });
+
+  assert.equal(
+    conflictState.candidates.get("c4")?.status,
+    AltCandidateStatus.DECORATIVE_SKIPPED,
+  );
+  assert.equal(conflictState.drafts.get("c4")?.finalText, null);
+  assert.equal(conflictState.targets.get("target-c4")?.currentAltText, null);
+  assert.equal(
+    conflictState.items.get(itemKey("batch-2", "c4"))?.status,
+    JobItemStatus.FAILED,
+  );
+  assert.ok(
+    conflictState.items.get(itemKey("batch-2", "c4"))?.error?.includes("CANDIDATE_STATUS_CHANGED"),
+  );
+  assert.equal(conflictState.batches.get("batch-2")?.failed, 1);
+  assert.equal(conflictState.batches.get("batch-2")?.status, JobBatchStatus.FAILED);
+  assert.equal(conflictState.auditLogs.length, 0);
+  assert.deepEqual(conflictState.releasedLocks, ["shop-1:lock-2"]);
 
   console.log("✅ writeback.processor 测试全部通过");
 }

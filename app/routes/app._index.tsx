@@ -13,6 +13,8 @@ import { getBootstrapData } from "../../server/modules/bootstrap/bootstrap.servi
 import { ImageStatusPie, type ImageGroupStats } from "../components/dashboard/ImageStatusPie";
 import { QuotaSummary } from "../components/dashboard/QuotaSummary";
 import { ScanProgressFloat } from "../components/dashboard/ScanProgressFloat";
+import { GenerationFlow } from "../components/generation/GenerationFlow";
+import { useGenerationFlow } from "../hooks/useGenerationFlow";
 import { formatRelativeTime } from "../lib/format";
 import { useTimezone } from "../lib/timezone";
 import { DEFAULT_SCOPE_FLAG_STATE } from "../lib/scope-utils";
@@ -133,6 +135,9 @@ function DashboardContent() {
   /** 重新扫描状态 */
   const [rescanning, setRescanning] = useState(false);
   const [rescanError, setRescanError] = useState<string | null>(null);
+  const [quickProcessing, setQuickProcessing] = useState(false);
+  const [quickProcessError, setQuickProcessError] = useState<string | null>(null);
+  const flow = useGenerationFlow();
 
   /** 当前浮窗展示的扫描任务 ID（null 时不显示浮窗） */
   const [floatScanJobId, setFloatScanJobId] = useState<string | null>(null);
@@ -262,6 +267,39 @@ function DashboardContent() {
       setRescanning(false);
     }
   }, [dashboardData]);
+
+  const handleQuickProcess = useCallback(async () => {
+    setQuickProcessing(true);
+    setQuickProcessError(null);
+    try {
+      const response = await fetch("/api/dashboard/process", { method: "POST" });
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? `请求失败 (${response.status})`);
+      }
+      const result = (await response.json()) as {
+        generationCandidateIds: string[];
+        writebackCandidateIds: string[];
+      };
+      if (result.generationCandidateIds.length === 0 && result.writebackCandidateIds.length === 0) {
+        setQuickProcessError("当前没有待生成或待写回的图片");
+        return;
+      }
+      flow.openQuickProcess(result.generationCandidateIds, result.writebackCandidateIds);
+      if (result.generationCandidateIds.length === 0) {
+        void flow.confirmAndStart();
+      }
+    } catch (err) {
+      setQuickProcessError(err instanceof Error ? err.message : "一键处理失败，请稍后重试");
+    } finally {
+      setQuickProcessing(false);
+    }
+  }, [flow]);
+
+  const handleCloseSummary = useCallback(() => {
+    flow.closeSummary();
+    setRefreshKey((prev) => prev + 1);
+  }, [flow]);
   /* ---------------------------------------------------------------- */
   /*  渲染                                                             */
   /* ---------------------------------------------------------------- */
@@ -272,6 +310,7 @@ function DashboardContent() {
   const activeScanJobId = dashboardData?.activeScanJobId ?? null;
   // 当 isScanning 或 rescanning 时，按钮 disabled
   const isScanButtonDisabled = isScanning || rescanning;
+  const isQuickProcessDisabled = isScanning || quickProcessing || flow.phase !== "IDLE";
 
   // 加载中骨架屏
   if (loading && !dashboardData) {
@@ -369,6 +408,22 @@ function DashboardContent() {
                 {rescanning ? "正在启动扫描…" : isScanning ? "扫描中…" : "扫描"}
               </s-button>
             </div>
+            <div
+              onClick={isQuickProcessDisabled ? undefined : handleQuickProcess}
+              style={{
+                display: "inline-block",
+                cursor: isQuickProcessDisabled ? "not-allowed" : "pointer",
+                opacity: isQuickProcessDisabled ? 0.6 : 1,
+              }}
+            >
+              <s-button
+                variant="primary"
+                {...(isQuickProcessDisabled ? { disabled: true } : {})}
+                accessibilityLabel="一键处理待生成和待写回图片"
+              >
+                {quickProcessing ? "正在准备…" : "一键处理待生成和待写回"}
+              </s-button>
+            </div>
           </s-stack>
 
           {/* 重新扫描错误 */}
@@ -379,6 +434,11 @@ function DashboardContent() {
               background="strong"
             >
               <s-text tone="critical">{rescanError}</s-text>
+            </s-box>
+          )}
+          {quickProcessError && (
+            <s-box padding="small" borderRadius="base" background="strong">
+              <s-text tone="critical">{quickProcessError}</s-text>
             </s-box>
           )}
 
@@ -415,6 +475,24 @@ function DashboardContent() {
           }}
         />
       )}
+      <GenerationFlow
+        phase={flow.phase}
+        preflightResult={flow.preflightResult}
+        totalCount={flow.totalCount}
+        progress={flow.progress}
+        summary={flow.summary}
+        error={flow.error}
+        preflightLoading={flow.preflightLoading}
+        connected={flow.connected}
+        percent={flow.percent}
+        writebackProgress={flow.writebackProgress}
+        writebackConnected={flow.writebackConnected}
+        writebackPercent={flow.writebackPercent}
+        writebackError={flow.writebackError}
+        onConfirmAndStart={() => void flow.confirmAndStart()}
+        onCancel={flow.cancel}
+        onCloseSummary={handleCloseSummary}
+      />
     </s-page>
   );
 }

@@ -166,6 +166,8 @@ interface UseGenerationFlowReturn {
   autoWritebackError: string | null;
   /** 打开确认对话框（不发起预检，仅展示待生成数量） */
   openConfirm: (candidateIds: string[]) => void;
+  /** 打开 Dashboard 一键处理确认：写回项会与生成任务一并启动 */
+  openQuickProcess: (generationCandidateIds: string[], writebackCandidateIds: string[]) => void;
   /** 确认并启动生成（先预检额度，充足则投递任务） */
   confirmAndStart: () => Promise<void>;
   /** 取消流程（从任意非 GENERATING 阶段回到 IDLE） */
@@ -189,6 +191,8 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   const [writebackBatchId, setWritebackBatchId] = useState<string | null>(null);
   const [autoWritebackError, setAutoWritebackError] = useState<string | null>(null);
   const candidateIdsRef = useRef<string[]>([]);
+  const writebackCandidateIdsRef = useRef<string[]>([]);
+  const startedQuickWritebackBatchIdRef = useRef<string | null>(null);
   // 生成计数的暂存：转入 WRITEBACK 阶段后用于合并最终汇总。
   const generationTallyRef = useRef<{ total: number; succeeded: number; skipped: number; failed: number } | null>(null);
 
@@ -304,12 +308,27 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   // ---- 打开确认对话框（立即弹出，并在后台预检额度以展示当前余额）----
   const openConfirm = useCallback((candidateIds: string[]) => {
     candidateIdsRef.current = candidateIds;
+    writebackCandidateIdsRef.current = [];
+    startedQuickWritebackBatchIdRef.current = null;
     setTotalCount(candidateIds.length);
     setPreflightResult(null);
     setError(null);
     setPhase("CONFIRMING");
     // 弹窗先渲染；额度在后台拉取，返回前显示「正在检查额度…」
     void runPreflight();
+  }, [runPreflight]);
+
+  const openQuickProcess = useCallback((generationCandidateIds: string[], writebackCandidateIds: string[]) => {
+    candidateIdsRef.current = generationCandidateIds;
+    writebackCandidateIdsRef.current = writebackCandidateIds;
+    startedQuickWritebackBatchIdRef.current = null;
+    setTotalCount(generationCandidateIds.length);
+    setPreflightResult(null);
+    setError(null);
+    setPhase(generationCandidateIds.length > 0 ? "CONFIRMING" : "STARTING");
+    if (generationCandidateIds.length > 0) {
+      void runPreflight();
+    }
   }, [runPreflight]);
 
   // ---- 确认并启动生成 ----
@@ -321,6 +340,33 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     setError(null);
 
     try {
+      let startedWritebackBatchId = startedQuickWritebackBatchIdRef.current;
+      if (!startedWritebackBatchId && writebackCandidateIdsRef.current.length > 0) {
+        const writebackResponse = await fetch("/api/writeback/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidateIds: writebackCandidateIdsRef.current }),
+        });
+        if (!writebackResponse.ok) {
+          const body = (await writebackResponse.json()) as { message?: string; error?: string };
+          throw new Error(body.message ?? body.error ?? `启动写回失败 (${writebackResponse.status})`);
+        }
+        const writebackData = (await writebackResponse.json()) as { batchId: string };
+        startedWritebackBatchId = writebackData.batchId;
+        startedQuickWritebackBatchIdRef.current = startedWritebackBatchId;
+      }
+
+      if (candidateIdsRef.current.length === 0) {
+        if (!startedWritebackBatchId) {
+          setError("当前没有可处理的图片");
+          setPhase("IDLE");
+          return;
+        }
+        setWritebackBatchId(startedWritebackBatchId);
+        setPhase("WRITEBACK");
+        return;
+      }
+
       const response = await fetch("/api/generation/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -392,6 +438,8 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     setTotalCount(0);
     setError(null);
     candidateIdsRef.current = [];
+    writebackCandidateIdsRef.current = [];
+    startedQuickWritebackBatchIdRef.current = null;
   }, []);
 
   return {
@@ -412,6 +460,7 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     writebackPercent,
     autoWritebackError,
     openConfirm,
+    openQuickProcess,
     confirmAndStart,
     cancel,
     closeSummary,

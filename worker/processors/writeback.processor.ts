@@ -128,12 +128,14 @@ export async function processWritebackJob(
   });
 
   if (result.success) {
-    await markWritten(data, candidate, altText, truth.currentAlt, jobLogger, dependencies);
-    // ── 指标：写回成功 ──
-    recordMetric("writeback.success", 1, {
-      shop_domain: data.shopId,
-      batch_id: data.batchId,
-    });
+    const applied = await markWritten(data, candidate, altText, truth.currentAlt, jobLogger, dependencies);
+    // ── 指标：写回成功（仅实际落库时计数；状态冲突走补偿路径，不计成功）──
+    if (applied) {
+      recordMetric("writeback.success", 1, {
+        shop_domain: data.shopId,
+        batch_id: data.batchId,
+      });
+    }
     await finalizeBatchIfComplete(data, jobLogger, dependencies);
     return;
   }
@@ -389,6 +391,11 @@ async function markSkippedAlreadyFilled(
   );
 }
 
+/**
+ * 落库写回成功。返回是否实际落库：
+ * - `true`：候选状态正常，WRITTEN 及关联写已提交（重复投递的幂等跳过也返回 true，保持既有指标语义）。
+ * - `false`：候选在落库前被并发方接管，已走补偿路径（jobItem 转 FAILED），调用方不应再计成功指标。
+ */
 async function markWritten(
   data: WritebackJobData,
   candidate: CandidateForWriteback,
@@ -396,10 +403,10 @@ async function markWritten(
   oldAltText: string | null,
   log: ExtendedLogger,
   dependencies: WritebackProcessorDependencies,
-): Promise<void> {
+): Promise<boolean> {
   const writtenAt = dependencies.now();
 
-  await dependencies.prisma.$transaction(async (tx) => {
+  const applied = await dependencies.prisma.$transaction(async (tx) => {
     const updatedItem = await tx.jobItem.updateMany({
       where: {
         batchId: data.batchId,
@@ -412,7 +419,7 @@ async function markWritten(
       },
     });
 
-    if (updatedItem.count !== 1) return;
+    if (updatedItem.count !== 1) return true;
 
     const jobItem = await tx.jobItem.findUnique({
       where: {
@@ -428,20 +435,58 @@ async function markWritten(
       throw new Error(`[writeback] job item 不存在: ${data.batchId}/${data.candidateId}`);
     }
 
-    await tx.altDraft.update({
-      where: { altCandidateId: candidate.id },
-      data: {
-        finalText: altText,
+    // 条件写：仅当候选仍处于可写回状态才落 WRITTEN，避免覆盖并发变更
+    //（如用户在此期间标记装饰性图片）。同时补上 shopId 租户隔离条件，
+    // 与本文件其他候选写保持一致。
+    const updatedCandidate = await tx.altCandidate.updateMany({
+      where: {
+        id: candidate.id,
+        shopId: data.shopId,
+        status: { in: [...PROCESSABLE_STATUSES] },
       },
-    });
-
-    await tx.altCandidate.update({
-      where: { id: candidate.id },
       data: {
         status: AltCandidateStatus.WRITTEN,
         writtenAt,
         errorCode: null,
         errorMessage: null,
+      },
+    });
+
+    if (updatedCandidate.count !== 1) {
+      // 补偿：Shopify 写回已成功，但候选状态已被并发方接管，不做覆盖；
+      // 将本 jobItem 转为 FAILED 以便批次正常收敛，候选保持并发方的状态。
+      const conflictError = "[CANDIDATE_STATUS_CHANGED] candidate 状态在写回落库前发生并发变更";
+      await tx.jobItem.updateMany({
+        where: {
+          batchId: data.batchId,
+          altCandidateId: data.candidateId,
+          status: JobItemStatus.SUCCESS,
+        },
+        data: {
+          status: JobItemStatus.FAILED,
+          error: conflictError,
+        },
+      });
+      await tx.jobBatch.update({
+        where: { id: data.batchId },
+        data: {
+          failed: { increment: 1 },
+        },
+      });
+      log.warn(
+        {
+          shopId: data.shopId,
+          candidateId: candidate.id,
+        },
+        "writeback.status-conflict-skipped",
+      );
+      return false;
+    }
+
+    await tx.altDraft.update({
+      where: { altCandidateId: candidate.id },
+      data: {
+        finalText: altText,
       },
     });
 
@@ -477,7 +522,11 @@ async function markWritten(
         success: { increment: 1 },
       },
     });
+
+    return true;
   });
+
+  if (!applied) return false;
 
   log.info(
     {
@@ -485,6 +534,8 @@ async function markWritten(
     },
     "writeback.written",
   );
+
+  return true;
 }
 
 function resolveFinalBatchStatus(batch: {
