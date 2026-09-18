@@ -43,6 +43,8 @@ export interface BillingSummaryResponse {
   billingInterval: BillingInterval;
   incrementalScanEnabled: boolean;
   includedRemaining: number;
+  /** 当前生效周期 included 发放总量（进度条真实分母） */
+  includedGranted: number;
   includedPeriodType: string;
   welcomeRemaining: number;
   overagePackRemaining: number;

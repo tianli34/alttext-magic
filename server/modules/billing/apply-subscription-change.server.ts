@@ -1,27 +1,30 @@
 /**
  * File: server/modules/billing/apply-subscription-change.server.ts
  * Purpose: 订阅变更业务处理服务 —— 根据订阅状态变化完成 included bucket 发放、
- *          首次付费欢迎额度发放、增量扫描开关、Free 降级补发等逻辑。
+ *          旧计划 included 桶作废、首次付费欢迎额度发放、增量扫描开关、Free 降级补发等逻辑。
  *
  * ### 处理场景
- * 1. 升级到月付计划：MONTHLY_INCLUDED + (WELCOME 首次付费) + 开启增量扫描
- * 2. 升级到年付计划：ANNUAL_INCLUDED + (WELCOME 首次付费) + 开启增量扫描
- * 3. 降级回 Free：关闭增量扫描 + 补发当月 FREE_MONTHLY_INCLUDED（如不存在）
+ * 1. 升级到月付计划：MONTHLY_INCLUDED + 作废旧 included 桶 + (WELCOME 首次付费) + 开启增量扫描
+ * 2. 升级到年付计划：ANNUAL_INCLUDED + 作废旧 included 桶 + (WELCOME 首次付费) + 开启增量扫描
+ * 3. 降级回 Free：关闭增量扫描 + 作废旧付费 included 桶 + 补发当月 FREE_MONTHLY_INCLUDED（如不存在）
  *
  * ### 幂等保证
  * - 所有 bucket 发放通过 grantCreditBucket 的唯一约束 (shopId + bucketType + cycleKey) 实现幂等
  * - 首次付费欢迎额度通过 shop.firstPaidBonusGrantedAt + bucket 唯一约束双重保障
+ * - 旧桶作废仅命中 status=ACTIVE 的 included 桶，二次执行自然无匹配
  * - 重复调用仅返回已存在的 bucket，不产生重复数据
  *
  * ### 调用时机
- * 本服务在 subscription.service.ts 或 plan-change.service.ts 完成订阅记录创建/更新之后调用，
- * 负责处理与订阅变更相关的所有额度发放和标记位更新。
+ * - 实时：syncSubscriptionFromShopify 返回 changed=true 后，由 callback / webhook 调用
+ *   applySubscriptionChangeFromSync（本文件导出）立即发放。
+ * - 兜底：billing-sync.job 每 6 小时批量同步并调用 applySubscriptionChange。
  */
 
 import type { PrismaClient, BillingInterval as PrismaBillingInterval } from '@prisma/client';
 
 import { createLogger } from '../../utils/logger.js';
 import { grantCreditBucket } from './credit/grant-credit.server.js';
+import type { SyncSubscriptionResult } from './subscription.service.js';
 import type { CreditBucketType } from './billing.types.js';
 import type { BillingInterval, PlanKey } from './billing.types.js';
 import {
@@ -99,6 +102,90 @@ function generateMonthlyCycleKey(planKey: PlanKey, date: Date): string {
  */
 function generateAnnualCycleKey(planKey: PlanKey, externalSubscriptionId: string): string {
   return `${planKey}:ANNUAL:${externalSubscriptionId}`;
+}
+
+// ----------------------------------------------------------------------------
+// 旧 included 桶作废
+// ----------------------------------------------------------------------------
+
+/** included family 全量类型 */
+const INCLUDED_FAMILY_BUCKET_TYPES: readonly CreditBucketType[] = [
+  'FREE_MONTHLY_INCLUDED',
+  'MONTHLY_INCLUDED',
+  'ANNUAL_INCLUDED',
+];
+
+/** 作废操作入参 */
+interface ExpireIncludedBucketsParams {
+  shopId: string;
+  /** 可作废的候选类型集合 */
+  candidateTypes: readonly CreditBucketType[];
+  /** 本次发放、需要保留的桶；无新桶时为 null */
+  keep: { bucketType: CreditBucketType; cycleKey: string } | null;
+  /** 写入 EXPIRE ledger 的原因 */
+  reason: string;
+}
+
+/**
+ * 将候选 included 类型下仍 ACTIVE 的旧桶置为 EXPIRED，并按剩余量写 EXPIRE ledger。
+ *
+ * 幂等：仅命中 status=ACTIVE 的桶，二次执行时旧桶已转 EXPIRED 不再匹配；
+ * ledger idempotencyKey 由 bucketId 唯一确定，并发重复写入会被唯一约束拒绝。
+ *
+ * @returns 被作废的 bucket ID 列表
+ */
+async function expireIncludedBuckets(
+  params: ExpireIncludedBucketsParams,
+  db: PrismaClient,
+  now: Date,
+): Promise<string[]> {
+  const { shopId, candidateTypes, keep, reason } = params;
+
+  const staleBuckets = await db.creditBucket.findMany({
+    where: {
+      shopId,
+      status: 'ACTIVE',
+      bucketType: { in: [...candidateTypes] },
+      ...(keep
+        ? { NOT: [{ bucketType: keep.bucketType, cycleKey: keep.cycleKey }] }
+        : {}),
+    },
+    select: { id: true, remainingAmount: true },
+  });
+
+  const expiredIds: string[] = [];
+
+  for (const bucket of staleBuckets) {
+    await db.$transaction(async (tx) => {
+      const { count } = await tx.creditBucket.updateMany({
+        where: { id: bucket.id, status: 'ACTIVE' },
+        data: { status: 'EXPIRED', expiresAt: now },
+      });
+      if (count === 0) return;
+
+      if (bucket.remainingAmount > 0) {
+        await tx.creditLedger.create({
+          data: {
+            shopId,
+            bucketId: bucket.id,
+            type: 'EXPIRE',
+            deltaAmount: -bucket.remainingAmount,
+            balanceAfter: 0,
+            reason,
+            idempotencyKey: `${shopId}:EXPIRE:${bucket.id}`,
+            eventAt: now,
+          },
+        });
+      }
+    });
+    expiredIds.push(bucket.id);
+  }
+
+  if (expiredIds.length > 0) {
+    log.info({ shopId, expiredBucketIds: expiredIds }, '旧 included 额度桶作废完成');
+  }
+
+  return expiredIds;
 }
 
 // ----------------------------------------------------------------------------
@@ -211,6 +298,18 @@ async function applyUpgradeToPaid(
     db,
   );
 
+  // ---- 1b. 作废旧计划遗留的 included 桶（保留本次发放的桶） ----
+  await expireIncludedBuckets(
+    {
+      shopId,
+      candidateTypes: INCLUDED_FAMILY_BUCKET_TYPES,
+      keep: { bucketType: includedBucketType, cycleKey: includedCycleKey },
+      reason: `${planKey} ${interval} 计划切换，作废旧 included 额度`,
+    },
+    db,
+    now,
+  );
+
   // ---- 2. 首次付费欢迎额度 ----
   let welcomeResult: { created: boolean; bucketId: string } | null = null;
 
@@ -299,7 +398,8 @@ async function applyUpgradeToPaid(
  *
  * 1. 关闭增量扫描（incrementalScanEnabled = false）
  * 2. 补发当月 FREE_MONTHLY_INCLUDED(25)，如果不存在
- * 3. 保留历史 WELCOME、OVERAGE_PACK（不删除）
+ * 3. 作废旧付费计划的 included 桶（MONTHLY / ANNUAL_INCLUDED）
+ * 4. 保留历史 WELCOME、OVERAGE_PACK（不删除）
  */
 async function applyDowngradeToFree(
   shopId: string,
@@ -342,6 +442,18 @@ async function applyDowngradeToFree(
     db,
   );
 
+  // ---- 3. 作废旧付费计划的 included 桶 ----
+  await expireIncludedBuckets(
+    {
+      shopId,
+      candidateTypes: ['MONTHLY_INCLUDED', 'ANNUAL_INCLUDED'],
+      keep: null,
+      reason: '降级到 Free，作废旧付费 included 额度',
+    },
+    db,
+    now,
+  );
+
   log.info(
     {
       shopId,
@@ -361,4 +473,76 @@ async function applyDowngradeToFree(
     },
     incrementalScanEnabled: false,
   };
+}
+
+// ----------------------------------------------------------------------------
+// 实时入口：基于订阅同步结果触发变更处理
+// ----------------------------------------------------------------------------
+
+/**
+ * 根据 syncSubscriptionFromShopify 的结果即时执行订阅变更处理（发放额度、作废旧桶）。
+ *
+ * 仅在 changed=true 且最终状态为 ACTIVE 时执行；异常只记录日志并返回 false，
+ * 不中断调用方流程（callback 重定向 / webhook 确认），由 billing-sync 定时任务兜底重试。
+ *
+ * @param syncResult  订阅同步结果（需含 shopId / subscriptionId / planCode / status）
+ * @param client      可选 PrismaClient 实例
+ * @returns 是否实际执行了 applySubscriptionChange
+ */
+export async function applySubscriptionChangeFromSync(
+  syncResult: SyncSubscriptionResult,
+  client?: PrismaClient,
+): Promise<boolean> {
+  if (!syncResult.changed) {
+    return false;
+  }
+
+  if (syncResult.status !== 'ACTIVE') {
+    log.info(
+      { shopId: syncResult.shopId, status: syncResult.status },
+      '订阅非 ACTIVE，跳过实时额度发放',
+    );
+    return false;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- 运行时保护
+  const db = client ?? (await import('../../db/prisma.server.js')).default;
+
+  try {
+    const subscription = await db.billingSubscription.findUnique({
+      where: { id: syncResult.subscriptionId },
+      select: { billingInterval: true, externalSubscriptionId: true },
+    });
+
+    if (!subscription) {
+      log.warn(
+        { shopId: syncResult.shopId, subscriptionId: syncResult.subscriptionId },
+        'applySubscriptionChangeFromSync: 未找到订阅记录，跳过',
+      );
+      return false;
+    }
+
+    await applySubscriptionChange(
+      {
+        shopId: syncResult.shopId,
+        subscriptionId: syncResult.subscriptionId,
+        planKey: syncResult.planCode,
+        interval: subscription.billingInterval as PrismaBillingInterval,
+        externalSubscriptionId: subscription.externalSubscriptionId ?? undefined,
+      },
+      db,
+    );
+
+    log.info(
+      { shopId: syncResult.shopId, planCode: syncResult.planCode },
+      'applySubscriptionChangeFromSync: 实时额度发放完成',
+    );
+    return true;
+  } catch (error) {
+    log.error(
+      { shopId: syncResult.shopId, planCode: syncResult.planCode, err: error },
+      'applySubscriptionChangeFromSync: 实时额度发放失败，等待定时任务兜底',
+    );
+    return false;
+  }
 }

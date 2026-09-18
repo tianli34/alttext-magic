@@ -33,6 +33,8 @@ const log = createLogger({ module: 'subscription-service' });
 
 /** 订阅同步结果 */
 export interface SyncSubscriptionResult {
+  /** 店铺内部 ID（供调用方直接触发额度发放等后续处理） */
+  shopId: string;
   /** 是否为新建订阅 */
   created: boolean;
   /** 是否有状态变更（含新建） */
@@ -220,6 +222,7 @@ export async function syncSubscriptionFromShopify(
     });
 
     return {
+      shopId: shop.id,
       created: false,
       changed: false,
       subscriptionId: localActive?.id ?? '',
@@ -242,6 +245,7 @@ export async function syncSubscriptionFromShopify(
       select: { id: true, planCode: true, status: true },
     });
     return {
+      shopId: shop.id,
       created: false,
       changed: false,
       subscriptionId: localActive?.id ?? '',
@@ -275,6 +279,7 @@ export async function syncSubscriptionFromShopify(
         '订阅已存在且状态一致，跳过（幂等）',
       );
       return {
+        shopId: shop.id,
         created: false,
         changed: false,
         subscriptionId: existing.id,
@@ -313,6 +318,7 @@ export async function syncSubscriptionFromShopify(
     );
 
     return {
+      shopId: shop.id,
       created: false,
       changed: true,
       subscriptionId: existing.id,
@@ -380,6 +386,7 @@ export async function syncSubscriptionFromShopify(
   );
 
   return {
+    shopId: shop.id,
     created: true,
     changed: true,
     subscriptionId: result.subscriptionId,

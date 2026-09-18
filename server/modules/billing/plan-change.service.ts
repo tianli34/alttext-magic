@@ -55,6 +55,8 @@ export interface ChangePlanToPaidResult {
 export interface ChangePlanToFreeResult {
   /** 是否有被取消的 Shopify 订阅 */
   cancelledSubscription: boolean;
+  /** 本地新建的 FREE 订阅 ID（供后续额度补发使用） */
+  subscriptionId: string;
 }
 
 // ----------------------------------------------------------------------------
@@ -193,7 +195,7 @@ export async function changePlanToFree(
   const now = new Date();
   const freeConfig = getPlanConfig('FREE');
 
-  await client.$transaction(async (tx) => {
+  const freeSubscriptionId = await client.$transaction(async (tx) => {
     // 2a. 将当前活跃订阅标记为 CANCELED
     const activeSubs = await tx.billingSubscription.findMany({
       where: { shopId, status: 'ACTIVE' },
@@ -211,7 +213,7 @@ export async function changePlanToFree(
     }
 
     // 2b. 创建新的 FREE 订阅
-    await tx.billingSubscription.create({
+    const newFreeSub = await tx.billingSubscription.create({
       data: {
         shopId,
         planCode: 'FREE',
@@ -220,6 +222,7 @@ export async function changePlanToFree(
         incrementalScanEnabled: freeConfig.incrementalScanEnabled,
         activatedAt: now,
       },
+      select: { id: true },
     });
 
     // 2c. 更新 shop 的 currentPlan + 关闭增量扫描
@@ -227,6 +230,8 @@ export async function changePlanToFree(
       where: { id: shopId },
       data: { currentPlan: 'FREE', incrementalScanEnabled: false },
     });
+
+    return newFreeSub.id;
   });
 
   log.info(
@@ -234,5 +239,5 @@ export async function changePlanToFree(
     '降级到 Free 计划完成',
   );
 
-  return { cancelledSubscription };
+  return { cancelledSubscription, subscriptionId: freeSubscriptionId };
 }

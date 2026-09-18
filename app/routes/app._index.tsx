@@ -421,7 +421,7 @@ function DashboardContent() {
                 {...(isQuickProcessDisabled ? { disabled: true } : {})}
                 accessibilityLabel="一键处理待生成和待写回图片"
               >
-                {quickProcessing ? "正在准备…" : "一键处理待生成和待写回"}
+                {quickProcessing ? "正在准备…" : "一键处理"}
               </s-button>
             </div>
           </s-stack>

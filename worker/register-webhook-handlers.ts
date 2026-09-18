@@ -6,6 +6,7 @@
 import { registerWebhookTopicHandler } from "../server/modules/webhook/webhook-topic-registry.js";
 import { handleBulkOperationsFinishWebhook } from "../server/modules/scan/catalog/bulk-finish.service.js";
 import { syncSubscriptionFromShopify } from "../server/modules/billing/subscription.service.js";
+import { applySubscriptionChangeFromSync } from "../server/modules/billing/apply-subscription-change.server.js";
 import { handleProductDeletedWebhook } from "../server/modules/scan/continuous/product-delete.service.js";
 
 /** 注册当前已接入的全部 topic 处理器（重复注册时覆盖，幂等）。 */
@@ -16,9 +17,10 @@ export function registerWebhookTopicHandlers(): void {
     handleBulkOperationsFinishWebhook,
   );
 
-  // APP_SUBSCRIPTIONS_UPDATE: 订阅状态变化 → 调用统一订阅同步服务
+  // APP_SUBSCRIPTIONS_UPDATE: 订阅状态变化 → 同步本地订阅，发现变更立即发放额度/作废旧桶
   registerWebhookTopicHandler("APP_SUBSCRIPTIONS_UPDATE", async (input) => {
-    await syncSubscriptionFromShopify(input.shopDomain);
+    const syncResult = await syncSubscriptionFromShopify(input.shopDomain);
+    await applySubscriptionChangeFromSync(syncResult);
   });
 
   // PRODUCTS_DELETE: 商品删除 → 已发布层空收敛 (usages / targets / candidates → NOT_FOUND)

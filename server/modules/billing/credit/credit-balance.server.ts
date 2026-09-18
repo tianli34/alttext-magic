@@ -52,6 +52,8 @@ export interface SpendableBucketSummary {
 export interface CreditBalanceResult {
   /** included family 剩余总额 */
   includedRemaining: number;
+  /** included family 当前生效周期的发放总量（含已耗尽桶；进度条真实分母） */
+  includedGranted: number;
   /** included 周期类型（FREE 视为 MONTHLY） */
   includedPeriodType: IncludedPeriodType;
   /** 欢迎额度剩余 */
@@ -229,20 +231,57 @@ export async function getCreditBalance(
 
   const totalRemaining = includedRemaining + welcomeRemaining + overagePackRemaining;
   const includedPeriodType = inferIncludedPeriodType(buckets);
+  const includedGranted = await getIncludedGrantedTotal(shopId, client);
 
   log.debug(
-    { shopId, totalRemaining, includedRemaining, welcomeRemaining, overagePackRemaining },
+    { shopId, totalRemaining, includedRemaining, includedGranted, welcomeRemaining, overagePackRemaining },
     '余额计算完成',
   );
 
   return {
     includedRemaining,
+    includedGranted,
     includedPeriodType,
     welcomeRemaining,
     overagePackRemaining,
     totalRemaining,
     buckets,
   };
+}
+
+// ---------------------------------------------------------------------------
+// includedGranted 聚合
+// ---------------------------------------------------------------------------
+
+/**
+ * 统计当前生效周期 included family 的发放总量（进度条分母）。
+ *
+ * 不能复用 getSpendableBuckets —— 其过滤了 remainingAmount = 0 的已耗尽桶，
+ * 会导致"全部用完"的周期分母被低估。此处纳入 ACTIVE / EXHAUSTED 状态的桶，
+ * 计划切换遗留的旧桶已由作废流程转为 EXPIRED，不会重复计入。
+ */
+async function getIncludedGrantedTotal(
+  shopId: string,
+  client?: PrismaClient,
+): Promise<number> {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- 运行时保护
+  const db = client ?? (await import('../../../db/prisma.server.js')).default;
+  const now = new Date();
+
+  const rows = await db.creditBucket.findMany({
+    where: {
+      shopId,
+      bucketType: {
+        in: ['FREE_MONTHLY_INCLUDED', 'MONTHLY_INCLUDED', 'ANNUAL_INCLUDED'],
+      },
+      status: { in: ['ACTIVE', 'EXHAUSTED'] },
+      effectiveAt: { lte: now },
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+    },
+    select: { grantedAmount: true },
+  });
+
+  return rows.reduce((sum, r) => sum + r.grantedAmount, 0);
 }
 
 // ---------------------------------------------------------------------------

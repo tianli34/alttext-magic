@@ -5,13 +5,13 @@
  *          本路由调用超额包发放服务，完成额度桶创建与 GRANT ledger 写入。
  *
  * ### 流程
- * 1. 通过 authenticate.admin 识别当前 shop
+ * 1. 校验 returnUrl 带回的 shop 与 host，并以 DB 中的 Shop 记录确定店铺
+ *    （顶层文档请求无会话令牌，不能使用 authenticate.admin）
  * 2. 从 URL query params 提取 purchaseId
  * 3. 调用 fulfillOveragePackPurchase 发放超额包额度（幂等）
  * 4. 重定向到计费页面（携带发放结果参数）
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { createLogger } from "../../server/utils/logger";
 import { fulfillOveragePackPurchase } from "../../server/modules/billing/overage-pack.service";
@@ -33,11 +33,30 @@ function buildBillingRedirectUrl(requestUrl: URL, params: Record<string, string>
 // ============================================================================
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // 1. 鉴权 —— 确保 Shopify 登录态
-  const { session } = await authenticate.admin(request);
-  const shopDomain = session.shop;
-
+  // 1. 识别店铺 —— 本路由由 Shopify 确认页以顶层文档请求跳入，没有会话令牌，
+  //    只能校验 returnUrl 带回的 shop，并以 DB 中的 Shop 记录为唯一可信来源。
   const url = new URL(request.url);
+  const shopParam = url.searchParams.get("shop");
+  const hostParam = url.searchParams.get("host");
+
+  if (!shopParam || !hostParam) {
+    return Response.json(
+      { error: "Missing shop or host parameter" },
+      { status: 400 },
+    );
+  }
+
+  const shopRecord = await prisma.shop.findUnique({
+    where: { shopDomain: shopParam },
+    select: { shopDomain: true },
+  });
+
+  if (!shopRecord) {
+    logger.warn({ shopParam }, "purchase callback 携带未知 shop");
+    return Response.json({ error: "Unknown shop" }, { status: 404 });
+  }
+
+  const shopDomain = shopRecord.shopDomain;
   const purchaseId = url.searchParams.get("purchaseId");
 
   logger.info(

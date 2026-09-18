@@ -4,7 +4,7 @@
  *          校验当前计划与超额包配置，调用 Shopify Billing API 创建一次性购买，
  *          返回确认支付跳转 URL。
  *
- * 请求体: { packCode: string }
+ * 请求体: { packCode: string, host?: string }
  * 响应体: { confirmationUrl: string }
  */
 import type { ActionFunctionArgs } from "react-router";
@@ -26,6 +26,8 @@ const logger = createLogger({ module: "api.billing.purchase-pack" });
 
 const purchasePackBodySchema = z.object({
   packCode: z.string().min(1, "packCode is required"),
+  // 嵌入式 iframe URL 上的 host，回调返回 App 时用于重新嵌入（空串按缺失处理）
+  host: z.string().optional(),
 });
 
 // ============================================================================
@@ -82,7 +84,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { packCode } = parsed;
+  const { packCode, host } = parsed;
   const currentPlan = shop.currentPlan as PlanKey;
 
   // 5. 校验 packCode 对应当前计划的超额包配置
@@ -98,7 +100,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // 6. 构造回调 URL
-  const returnUrl = `${env.SHOPIFY_APP_URL}/api/billing/purchase-callback`;
+  //    Shopify 确认页会以顶层文档请求把用户送回此地址，届时没有会话令牌，
+  //    purchase-callback 只能靠 shop + host 查询参数识别店铺并重新嵌入 App。
+  const returnUrl = new URL(`${env.SHOPIFY_APP_URL}/api/billing/purchase-callback`);
+  returnUrl.searchParams.set("shop", shop.shopDomain);
+  if (host) {
+    returnUrl.searchParams.set("host", host);
+  }
 
   const adapter = getBillingAdapter();
 
@@ -110,7 +118,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopDomain: shop.shopDomain,
         currentPlan,
         packCode,
-        returnUrl,
+        returnUrl: returnUrl.toString(),
       },
       adapter,
       prisma,

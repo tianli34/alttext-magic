@@ -97,6 +97,8 @@ interface MockConfig {
     amount: number;
     cycleKey: string;
   }>;
+  /** expireIncludedBuckets 顶层查询命中的旧 ACTIVE included 桶（默认为空） */
+  staleBuckets?: Array<{ id: string; remainingAmount: number }>;
 }
 
 /**
@@ -126,9 +128,27 @@ function createMockPrisma(config: MockConfig) {
         const b = config.createdBuckets[idx];
         return makeBucket(b.id, b.bucketType, b.amount, b.cycleKey);
       },
+      updateMany: async (arg: {
+        where: Record<string, unknown>;
+        data: Record<string, unknown>;
+      }) => {
+        calls.push({
+          method: 'tx.creditBucket.updateMany',
+          data: { where: arg.where, ...arg.data },
+        });
+        return { count: 1 };
+      },
     },
     creditLedger: {
       create: async (arg: { data: Record<string, unknown> }) => {
+        if (arg.data.type === 'EXPIRE') {
+          calls.push({ method: 'tx.creditLedger.create[EXPIRE]', data: arg.data });
+          return makeLedger(
+            `ledger-expire-${String(arg.data.bucketId)}`,
+            String(arg.data.bucketId),
+            Number(arg.data.deltaAmount ?? 0),
+          );
+        }
         const idx = grantCallIndex;
         calls.push({ method: `creditLedger.create[${idx}]`, data: arg.data });
         const b = config.createdBuckets[idx];
@@ -167,10 +187,24 @@ function createMockPrisma(config: MockConfig) {
     },
     creditBucket: {
       findUnique: async () => null,
+      findMany: async (arg: { where: Record<string, unknown> }) => {
+        calls.push({
+          method: 'creditBucket.findMany[expire]',
+          data: arg.where,
+        });
+        return (config.staleBuckets ?? []).map((b) => ({
+          id: b.id,
+          remainingAmount: b.remainingAmount,
+        }));
+      },
     },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
       const result = await fn(mockTx);
-      grantCallIndex++;
+      // 仅发放事务（grantCreditBucket 返回 { bucket, ledger, created }）推进序列索引，
+      // 作废等辅助事务不得干扰 existingBuckets/createdBuckets 的按序取数
+      if (result && typeof result === 'object' && 'bucket' in result) {
+        grantCallIndex++;
+      }
       return result;
     },
     /** 暴露调用记录供断言 */
@@ -703,6 +737,123 @@ async function run(): Promise<void> {
       (c) => c.method === 'shop.update' && c.data.incrementalScanEnabled === false,
     );
     assertTrue(!!shopUpdate, 'shop.update(incrementalScanEnabled=false) 被调用');
+  }
+
+  // ------------------------------------------------------------------
+  // 11. 升级时作废旧计划 included 桶
+  // ------------------------------------------------------------------
+  {
+    console.log('11. 升级时作废旧计划 included 桶');
+    const mock = createMockPrisma({
+      firstPaidBonusGrantedAt: new Date('2026-01-01T00:00:00Z'),
+      existingBuckets: [false],
+      createdBuckets: [
+        {
+          id: 'bucket-included-11',
+          bucketType: 'MONTHLY_INCLUDED',
+          amount: 350,
+          cycleKey: 'GROWTH:MONTHLY:2026-09',
+        },
+      ],
+      staleBuckets: [{ id: 'old-starter-bucket', remainingAmount: 80 }],
+    });
+
+    const result = await applySubscriptionChange(
+      {
+        shopId: 'shop-001',
+        subscriptionId: 'sub-upgrade-11',
+        planKey: 'GROWTH',
+        interval: 'MONTHLY',
+      },
+      asClient(mock),
+    );
+
+    assertTrue(result.included!.created, 'included bucket 已创建');
+
+    const findManyCall = mock._calls.find(
+      (c) => c.method === 'creditBucket.findMany[expire]',
+    );
+    assertTrue(!!findManyCall, '作废查询被调用');
+    assertEqual(
+      findManyCall!.data.status,
+      'ACTIVE',
+      '作废查询仅命中 ACTIVE 桶',
+    );
+
+    const updateManyCall = mock._calls.find(
+      (c) => c.method === 'tx.creditBucket.updateMany',
+    );
+    assertTrue(!!updateManyCall, '旧桶状态置位被调用');
+    assertEqual(updateManyCall!.data.status, 'EXPIRED', '旧桶置为 EXPIRED');
+
+    const expireLedger = mock._calls.find(
+      (c) => c.method === 'tx.creditLedger.create[EXPIRE]',
+    );
+    assertTrue(!!expireLedger, 'EXPIRE ledger 被写入');
+    assertEqual(expireLedger!.data.deltaAmount, -80, 'EXPIRE delta = -remaining');
+    assertEqual(
+      expireLedger!.data.idempotencyKey,
+      'shop-001:EXPIRE:old-starter-bucket',
+      'EXPIRE 幂等键由 bucketId 唯一确定',
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // 12. 降级 Free 时作废旧付费 included 桶
+  // ------------------------------------------------------------------
+  {
+    console.log('12. 降级 Free 时作废旧付费 included 桶');
+    const mock = createMockPrisma({
+      firstPaidBonusGrantedAt: new Date('2026-01-01T00:00:00Z'),
+      existingBuckets: [false],
+      createdBuckets: [
+        {
+          id: 'bucket-free-12',
+          bucketType: 'FREE_MONTHLY_INCLUDED',
+          amount: 25,
+          cycleKey: 'FREE:2026-09',
+        },
+      ],
+      staleBuckets: [{ id: 'old-paid-bucket', remainingAmount: 0 }],
+    });
+
+    const result = await applySubscriptionChange(
+      {
+        shopId: 'shop-001',
+        subscriptionId: 'sub-downgrade-12',
+        planKey: 'FREE',
+        interval: 'NONE',
+      },
+      asClient(mock),
+    );
+
+    assertTrue(result.freeMonthly!.created, 'freeMonthly bucket 已创建');
+
+    const findManyCall = mock._calls.find(
+      (c) => c.method === 'creditBucket.findMany[expire]',
+    );
+    assertTrue(!!findManyCall, '作废查询被调用');
+    const candidateTypes = (findManyCall!.data.bucketType as { in: string[] }).in;
+    assertEqual(candidateTypes.length, 2, '降级仅作废两类付费 included 桶');
+    assertTrue(
+      candidateTypes.includes('MONTHLY_INCLUDED') &&
+        candidateTypes.includes('ANNUAL_INCLUDED'),
+      '作废候选类型为 MONTHLY_INCLUDED / ANNUAL_INCLUDED（不含 FREE_MONTHLY）',
+    );
+
+    const updateManyCall = mock._calls.find(
+      (c) => c.method === 'tx.creditBucket.updateMany',
+    );
+    assertTrue(!!updateManyCall, '旧付费桶置为 EXPIRED');
+
+    const expireLedger = mock._calls.find(
+      (c) => c.method === 'tx.creditLedger.create[EXPIRE]',
+    );
+    assertEqual(
+      expireLedger,
+      undefined,
+      'remaining=0 的旧桶不写 EXPIRE ledger',
+    );
   }
 
   // ------------------------------------------------------------------

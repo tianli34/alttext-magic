@@ -40,17 +40,26 @@ export function QuotaBreakdown({ data }: QuotaBreakdownProps) {
 
   const intervalLabel = data.billingInterval === 'ANNUAL' ? '年付' : '月付';
 
-  // 计算总额度百分比
+  // 进度条分母：优先使用当前生效周期的真实发放量（includedGranted），
+  // 尚无 included 桶时回退到计划配置的固定值
   const planConfig = data.plans.find((p) => p.planKey === data.currentPlan);
-  const totalQuota = planConfig
+  const configQuota = planConfig
     ? data.billingInterval === 'ANNUAL'
       ? planConfig.annualTotalCredits
       : planConfig.monthlyQuota
     : 0;
+  const totalQuota = data.includedGranted > 0 ? data.includedGranted : configQuota;
   const usedPercent =
     totalQuota > 0
-      ? Math.round(((totalQuota - data.includedRemaining) / totalQuota) * 100)
+      ? Math.min(
+          100,
+          Math.max(
+            0,
+            Math.round(((totalQuota - data.includedRemaining) / totalQuota) * 100),
+          ),
+        )
       : 0;
+  const usedCredits = Math.min(totalQuota, Math.max(0, totalQuota - data.includedRemaining));
 
   return (
     <s-box
@@ -83,7 +92,7 @@ export function QuotaBreakdown({ data }: QuotaBreakdownProps) {
         {totalQuota > 0 && (
           <s-stack direction="block" gap="small">
             <s-text tone="neutral">
-              已使用 {usedPercent}%（{totalQuota - data.includedRemaining} / {totalQuota}）
+              已使用 {usedPercent}%（{usedCredits} / {totalQuota}）
             </s-text>
             <div
               style={{

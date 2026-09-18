@@ -5,14 +5,17 @@
  *          本路由调用统一的订阅同步服务，将 Shopify 侧订阅状态同步到本地。
  *
  * ### 流程
- * 1. 通过 authenticate.admin 识别当前 shop
+ * 1. 校验 returnUrl 带回的 shop 与 host，并以 DB 中的 Shop 记录确定店铺
+ *    （顶层文档请求无会话令牌，不能使用 authenticate.admin）
  * 2. 调用 syncSubscriptionFromShopify 统一同步服务
- * 3. 重定向到计费页面（携带同步结果参数）
+ * 3. 同步发现变更时调用 applySubscriptionChangeFromSync 立即发放额度/作废旧桶
+ * 4. 重定向到计费页面（携带同步结果参数）
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 import { createLogger } from "../../server/utils/logger";
 import { syncSubscriptionFromShopify } from "../../server/modules/billing/subscription.service";
+import { applySubscriptionChangeFromSync } from "../../server/modules/billing/apply-subscription-change.server";
 import { env } from "../../server/config/env";
 
 const logger = createLogger({ module: "api.billing.callback" });
@@ -31,11 +34,31 @@ function buildBillingRedirectUrl(requestUrl: URL, params: Record<string, string>
 // ============================================================================
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // 1. 鉴权 —— 确保 Shopify 登录态
-  const { session } = await authenticate.admin(request);
-  const shopDomain = session.shop;
-
+  // 1. 识别店铺 —— 本路由由 Shopify 确认页以顶层文档请求跳入，没有会话令牌，
+  //    只能校验 returnUrl 带回的 shop，并以 DB 中的 Shop 记录为唯一可信来源。
   const url = new URL(request.url);
+  const shopParam = url.searchParams.get("shop");
+  const hostParam = url.searchParams.get("host");
+
+  if (!shopParam || !hostParam) {
+    return Response.json(
+      { error: "Missing shop or host parameter" },
+      { status: 400 },
+    );
+  }
+
+  const shopRecord = await prisma.shop.findUnique({
+    where: { shopDomain: shopParam },
+    select: { shopDomain: true },
+  });
+
+  if (!shopRecord) {
+    logger.warn({ shopParam }, "billing callback 携带未知 shop");
+    return Response.json({ error: "Unknown shop" }, { status: 404 });
+  }
+
+  const shopDomain = shopRecord.shopDomain;
+
   logger.info(
     {
       shopDomain,
@@ -57,6 +80,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         status: result.status,
       },
       "订阅同步完成",
+    );
+
+    // 2b. 发现变更 → 立即执行额度发放/旧桶作废，
+    //     确保用户回到 Billing 页时剩余额度已反映新计划。
+    //     （函数内部含 changed/status 守卫，失败不抛出，由 billing-sync 定时任务兜底）
+    const applied = await applySubscriptionChangeFromSync(result);
+
+    logger.info(
+      { shopDomain, changed: result.changed, applied },
+      "订阅变更额度发放处理完成",
     );
 
     // 3. 重定向到计费页面（嵌入式应用需要通过 App Bridge 重定向）

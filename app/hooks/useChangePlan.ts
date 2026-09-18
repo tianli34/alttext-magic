@@ -5,6 +5,8 @@
  */
 import { useState, useCallback } from 'react';
 import type { PlanKey, BillingInterval, ChangePlanResponse } from '../components/billing/types';
+import { getEmbeddedHost } from '../lib/app-navigation';
+import { openTopLevel } from '../lib/top-navigation';
 
 interface UseChangePlanResult {
   /** 请求中 */
@@ -27,7 +29,7 @@ export function useChangePlan(): UseChangePlanResult {
       const response = await fetch('/api/billing/change-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, interval }),
+        body: JSON.stringify({ plan, interval, host: getEmbeddedHost() }),
       });
 
       const result = (await response.json()) as ChangePlanResponse;
@@ -36,9 +38,9 @@ export function useChangePlan(): UseChangePlanResult {
         throw new Error(result.error || `请求失败 (${response.status})`);
       }
 
-      // 付费计划：跳转到 Shopify 确认页
+      // 付费计划：顶层跳转到 Shopify 确认页（嵌入 iframe 内不可直访 window.top.location）
       if (result.confirmationUrl) {
-        window.top?.location.assign(result.confirmationUrl);
+        openTopLevel(result.confirmationUrl);
         return;
       }
 

@@ -3,7 +3,7 @@
  * Purpose: POST /api/billing/change-plan —— 计划变更接口。
  *          支持付费计划月付/年付切换，以及降级到 Free。
  *
- * 请求体: { plan: PlanKey, interval: BillingInterval }
+ * 请求体: { plan: PlanKey, interval: BillingInterval, host?: string }
  * 响应体:
  *   - 付费计划: { confirmationUrl: string }
  *   - Free 降级: { success: true, cancelledSubscription: boolean }
@@ -22,6 +22,7 @@ import {
   changePlanToPaid,
   changePlanToFree,
 } from "../../server/modules/billing/plan-change.service";
+import { applySubscriptionChange } from "../../server/modules/billing/apply-subscription-change.server";
 import { env } from "../../server/config/env";
 import type { PlanKey, BillingInterval } from "../../server/modules/billing/billing.types";
 
@@ -34,6 +35,8 @@ const logger = createLogger({ module: "api.billing.change-plan" });
 const changePlanBodySchema = z.object({
   plan: z.string().min(1, "plan is required"),
   interval: z.string().min(1, "interval is required"),
+  // 嵌入式 iframe URL 上的 host，回调返回 App 时用于重新嵌入（空串按缺失处理）
+  host: z.string().optional(),
 });
 
 // ============================================================================
@@ -90,7 +93,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { plan: rawPlan, interval: rawInterval } = parsed;
+  const { plan: rawPlan, interval: rawInterval, host } = parsed;
 
   // 5. 校验 plan 合法性
   if (!isValidPlanKey(rawPlan)) {
@@ -116,7 +119,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const interval: BillingInterval = rawInterval;
 
   // 7. 构造 returnUrl，指向 billing callback
-  const returnUrl = `${env.SHOPIFY_APP_URL}/api/billing/callback`;
+  //    Shopify 确认页会以顶层文档请求把用户送回此地址，届时没有会话令牌，
+  //    callback 只能靠 shop + host 查询参数识别店铺并重新嵌入 App。
+  const returnUrl = new URL(`${env.SHOPIFY_APP_URL}/api/billing/callback`);
+  returnUrl.searchParams.set("shop", shop.shopDomain);
+  if (host) {
+    returnUrl.searchParams.set("host", host);
+  }
 
   const adapter = getBillingAdapter();
 
@@ -138,6 +147,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         "降级到 Free 成功",
       );
 
+      // 降级后立即补发当月 Free 月配额 + 作废旧付费 included 桶
+      // （幂等：bucket 唯一约束 + 作废仅命中 ACTIVE 桶；失败不影响降级结果，定时任务兜底）
+      try {
+        await applySubscriptionChange({
+          shopId: shop.id,
+          subscriptionId: result.subscriptionId,
+          planKey: "FREE",
+          interval: "NONE",
+        });
+      } catch (applyErr) {
+        logger.error(
+          { shopId: shop.id, err: applyErr },
+          "降级后 Free 月配额补发失败，等待 billing-sync 兜底",
+        );
+      }
+
       return Response.json({
         success: true,
         cancelledSubscription: result.cancelledSubscription,
@@ -151,7 +176,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopDomain: shop.shopDomain,
         planKey,
         interval,
-        returnUrl,
+        returnUrl: returnUrl.toString(),
       },
       adapter,
     );

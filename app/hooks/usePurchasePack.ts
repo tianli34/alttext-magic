@@ -5,6 +5,8 @@
  */
 import { useState, useCallback } from 'react';
 import type { PurchasePackResponse } from '../components/billing/types';
+import { getEmbeddedHost } from '../lib/app-navigation';
+import { openTopLevel } from '../lib/top-navigation';
 
 interface UsePurchasePackResult {
   /** 请求中 */
@@ -27,7 +29,7 @@ export function usePurchasePack(): UsePurchasePackResult {
       const response = await fetch('/api/billing/purchase-pack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packCode }),
+        body: JSON.stringify({ packCode, host: getEmbeddedHost() }),
       });
 
       const result = (await response.json()) as PurchasePackResponse;
@@ -36,9 +38,9 @@ export function usePurchasePack(): UsePurchasePackResult {
         throw new Error(result.error || `请求失败 (${response.status})`);
       }
 
-      // 跳转到 Shopify 确认页
+      // 顶层跳转到 Shopify 确认页（嵌入 iframe 内不可直访 window.top.location）
       if (result.confirmationUrl) {
-        window.top?.location.assign(result.confirmationUrl);
+        openTopLevel(result.confirmationUrl);
       }
     } catch (err) {
       setPurchaseError(
