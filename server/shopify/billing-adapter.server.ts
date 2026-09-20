@@ -6,6 +6,7 @@
  *          - appPurchaseOneTimeCreate（一次性购买 / 超额包）
  *          - appSubscriptionCancel（取消订阅）
  *          - currentAppInstallation.activeSubscriptions（查询活跃订阅）
+ *          - currentAppInstallation.oneTimePurchases（回查一次性购买状态）
  */
 
 import { createLogger } from '../utils/logger.js';
@@ -20,6 +21,9 @@ import type {
   GetCurrentAppSubscriptionsParams,
   GetCurrentAppSubscriptionsResult,
   ActiveSubscription,
+  GetOneTimePurchaseParams,
+  GetOneTimePurchaseResult,
+  OneTimePurchase,
 } from './billing-adapter.types.js';
 import { SHOPIFY_API_VERSION } from './billing-adapter.types.js';
 
@@ -159,6 +163,22 @@ const CURRENT_SUBSCRIPTIONS_QUERY = /* GraphQL */ `
         interval
         amount
         currencyCode
+      }
+    }
+  }
+`;
+
+/** 查询一次性购买（AppPurchaseOneTime）状态 */
+const ONE_TIME_PURCHASES_QUERY = /* GraphQL */ `
+  query {
+    currentAppInstallation {
+      oneTimePurchases(first: 100, reverse: true) {
+        nodes {
+          id
+          name
+          status
+          test
+        }
       }
     }
   }
@@ -428,6 +448,62 @@ export class ShopifyBillingAdapter implements BillingAdapter {
       const message = err instanceof Error ? err.message : String(err);
       log.error({ shop, err }, 'Exception in getCurrentAppSubscriptions');
       return { success: false, subscriptions: [], errorMessage: message };
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // getOneTimePurchase
+  // ------------------------------------------------------------------
+
+  async getOneTimePurchase(
+    params: GetOneTimePurchaseParams,
+  ): Promise<GetOneTimePurchaseResult> {
+    const { shop, accessToken, purchaseId } = params;
+
+    log.info({ shop, purchaseId }, 'Querying one-time purchase status');
+
+    try {
+      const result = await shopifyGraphql<{
+        currentAppInstallation: {
+          oneTimePurchases: {
+            nodes: Array<{
+              id: string;
+              name: string;
+              status: string;
+              test: boolean;
+            }>;
+          };
+        };
+      }>(shop, accessToken, ONE_TIME_PURCHASES_QUERY, {});
+
+      if (result.errors?.length) {
+        const errMsg = result.errors.map((e) => e.message).join('; ');
+        log.error({ shop, errors: result.errors }, 'GraphQL error in oneTimePurchases query');
+        return { success: false, errorMessage: errMsg };
+      }
+
+      const nodes = result.data?.currentAppInstallation?.oneTimePurchases?.nodes ?? [];
+      const matched = nodes.find((n) => n.id === purchaseId);
+
+      if (!matched) {
+        log.warn({ shop, purchaseId, fetched: nodes.length }, '未查询到对应的一次性购买');
+        return { success: true };
+      }
+
+      const purchase: OneTimePurchase = {
+        id: matched.id,
+        name: matched.name,
+        status: matched.status as OneTimePurchase['status'],
+        test: matched.test,
+      };
+
+      log.info({ shop, purchaseId, status: purchase.status }, 'Queried one-time purchase');
+
+      return { success: true, purchase };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error({ shop, err }, 'Exception in getOneTimePurchase');
+      return { success: false, errorMessage: message };
     }
   }
 }

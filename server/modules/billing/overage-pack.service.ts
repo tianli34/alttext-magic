@@ -13,6 +13,8 @@
  * 2. fulfillOveragePackPurchase: 确认并发放（幂等）
  *    - 查找 PENDING 购买记录
  *    - 幂等检查：已 PURCHASED 直接返回
+ *    - 回查 Shopify 侧 AppPurchaseOneTime 状态，仅 ACTIVE 才继续
+ *      （returnUrl 是用户可构造的入口，不能仅凭回调就发放额度）
  *    - 更新状态为 PURCHASED
  *    - 创建 OVERAGE_PACK bucket + GRANT ledger（通过 grantCreditBucket）
  *
@@ -26,6 +28,7 @@ import type { PrismaClient } from '@prisma/client';
 
 import { createLogger } from '../../utils/logger.js';
 import { getOfflineAccessTokenByDomain } from '../../shopify/offline-admin.server.js';
+import { getBillingAdapter } from '../../shopify/billing-adapter.js';
 import { getPlanConfig } from './plan-config.js';
 import { grantCreditBucket } from './credit/grant-credit.server.js';
 import type { OveragePackConfig, PlanKey } from './billing.types.js';
@@ -65,14 +68,28 @@ export interface InitiateOveragePackPurchaseResult {
   externalPurchaseId: string;
 }
 
+/** 发放未执行的原因 */
+export type FulfillSkipReason =
+  /** 回查时 Shopify 侧查不到该购买 */
+  | 'PURCHASE_NOT_FOUND'
+  /** 回查到购买但状态不是 ACTIVE（PENDING / DECLINED / EXPIRED） */
+  | 'PURCHASE_NOT_ACTIVE';
+
 /** 发放结果 */
 export interface FulfillOveragePackPurchaseResult {
-  /** 是否本次实际执行了发放（false = 幂等跳过） */
+  /** 是否本次实际执行了发放（false = 幂等跳过或未通过校验） */
   fulfilled: boolean;
   /** 购买记录 ID */
   purchaseId: string;
-  /** 创建的 bucket ID（幂等跳过时为 undefined） */
+  /** 创建的 bucket ID（幂等跳过或未通过校验时为 undefined） */
   bucketId?: string;
+  /** 未发放的原因（幂等跳过时为空） */
+  reason?: FulfillSkipReason;
+}
+
+/** 发放时可注入依赖（方便测试） */
+export interface FulfillOveragePackOptions {
+  adapter?: BillingAdapter;
 }
 
 // ----------------------------------------------------------------------------
@@ -227,16 +244,22 @@ export async function initiateOveragePackPurchase(
  * - 如果购买状态已为 PURCHASED，直接返回（不重复发放）
  * - grantCreditBucket 通过 (shopId, bucketType, cycleKey) 唯一约束保证幂等
  *
+ * ### 安全保证
+ * - 发放前回查 Shopify 侧一次性购买状态，仅 ACTIVE（商家已批准且扣款）才发放；
+ *   returnUrl 只是重定向入口，任何人都能构造，不能作为已支付的证据。
+ *
  * ### cycleKey 格式
  * `OVERAGE:{externalPurchaseId}`
  * 若 externalPurchaseId 为空则回退到内部 purchase ID
  *
  * @param purchaseId  内部购买记录 ID
  * @param client      PrismaClient 实例
+ * @param options     可选注入项（测试用 BillingAdapter）
  */
 export async function fulfillOveragePackPurchase(
   purchaseId: string,
   client: PrismaClient,
+  options?: FulfillOveragePackOptions,
 ): Promise<FulfillOveragePackPurchaseResult> {
   // ---- 1. 查找购买记录 ----
   const purchase = await client.overagePackPurchase.findUnique({
@@ -259,7 +282,61 @@ export async function fulfillOveragePackPurchase(
     );
   }
 
-  // ---- 3. 更新状态为 PURCHASED ----
+  // ---- 3. 回查 Shopify 侧购买状态（不信任回调参数） ----
+  const externalId = purchase.externalPurchaseId;
+
+  if (!externalId) {
+    throw new Error(
+      `[overage-pack] 购买记录缺少 externalPurchaseId，无法校验支付状态: ${purchaseId}`,
+    );
+  }
+
+  const shop = await client.shop.findUnique({
+    where: { id: purchase.shopId },
+    select: { shopDomain: true },
+  });
+
+  if (!shop) {
+    throw new Error(`[overage-pack] 店铺不存在: ${purchase.shopId}`);
+  }
+
+  const adapter = options?.adapter ?? getBillingAdapter();
+  const accessToken = await getOfflineAccessTokenByDomain(shop.shopDomain);
+
+  const verifyResult = await adapter.getOneTimePurchase({
+    shop: shop.shopDomain,
+    accessToken,
+    purchaseId: externalId,
+  });
+
+  if (!verifyResult.success) {
+    throw new Error(
+      `[overage-pack] 回查 Shopify 购买状态失败: ${verifyResult.errorMessage ?? 'unknown'}`,
+    );
+  }
+
+  if (!verifyResult.purchase) {
+    log.warn(
+      { shopId: purchase.shopId, purchaseId, externalPurchaseId: externalId },
+      '回查未找到该一次性购买，拒绝发放',
+    );
+    return { fulfilled: false, purchaseId: purchase.id, reason: 'PURCHASE_NOT_FOUND' };
+  }
+
+  if (verifyResult.purchase.status !== 'ACTIVE') {
+    log.warn(
+      {
+        shopId: purchase.shopId,
+        purchaseId,
+        externalPurchaseId: externalId,
+        status: verifyResult.purchase.status,
+      },
+      '一次性购买尚未生效，拒绝发放',
+    );
+    return { fulfilled: false, purchaseId: purchase.id, reason: 'PURCHASE_NOT_ACTIVE' };
+  }
+
+  // ---- 4. 更新状态为 PURCHASED ----
   const now = new Date();
 
   await client.overagePackPurchase.update({
@@ -272,8 +349,7 @@ export async function fulfillOveragePackPurchase(
 
   log.info({ purchaseId }, '超额包购买状态更新为 PURCHASED');
 
-  // ---- 4. 创建 OVERAGE_PACK bucket + GRANT ledger ----
-  const externalId = purchase.externalPurchaseId ?? purchase.id;
+  // ---- 5. 创建 OVERAGE_PACK bucket + GRANT ledger ----
   const cycleKey = `OVERAGE:${externalId}`;
 
   const grantResult = await grantCreditBucket(

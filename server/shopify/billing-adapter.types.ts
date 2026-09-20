@@ -2,7 +2,7 @@
  * File: server/shopify/billing-adapter.types.ts
  * Purpose: Shopify Billing API Adapter 接口与类型定义。
  *          支持 appSubscriptionCreate / appPurchaseOneTimeCreate /
- *          appSubscriptionCancel / 当前活跃订阅查询。
+ *          appSubscriptionCancel / 当前活跃订阅查询 / 一次性购买状态回查。
  */
 
 import type { BillingInterval, PlanKey } from '../modules/billing/billing.types';
@@ -148,6 +148,40 @@ export interface GetCurrentAppSubscriptionsResult {
 }
 
 // ============================================================================
+// getOneTimePurchase 参数与返回值
+// ============================================================================
+
+export interface GetOneTimePurchaseParams {
+  /** 店铺域名 */
+  shop: string;
+  /** Shopify Offline Access Token */
+  accessToken: string;
+  /** Shopify 侧购买 ID（gid://shopify/AppPurchaseOneTime/xxx） */
+  purchaseId: string;
+}
+
+/** 单条一次性购买信息 */
+export interface OneTimePurchase {
+  /** Shopify 购买 GID */
+  id: string;
+  /** 购买名称 */
+  name: string;
+  /** 状态：ACTIVE 表示商家已批准并完成扣款 */
+  status: 'ACTIVE' | 'PENDING' | 'DECLINED' | 'EXPIRED' | 'ACCEPTED';
+  /** 测试模式 */
+  test: boolean;
+}
+
+export interface GetOneTimePurchaseResult {
+  /** 是否查询成功（false 表示 API 调用失败，非购买状态问题） */
+  success: boolean;
+  /** 命中的购买记录，未找到时为 undefined */
+  purchase?: OneTimePurchase;
+  /** 错误信息 */
+  errorMessage?: string;
+}
+
+// ============================================================================
 // BillingAdapter 接口
 // ============================================================================
 
@@ -175,4 +209,9 @@ export interface BillingAdapter {
   getCurrentAppSubscriptions(
     params: GetCurrentAppSubscriptionsParams,
   ): Promise<GetCurrentAppSubscriptionsResult>;
+
+  /** 查询指定一次性购买的状态（用于回调时回查确认，避免直接信任 returnUrl） */
+  getOneTimePurchase(
+    params: GetOneTimePurchaseParams,
+  ): Promise<GetOneTimePurchaseResult>;
 }

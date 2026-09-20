@@ -19,6 +19,8 @@ import type {
   GetCurrentAppSubscriptionsParams,
   GetCurrentAppSubscriptionsResult,
   ActiveSubscription,
+  GetOneTimePurchaseParams,
+  GetOneTimePurchaseResult,
 } from './billing-adapter.types.js';
 
 // ----------------------------------------------------------------------------
@@ -38,6 +40,8 @@ export class FakeBillingAdapter implements BillingAdapter {
   private _purchaseHistory: CreateOneTimePurchaseParams[] = [];
   /** 保存最近取消的订阅 ID，供测试断言 */
   private _cancelHistory: string[] = [];
+  /** 保存本 adapter 创建过的一次性购买 GID，供回查状态使用 */
+  private _createdPurchaseIds: string[] = [];
 
   // ------------------------------------------------------------------
   // createAppSubscription
@@ -84,6 +88,8 @@ export class FakeBillingAdapter implements BillingAdapter {
     this._purchaseHistory.push(params);
 
     const fakeId = `gid://shopify/AppPurchaseOneTime/${randomUUID()}`;
+    this._createdPurchaseIds.push(fakeId);
+
     const confirmationUrl = `${returnUrl}${
       returnUrl.includes('?') ? '&' : '?'
     }fake=true&purchase_id=${encodeURIComponent(fakeId)}&pack=${packKey}`;
@@ -145,6 +151,33 @@ export class FakeBillingAdapter implements BillingAdapter {
   }
 
   // ------------------------------------------------------------------
+  // getOneTimePurchase
+  // ------------------------------------------------------------------
+
+  async getOneTimePurchase(
+    params: GetOneTimePurchaseParams,
+  ): Promise<GetOneTimePurchaseResult> {
+    const { shop, purchaseId } = params;
+
+    log.info({ shop, purchaseId }, '[FAKE] Querying one-time purchase status');
+
+    // 仅认本 adapter 创建过的购买，未创建过的视为查不到（保持与真实实现一致）
+    if (!this._createdPurchaseIds.includes(purchaseId)) {
+      return { success: true };
+    }
+
+    return {
+      success: true,
+      purchase: {
+        id: purchaseId,
+        name: 'Overage Pack (fake)',
+        status: 'ACTIVE',
+        test: true,
+      },
+    };
+  }
+
+  // ------------------------------------------------------------------
   // 测试辅助方法
   // ------------------------------------------------------------------
 
@@ -168,5 +201,6 @@ export class FakeBillingAdapter implements BillingAdapter {
     this._subscriptionHistory = [];
     this._purchaseHistory = [];
     this._cancelHistory = [];
+    this._createdPurchaseIds = [];
   }
 }

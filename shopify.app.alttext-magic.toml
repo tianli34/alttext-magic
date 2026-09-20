@@ -12,6 +12,10 @@ include_config_on_deploy = true
 [webhooks]
 api_version = "2026-07"
 
+  [[webhooks.subscriptions]]
+  topics = [ "app/subscriptions/update" ]
+  uri = "/webhooks/app/subscriptions_update"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_content,read_files,read_products,write_content,write_files,write_products"

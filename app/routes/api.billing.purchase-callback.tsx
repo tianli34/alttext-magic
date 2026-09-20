@@ -87,7 +87,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
 
     // 4. 重定向到计费页面
-    const packParam = result.fulfilled ? "success" : "already-granted";
+    //    - success: 本次完成发放
+    //    - already-granted: 幂等跳过（此前已发放）
+    //    - pending: 回查发现 Shopify 侧购买尚未 ACTIVE，未发放
+    let packParam: string;
+    if (result.fulfilled) {
+      packParam = "success";
+    } else if (result.reason) {
+      packParam = "pending";
+    } else {
+      packParam = "already-granted";
+    }
+
     const billingUrl = buildBillingRedirectUrl(url, { pack: packParam });
 
     return new Response(null, {
