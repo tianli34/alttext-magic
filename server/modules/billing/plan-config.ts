@@ -46,10 +46,15 @@ export function getIncludedCredits(planKey: PlanKey, interval: BillingInterval):
 
 /**
  * 获取指定计划年付一次性发放总量。
- * 便捷方法，等价于 getIncludedCredits(planKey, 'ANNUAL')。
- * FREE 返回 0。
+ * 付费计划等价于 getIncludedCredits(planKey, 'ANNUAL')。
+ *
+ * 注意：FREE 计划无年付形态（annualTotalCredits 配置为 0，订阅变更走降级分支），
+ * 不经过 getIncludedCredits 的 FREE 特例（该特例固定返回月配额 25），此处返回 0。
  */
 export function getAnnualIncludedCredits(planKey: PlanKey): number {
+  if (planKey === 'FREE') {
+    return 0;
+  }
   return getIncludedCredits(planKey, 'ANNUAL');
 }
 

@@ -19,7 +19,8 @@
 
 ## 测试
 
-无测试框架
+- 单元测试: `vitest` (`vitest.config.ts`, 仅收集 `tests/unit/**/*.test.ts`, 如 `tests/unit/billing/`), 命令 `npm run test` / `npm run test:watch`
+- 旧式集成脚本: `tests/` 根目录下大量 `*.test.ts` 为手写断言脚本(`node:assert` + `process.exit`), 通过 `tsx` 单独运行(如 `npm run testpublish`), 不纳入 Vitest
 
 ## 工作流限制
 
