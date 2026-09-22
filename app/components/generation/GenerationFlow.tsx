@@ -76,8 +76,12 @@ export function GenerationFlow({
   onCancel,
   onCloseSummary,
 }: GenerationFlowProps) {
-  if (phase === "IDLE" || phase === "PREFLIGHT_LOADING") {
+  if (phase === "IDLE") {
     return null;
+  }
+
+  if (phase === "PREFLIGHT_LOADING") {
+    return <QuickProcessPrepareModal error={error} onCancel={onCancel} />;
   }
 
   if (phase === "CONFIRMING") {
@@ -140,6 +144,53 @@ export function GenerationFlow({
   }
 
   return null;
+}
+
+// ============================================================================
+// 一键处理准备 Modal（统计候选 ID 期间的占位弹窗；统计失败/无候选时展示错误）
+// ============================================================================
+
+interface QuickProcessPrepareModalProps {
+  /** 统计失败或无候选时的错误信息（null 表示仍在统计中） */
+  error: string | null;
+  /** 关闭弹窗（回到 IDLE） */
+  onCancel: () => void;
+}
+
+function QuickProcessPrepareModal({ error, onCancel }: QuickProcessPrepareModalProps) {
+  // 统计进行中不提供关闭入口：避免关闭后请求返回再次拉起弹窗造成状态混乱
+  if (!error) {
+    return (
+      <div className={styles.overlay}>
+        <div className={styles.modal}>
+          <s-stack direction="block" gap="base">
+            <s-heading>一键处理</s-heading>
+            <s-text tone="neutral">正在统计待处理图片…</s-text>
+          </s-stack>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.overlay} onClick={onCancel}>
+      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <s-stack direction="block" gap="base">
+          <s-heading>一键处理</s-heading>
+          <s-box padding="base" borderRadius="base" background="strong">
+            <s-text tone="critical">{error}</s-text>
+          </s-box>
+          <div className={styles.actions}>
+            <div onClick={onCancel} style={{ display: "inline-block", cursor: "pointer" }}>
+              <s-button variant="secondary" accessibilityLabel="关闭">
+                关闭
+              </s-button>
+            </div>
+          </div>
+        </s-stack>
+      </div>
+    </div>
+  );
 }
 
 // ============================================================================

@@ -5,6 +5,8 @@
  *
  * 流程阶段:
  *   IDLE → CONFIRMING（确认）→ STARTING → GENERATING → WRITEBACK → SUMMARY
+ *   Dashboard 一键处理先进入 PREFLIGHT_LOADING 占位弹窗（后台统计候选 ID），
+ *   统计完成后转入 CONFIRMING（或仅写回时直入 STARTING），失败/无候选则停留展示错误；
  *   打开 CONFIRMING 弹窗时即后台执行 preflight 预检以展示当前额度余额；
  *   用户点确认时不再前端二次预检，直接投递生成，额度不足由后端原子预留兜底
  *   （返回 409 INSUFFICIENT_CREDIT），前端回填余额并停留 CONFIRMING 展示不足引导。
@@ -166,6 +168,10 @@ interface UseGenerationFlowReturn {
   autoWritebackError: string | null;
   /** 打开确认对话框（不发起预检，仅展示待生成数量） */
   openConfirm: (candidateIds: string[]) => void;
+  /** 打开一键处理准备弹窗（立即反馈，候选统计请求由调用方在弹窗打开后发起） */
+  openQuickProcessPrepare: () => void;
+  /** 一键处理统计失败或无候选：停留准备弹窗展示错误，用户可关闭 */
+  failQuickProcessPrepare: (message: string) => void;
   /** 打开 Dashboard 一键处理确认：写回项会与生成任务一并启动 */
   openQuickProcess: (generationCandidateIds: string[], writebackCandidateIds: string[]) => void;
   /** 确认并启动生成（先预检额度，充足则投递任务） */
@@ -318,6 +324,21 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     void runPreflight();
   }, [runPreflight]);
 
+  // ---- 打开一键处理准备弹窗（立即弹出，候选统计请求由调用方随后发起）----
+  const openQuickProcessPrepare = useCallback(() => {
+    candidateIdsRef.current = [];
+    writebackCandidateIdsRef.current = [];
+    startedQuickWritebackBatchIdRef.current = null;
+    setPreflightResult(null);
+    setError(null);
+    setPhase("PREFLIGHT_LOADING");
+  }, []);
+
+  // ---- 一键处理统计失败/无候选：停留准备弹窗展示错误，用户可点关闭回到 IDLE ----
+  const failQuickProcessPrepare = useCallback((message: string) => {
+    setError(message);
+  }, []);
+
   const openQuickProcess = useCallback((generationCandidateIds: string[], writebackCandidateIds: string[]) => {
     candidateIdsRef.current = generationCandidateIds;
     writebackCandidateIdsRef.current = writebackCandidateIds;
@@ -460,6 +481,8 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     writebackPercent,
     autoWritebackError,
     openConfirm,
+    openQuickProcessPrepare,
+    failQuickProcessPrepare,
     openQuickProcess,
     confirmAndStart,
     cancel,

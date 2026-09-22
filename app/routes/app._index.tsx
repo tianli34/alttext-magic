@@ -135,8 +135,6 @@ function DashboardContent() {
   /** 重新扫描状态 */
   const [rescanning, setRescanning] = useState(false);
   const [rescanError, setRescanError] = useState<string | null>(null);
-  const [quickProcessing, setQuickProcessing] = useState(false);
-  const [quickProcessError, setQuickProcessError] = useState<string | null>(null);
   const flow = useGenerationFlow();
 
   /** 当前浮窗展示的扫描任务 ID（null 时不显示浮窗） */
@@ -269,8 +267,9 @@ function DashboardContent() {
   }, [dashboardData]);
 
   const handleQuickProcess = useCallback(async () => {
-    setQuickProcessing(true);
-    setQuickProcessError(null);
+    // 立即弹出准备弹窗（PREFLIGHT_LOADING），候选统计请求在弹窗打开后发起，
+    // 避免点击后长时间仅按钮转圈而无对话框反馈
+    flow.openQuickProcessPrepare();
     try {
       const response = await fetch("/api/dashboard/process", { method: "POST" });
       if (!response.ok) {
@@ -282,7 +281,8 @@ function DashboardContent() {
         writebackCandidateIds: string[];
       };
       if (result.generationCandidateIds.length === 0 && result.writebackCandidateIds.length === 0) {
-        setQuickProcessError("当前没有待生成或待写回的图片");
+        // 停留准备弹窗展示提示，用户可关闭
+        flow.failQuickProcessPrepare("当前没有待生成或待写回的图片");
         return;
       }
       flow.openQuickProcess(result.generationCandidateIds, result.writebackCandidateIds);
@@ -290,9 +290,7 @@ function DashboardContent() {
         void flow.confirmAndStart();
       }
     } catch (err) {
-      setQuickProcessError(err instanceof Error ? err.message : "一键处理失败，请稍后重试");
-    } finally {
-      setQuickProcessing(false);
+      flow.failQuickProcessPrepare(err instanceof Error ? err.message : "一键处理失败，请稍后重试");
     }
   }, [flow]);
 
@@ -310,7 +308,7 @@ function DashboardContent() {
   const activeScanJobId = dashboardData?.activeScanJobId ?? null;
   // 当 isScanning 或 rescanning 时，按钮 disabled
   const isScanButtonDisabled = isScanning || rescanning;
-  const isQuickProcessDisabled = isScanning || quickProcessing || flow.phase !== "IDLE";
+  const isQuickProcessDisabled = isScanning || flow.phase !== "IDLE";
 
   // 加载中骨架屏
   if (loading && !dashboardData) {
@@ -421,7 +419,7 @@ function DashboardContent() {
                 {...(isQuickProcessDisabled ? { disabled: true } : {})}
                 accessibilityLabel="一键处理待生成和待写回图片"
               >
-                {quickProcessing ? "正在准备…" : "一键处理"}
+                一键处理
               </s-button>
             </div>
           </s-stack>
@@ -434,11 +432,6 @@ function DashboardContent() {
               background="strong"
             >
               <s-text tone="critical">{rescanError}</s-text>
-            </s-box>
-          )}
-          {quickProcessError && (
-            <s-box padding="small" borderRadius="base" background="strong">
-              <s-text tone="critical">{quickProcessError}</s-text>
             </s-box>
           )}
 
