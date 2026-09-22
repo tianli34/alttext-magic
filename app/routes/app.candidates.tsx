@@ -24,6 +24,7 @@ type CandidateStatus =
   | "GENERATION_FAILED_RETRYABLE"
   | "GENERATED"
   | "WRITEBACK_FAILED_RETRYABLE"
+  | "WRITEBACK_FAILED_PERMANENT"
   | "WRITTEN"
   | "RESOLVED"
   | "NOT_FOUND"
@@ -118,6 +119,7 @@ const STATUS_LABELS: Record<CandidateStatus, string> = {
   GENERATION_FAILED_RETRYABLE: "Generation failed",
   GENERATED: "Generated",
   WRITEBACK_FAILED_RETRYABLE: "Writeback failed",
+  WRITEBACK_FAILED_PERMANENT: "Writeback failed (re-auth required)",
   WRITTEN: "Written",
   RESOLVED: "Resolved",
   NOT_FOUND: "Not found",

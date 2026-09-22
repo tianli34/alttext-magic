@@ -464,6 +464,39 @@ async function run(): Promise<void> {
   assert.equal(conflictState.auditLogs.length, 0);
   assert.deepEqual(conflictState.releasedLocks, ["shop-1:lock-2"]);
 
+  // ── 认证失效场景：executor 返回 retryable=false + AUTH_FAILED ──
+  // 候选必须进入终态 WRITEBACK_FAILED_PERMANENT 并携带结构化错误码，
+  // 而不是落入可重试态导致令牌失效被无限重试吞没。
+  const authState = makeState();
+  const authDependencies = createDependencies(authState);
+  await processWritebackJob(makeJob("c1"), {
+    ...authDependencies,
+    getExecutor: () =>
+      new StaticExecutor({
+        success: false,
+        error: "Shopify Admin GraphQL auth error: 401 Unauthorized",
+        retryable: false,
+        errorCode: "AUTH_FAILED",
+      }),
+  });
+
+  assert.equal(
+    authState.candidates.get("c1")?.status,
+    AltCandidateStatus.WRITEBACK_FAILED_PERMANENT,
+  );
+  assert.equal(authState.candidates.get("c1")?.errorCode, "AUTH_FAILED");
+  assert.ok(
+    authState.candidates.get("c1")?.errorMessage?.includes("401"),
+  );
+  assert.equal(
+    authState.items.get(itemKey("batch-1", "c1"))?.status,
+    JobItemStatus.FAILED,
+  );
+  assert.equal(authState.batches.get("batch-1")?.failed, 1);
+  // 批次未全部完结（total=3 仅处理 1 条），锁不释放
+  assert.equal(authState.batches.get("batch-1")?.status, JobBatchStatus.RUNNING);
+  assert.deepEqual(authState.releasedLocks, []);
+
   console.log("✅ writeback.processor 测试全部通过");
 }
 

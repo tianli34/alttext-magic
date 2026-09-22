@@ -8,6 +8,7 @@
 import { AltPlane } from "@prisma/client";
 import type { Session } from "@shopify/shopify-api";
 import { WritebackRouter } from "../server/modules/writeback/writeback-router.js";
+import { ShopifyAuthError } from "../server/modules/writeback/mutations/mutation-utils.js";
 import { ArticleAltExecutor } from "../server/modules/writeback/mutations/article-update.mutation.js";
 import { CollectionAltExecutor } from "../server/modules/writeback/mutations/collection-update.mutation.js";
 import { FileAltExecutor } from "../server/modules/writeback/mutations/file-update.mutation.js";
@@ -80,6 +81,12 @@ function makeMockGraphql<TData>(
 function makeThrowingGraphql(message: string): ShopifyGraphqlExecutor {
   return async () => {
     throw new TypeError(message);
+  };
+}
+
+function makeAuthErrorGraphql(status: number, message: string): ShopifyGraphqlExecutor {
+  return async () => {
+    throw new ShopifyAuthError(status, message);
   };
 }
 
@@ -170,6 +177,67 @@ async function testFileNetworkError(): Promise<void> {
     altText: "New alt",
   });
   assertFailure(result, true, "fetch failed");
+}
+
+async function testFileAuthHttpError(): Promise<void> {
+  console.log("\n--- FileAltExecutor: HTTP 401 认证失效 ---");
+  const executor = new FileAltExecutor(
+    makeAuthErrorGraphql(
+      401,
+      "Shopify Admin GraphQL auth error: 401 Unauthorized: [API] Invalid API key or access token",
+    ),
+  );
+  const result = await executor.execute({
+    session: testSession,
+    shopifyGid: "gid://shopify/MediaImage/1",
+    altText: "New alt",
+  });
+  assertFailure(result, false, "401");
+  if (!result.success) {
+    assertEqual(result.errorCode, "AUTH_FAILED", "errorCode 为 AUTH_FAILED");
+  }
+}
+
+async function testFileGraphqlAccessDenied(): Promise<void> {
+  console.log("\n--- FileAltExecutor: GraphQL ACCESS_DENIED ---");
+  const executor = new FileAltExecutor(
+    makeMockGraphql(
+      {
+        errors: [
+          { message: "Access denied for fileUpdate field", extensions: { code: "ACCESS_DENIED" } },
+        ],
+      },
+      [],
+    ),
+  );
+  const result = await executor.execute({
+    session: testSession,
+    shopifyGid: "gid://shopify/MediaImage/1",
+    altText: "New alt",
+  });
+  assertFailure(result, false, "Access denied");
+  if (!result.success) {
+    assertEqual(result.errorCode, "AUTH_FAILED", "ACCESS_DENIED 归为 AUTH_FAILED");
+  }
+}
+
+async function testFileGraphqlThrottled(): Promise<void> {
+  console.log("\n--- FileAltExecutor: GraphQL THROTTLED（非认证错误维持可重试）---");
+  const executor = new FileAltExecutor(
+    makeMockGraphql(
+      { errors: [{ message: "Throttled", extensions: { code: "THROTTLED" } }] },
+      [],
+    ),
+  );
+  const result = await executor.execute({
+    session: testSession,
+    shopifyGid: "gid://shopify/MediaImage/1",
+    altText: "New alt",
+  });
+  assertFailure(result, true, "Throttled");
+  if (!result.success) {
+    assertEqual(result.errorCode, undefined, "非认证错误不带 errorCode");
+  }
 }
 
 async function testCollectionSuccess(): Promise<void> {
@@ -328,6 +396,22 @@ async function testArticleNetworkError(): Promise<void> {
   assertFailure(result, true, "ECONNRESET");
 }
 
+async function testArticleAuthHttpError(): Promise<void> {
+  console.log("\n--- ArticleAltExecutor: HTTP 403 认证失效（跨执行器共享分类）---");
+  const executor = new ArticleAltExecutor(
+    makeAuthErrorGraphql(403, "Shopify Admin GraphQL auth error: 403 Forbidden"),
+  );
+  const result = await executor.execute({
+    session: testSession,
+    shopifyGid: "gid://shopify/Article/1",
+    altText: "New alt",
+  });
+  assertFailure(result, false, "403");
+  if (!result.success) {
+    assertEqual(result.errorCode, "AUTH_FAILED", "errorCode 为 AUTH_FAILED");
+  }
+}
+
 function assertFailure(
   result: WritebackResult,
   retryable: boolean,
@@ -347,12 +431,16 @@ async function run(): Promise<void> {
     await testFileSuccess();
     await testFileUserError();
     await testFileNetworkError();
+    await testFileAuthHttpError();
+    await testFileGraphqlAccessDenied();
+    await testFileGraphqlThrottled();
     await testCollectionSuccess();
     await testCollectionUserError();
     await testCollectionNetworkError();
     await testArticleSuccess();
     await testArticleUserError();
     await testArticleNetworkError();
+    await testArticleAuthHttpError();
   } catch (err) {
     failed++;
     console.error("\n  ✗ 测试执行异常:", err);

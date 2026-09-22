@@ -90,7 +90,7 @@ export function buildDashboardGroupStatsQuery(
       COUNT(*) FILTER (
         WHERE alt_target.current_alt_empty = true
           AND COALESCE(decorative_mark.is_active, false) = false
-          AND alt_candidate.status = ANY(ARRAY['GENERATED','WRITEBACK_FAILED_RETRYABLE']::"AltCandidateStatus"[])
+          AND alt_candidate.status = ANY(ARRAY['GENERATED','WRITEBACK_FAILED_RETRYABLE','WRITEBACK_FAILED_PERMANENT']::"AltCandidateStatus"[])
       )::integer AS "generated"
     FROM candidate_group_projection AS cgp
     JOIN alt_target AS alt_target

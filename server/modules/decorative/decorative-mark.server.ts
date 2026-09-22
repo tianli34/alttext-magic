@@ -77,6 +77,7 @@ const markableStatuses = new Set<AltCandidateStatus>([
   AltCandidateStatus.GENERATION_FAILED_RETRYABLE,
   AltCandidateStatus.GENERATED,
   AltCandidateStatus.WRITEBACK_FAILED_RETRYABLE,
+  AltCandidateStatus.WRITEBACK_FAILED_PERMANENT,
 ]);
 
 function mapScopeFlagsToGroupTypes(

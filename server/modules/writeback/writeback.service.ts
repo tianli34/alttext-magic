@@ -22,6 +22,8 @@ import { createLogger } from "../../utils/logger";
 
 const logger = createLogger({ module: "writeback-start-service" });
 
+// 注意：WRITEBACK_FAILED_PERMANENT（认证失效等不可自愈失败）刻意不在此列，
+// 须重新扫描确认条件修复后恢复为 GENERATED 才可再次写回。
 const WRITEBACK_ALLOWED_STATUSES = [
   AltCandidateStatus.GENERATED,
   AltCandidateStatus.WRITEBACK_FAILED_RETRYABLE,

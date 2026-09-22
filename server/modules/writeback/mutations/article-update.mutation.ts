@@ -10,7 +10,13 @@ import type {
   ShopifyUserError,
   WritebackResult,
 } from "../writeback.types";
-import { executeShopifyGraphql, formatUserErrors, isRetryableUserError } from "./mutation-utils";
+import {
+  executeShopifyGraphql,
+  formatUserErrors,
+  isRetryableUserError,
+  toExecutorFailure,
+  toGraphqlErrorsFailure,
+} from "./mutation-utils";
 
 const ARTICLE_UPDATE_MUTATION = /* GraphQL */ `
   mutation WritebackArticleImageAlt($id: ID!, $article: ArticleUpdateInput!) {
@@ -64,11 +70,7 @@ export class ArticleAltExecutor implements MutationExecutor {
       });
 
       if (payload.errors?.length) {
-        return {
-          success: false,
-          error: payload.errors.map((error) => error.message).join("; "),
-          retryable: true,
-        };
+        return toGraphqlErrorsFailure(payload.errors);
       }
 
       const userErrors = payload.data?.articleUpdate?.userErrors ?? [];
@@ -90,11 +92,7 @@ export class ArticleAltExecutor implements MutationExecutor {
 
       return { success: true };
     } catch (err) {
-      return {
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-        retryable: true,
-      };
+      return toExecutorFailure(err);
     }
   }
 }

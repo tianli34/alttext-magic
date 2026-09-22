@@ -962,10 +962,13 @@ writebackWorker.on("failed", (job, error) => {
   const attempts = job.opts.attempts ?? 1;
   if (job.attemptsMade < attempts) return;
 
-  void markWritebackJobFailed(
-    job.data,
-    error instanceof Error ? error.message : String(error),
-  )
+  // BullMQ 重试耗尽后的兜底持久化：未知异常维持可重试分类（与改造前行为一致），
+  // 仅 executor 明确判定为认证失效（AUTH_FAILED）的失败才走终态。
+  void markWritebackJobFailed(job.data, {
+    success: false,
+    error: error instanceof Error ? error.message : String(error),
+    retryable: true,
+  })
     .then(() => finalizeBatchIfComplete(job.data))
     .catch((finalizeError: unknown) => {
       logger.error(

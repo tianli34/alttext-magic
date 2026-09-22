@@ -36,6 +36,7 @@ type CandidateWithTarget = AltCandidate & { altTarget: AltTarget };
 const TERMINAL_STATUSES = new Set<AltCandidateStatus>([
   AltCandidateStatus.GENERATED,
   AltCandidateStatus.WRITEBACK_FAILED_RETRYABLE,
+  AltCandidateStatus.WRITEBACK_FAILED_PERMANENT,
   AltCandidateStatus.WRITTEN,
   AltCandidateStatus.RESOLVED,
   AltCandidateStatus.NOT_FOUND,

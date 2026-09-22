@@ -29,6 +29,7 @@ export const candidateListStatusValues = [
   "DECORATIVE_SKIPPED",
   "GENERATION_FAILED_RETRYABLE",
   "WRITEBACK_FAILED_RETRYABLE",
+  "WRITEBACK_FAILED_PERMANENT",
   "WRITTEN",
   "RESOLVED",
   "NOT_FOUND",
@@ -181,6 +182,7 @@ const PENDING_STATUSES = [
 const GENERATED_STATUSES = [
   "GENERATED",
   "WRITEBACK_FAILED_RETRYABLE",
+  "WRITEBACK_FAILED_PERMANENT",
 ] as const;
 
 function buildStatusCondition(status: CandidateListStatus | undefined): Prisma.Sql {

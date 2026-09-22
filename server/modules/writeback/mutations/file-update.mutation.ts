@@ -10,7 +10,13 @@ import type {
   WritebackResult,
 } from "../writeback.types";
 import type { Session } from "@shopify/shopify-api";
-import { executeShopifyGraphql, formatUserErrors, isRetryableUserError } from "./mutation-utils";
+import {
+  executeShopifyGraphql,
+  formatUserErrors,
+  isRetryableUserError,
+  toExecutorFailure,
+  toGraphqlErrorsFailure,
+} from "./mutation-utils";
 
 const FILE_UPDATE_MUTATION = /* GraphQL */ `
   mutation WritebackFileAlt($files: [FileUpdateInput!]!) {
@@ -61,11 +67,7 @@ export class FileAltExecutor implements MutationExecutor {
       });
 
       if (payload.errors?.length) {
-        return {
-          success: false,
-          error: payload.errors.map((error) => error.message).join("; "),
-          retryable: true,
-        };
+        return toGraphqlErrorsFailure(payload.errors);
       }
 
       const userErrors = payload.data?.fileUpdate?.userErrors ?? [];
@@ -87,11 +89,7 @@ export class FileAltExecutor implements MutationExecutor {
 
       return { success: true };
     } catch (err) {
-      return {
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-        retryable: true,
-      };
+      return toExecutorFailure(err);
     }
   }
 }

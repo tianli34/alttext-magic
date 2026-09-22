@@ -140,23 +140,30 @@ export async function processWritebackJob(
     return;
   }
 
-  await markWritebackJobFailed(data, result.error, jobLogger, dependencies);
-  // ── 指标：写回失败 ──
-  recordMetric("writeback.fail.WRITEBACK_FAILED", 1, {
+  await markWritebackJobFailed(data, result, jobLogger, dependencies);
+  // ── 指标：写回失败（按错误码区分认证失效与普通失败）──
+  const errorCode = result.errorCode ?? "WRITEBACK_FAILED";
+  recordMetric(`writeback.fail.${errorCode}`, 1, {
     shop_domain: data.shopId,
     batch_id: data.batchId,
-    error_code: "WRITEBACK_FAILED",
+    error_code: errorCode,
   });
   await finalizeBatchIfComplete(data, jobLogger, dependencies);
 }
 
 export async function markWritebackJobFailed(
   data: WritebackJobData,
-  errorMessage: string,
+  failure: Extract<WritebackResult, { success: false }>,
   log: ExtendedLogger = logger,
   dependencies: WritebackProcessorDependencies = defaultDependencies,
 ): Promise<void> {
-  const message = truncateError(errorMessage);
+  const message = truncateError(failure.error);
+  const errorCode = failure.errorCode ?? "WRITEBACK_FAILED";
+  // retryable=false 表示认证失效等不可自愈错误：进入终态 WRITEBACK_FAILED_PERMANENT，
+  // 不再允许写回重试；条件修复（如店铺重新授权）后可经重新扫描恢复为 GENERATED
+  const candidateStatus = failure.retryable
+    ? AltCandidateStatus.WRITEBACK_FAILED_RETRYABLE
+    : AltCandidateStatus.WRITEBACK_FAILED_PERMANENT;
 
   await dependencies.prisma.$transaction(async (tx) => {
     const updatedItem = await tx.jobItem.updateMany({
@@ -180,8 +187,8 @@ export async function markWritebackJobFailed(
         status: { in: [...PROCESSABLE_STATUSES] },
       },
       data: {
-        status: AltCandidateStatus.WRITEBACK_FAILED_RETRYABLE,
-        errorCode: "WRITEBACK_FAILED",
+        status: candidateStatus,
+        errorCode,
         errorMessage: message,
       },
     });
@@ -197,8 +204,9 @@ export async function markWritebackJobFailed(
   log.error(
     {
       shopId: data.shopId,
-      error_code: "WRITEBACK_FAILED",
+      error_code: errorCode,
       error_message: message,
+      retryable: failure.retryable,
     },
     "writeback.failed",
   );
