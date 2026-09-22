@@ -459,7 +459,18 @@ function SummaryModal({ summary, totalCount, onClose }: SummaryModalProps) {
     <div className={styles.overlay}>
       <div className={styles.modal}>
         <s-stack direction="block" gap="base">
-          <s-heading>{allSuccess && !writebackError && (writeback === null || writeback.fail === 0) ? "生成完成！" : "生成已结束"}</s-heading>
+          <div className={styles.modalHeader}>
+            <s-heading>{allSuccess && !writebackError && (writeback === null || writeback.fail === 0) ? "生成完成！" : "生成已结束"}</s-heading>
+            <button
+              type="button"
+              className={styles.closeButton}
+              onClick={onClose}
+              aria-label="关闭"
+              title="关闭"
+            >
+              ×
+            </button>
+          </div>
 
           {/* 生成汇总统计卡片 */}
           <s-text tone="neutral">生成结果</s-text>

@@ -32,6 +32,7 @@
     "field": "tsx E:/typescript-prisma-query-tool/src/cli.ts field",
     "search": "tsx E:/typescript-prisma-query-tool/src/cli.ts search",
     "testpublish": "tsx tests/publish-scan.test.ts",
+    "clear:alt": "tsx scripts/clear-media-alt.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
