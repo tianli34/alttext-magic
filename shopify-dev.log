@@ -30,3 +30,282 @@
 ╰──────────────────────────────────────────────────────────────────────────────╯
 [1] https://shopify.dev/docs/apps/build/cli-for-apps/networking-options
 
+╭─ info ───────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  Using shopify.app.development.toml for default values:                      │
+│                                                                              │
+│    • Org:             Magic AI Lab                                           │
+│    • App:             AltText Magic                                          │
+│    • Dev store:       magic-ai-test-01.myshopify.com                         │
+│    • Update URLs:     Yes                                                    │
+│                                                                              │
+│   You can pass `--reset` to your command to reset your app configuration.    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Running pre-dev command: "pnpm exec prisma generate"Preparing dev preview on magic-ai-test-01.myshopify.comProxy server started on port 49172 GraphiQL server started on port 3457❌ Error└  The following topic is invalid: app/subscriptions/update╭─ error ──────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  Failed to start dev preview.                                                │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+╭─ info ───────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  Using shopify.app.development.toml for default values:                      │
+│                                                                              │
+│    • Org:             Magic AI Lab                                           │
+│    • App:             AltText Magic                                          │
+│    • Dev store:       magic-ai-test-01.myshopify.com                         │
+│    • Update URLs:     Yes                                                    │
+│                                                                              │
+│   You can pass `--reset` to your command to reset your app configuration.    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Running pre-dev command: "pnpm exec prisma generate"Preparing dev preview on magic-ai-test-01.myshopify.comProxy server started on port 49680 GraphiQL server started on port 3457Loaded Prisma config from prisma.config.ts.
+
+✅ Ready, watching for changes in your app │ Access scopes auto-granted: read_content, read_files, read_products, write_content, write_files, write_products└ Using URL: https://wildlife-stephanie-point-totally.trycloudflare.comPrisma schema loaded from prisma\schema.prisma.
+┌─────────────────────────────────────────────────────────┐
+│  Update available 7.6.0 -> 8.0.0-rc.15                  │
+│                                                         │
+│  This is a major update - please follow the guide at    │
+│  https://pris.ly/d/major-version-upgrade                │
+│                                                         │
+│  Run the following to update                            │
+│    npm i --save-dev prisma@latest                       │
+│    npm i @prisma/client@latest                          │
+└─────────────────────────────────────────────────────────┘
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma\schema.prisma.
+Datasource "db": PostgreSQL database "mydatabase", schema "public" at "localhost:5432"
+
+19 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+[2m06:29:01[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m Re-optimizing dependencies because lockfile has changed
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m49683[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[dotenv@17.3.1] injecting env (0) from .env -- tip: 🤖 agentic secret storage: https://dotenvx.com/as2
+[shopify-api/INFO] version 13.0.0, environment React Router
+[2026-09-22 06:30:21.298] [32mINFO[39m: [36mrequest completed[39m
+    [35mapp[39m: "shopify-app"
+    [35menv[39m: "development"
+    [35mreq[39m: {
+      "id": "3b1ced9a-695f-42cb-92e3-b57745640ccf",
+      "method": "GET",
+      "url": "/",
+      "headers": {
+        "host": "localhost:49683",
+        "user-agent": "curl/8.19.0",
+        "accept": "*/*"
+      },
+      "remoteAddress": "::1",
+      "remotePort": 49747
+    }
+    [35mrequest_id[39m: "3b1ced9a-695f-42cb-92e3-b57745640ccf"
+    [35mres[39m: {
+      "statusCode": 200,
+      "headers": {
+        "x-request-id": "3b1ced9a-695f-42cb-92e3-b57745640ccf",
+        "vary": "Origin",
+        "content-type": "text/html"
+      }
+    }
+    [35mresponseTime[39m: 4808
+[2026-09-22 06:30:28.057] [32mINFO[39m: [36mrequest completed[39m
+    [35mapp[39m: "shopify-app"
+    [35menv[39m: "development"
+    [35mreq[39m: {
+      "id": "6698a564-86a9-4120-92c8-47ef4647ede3",
+      "method": "GET",
+      "url": "/",
+      "headers": {
+        "host": "wildlife-stephanie-point-totally.trycloudflare.com",
+        "user-agent": "curl/8.19.0",
+        "accept": "*/*",
+        "accept-encoding": "gzip",
+        "cdn-loop": "cloudflare; loops=1; subreqs=1",
+        "cf-connecting-ip": "117.153.220.7",
+        "cf-ew-via": "15",
+        "cf-ipcountry": "CN",
+        "cf-ray": "a3ef42e16aeb0d83-LAX",
+        "cf-visitor": "{\"scheme\":\"https\"}",
+        "cf-warp-tag-id": "a020146e-f96b-4783-a715-cb09152552dd",
+        "cf-worker": "trycloudflare.com",
+        "connection": "close",
+        "x-forwarded-for": "117.153.220.7",
+        "x-forwarded-proto": "https"
+      },
+      "remoteAddress": "::1",
+      "remotePort": 49762
+    }
+    [35mrequest_id[39m: "6698a564-86a9-4120-92c8-47ef4647ede3"
+    [35mres[39m: {
+      "statusCode": 200,
+      "headers": {
+        "x-request-id": "6698a564-86a9-4120-92c8-47ef4647ede3",
+        "vary": "Origin",
+        "content-type": "text/html"
+      }
+    }
+    [35mresponseTime[39m: 18
+Error: No route matches URL "/%60"
+    at getInternalRouterError (file:///E:/alttext-magic/node_modules/.pnpm/react-router@7.13.2_react-d_5aa9dd8fca2581c765354ffbf9144e38/node_modules/react-router/dist/development/chunk-UVKPFVEO.mjs:5266:5)
+    at Object.query (file:///E:/alttext-magic/node_modules/.pnpm/react-router@7.13.2_react-d_5aa9dd8fca2581c765354ffbf9144e38/node_modules/react-router/dist/development/chunk-UVKPFVEO.mjs:3298:19)
+    at handleDocumentRequest (file:///E:/alttext-magic/node_modules/.pnpm/react-router@7.13.2_react-d_5aa9dd8fca2581c765354ffbf9144e38/node_modules/react-router/dist/development/chunk-UALY5CBT.mjs:1449:38)
+    at requestHandler (file:///E:/alttext-magic/node_modules/.pnpm/react-router@7.13.2_react-d_5aa9dd8fca2581c765354ffbf9144e38/node_modules/react-router/dist/development/chunk-UALY5CBT.mjs:1308:24)
+    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at nodeHandler (E:\alttext-magic\node_modules\.pnpm\@react-router+dev@7.13.2_@r_39f16ae6c5921af00c1ab2b44f90a774\node_modules\@react-router\dev\dist\vite.js:3773:30)
+    at E:\alttext-magic\node_modules\.pnpm\@react-router+dev@7.13.2_@r_39f16ae6c5921af00c1ab2b44f90a774\node_modules\@react-router\dev\dist\vite.js:3780:17
+No routes matched location "/%60" 
+ErrorResponseImpl {
+  status: 404,
+  statusText: 'Not Found',
+  internal: true,
+  data: 'Error: No route matches URL "/%60"',
+  error: Error: No route matches URL "/%60"
+      at getInternalRouterError (file:///E:/alttext-magic/node_modules/.pnpm/react-router@7.13.2_react-d_5aa9dd8fca2581c765354ffbf9144e38/node_modules/react-router/dist/development/chunk-UVKPFVEO.mjs:5266:5)
+      at Object.query (file:///E:/alttext-magic/node_modules/.pnpm/react-router@7.13.2_react-d_5aa9dd8fca2581c765354ffbf9144e38/node_modules/react-router/dist/development/chunk-UVKPFVEO.mjs:3298:19)
+      at handleDocumentRequest (file:///E:/alttext-magic/node_modules/.pnpm/react-router@7.13.2_react-d_5aa9dd8fca2581c765354ffbf9144e38/node_modules/react-router/dist/development/chunk-UALY5CBT.mjs:1449:38)
+      at requestHandler (file:///E:/alttext-magic/node_modules/.pnpm/react-router@7.13.2_react-d_5aa9dd8fca2581c765354ffbf9144e38/node_modules/react-router/dist/development/chunk-UALY5CBT.mjs:1308:24)
+      at processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at nodeHandler (E:\alttext-magic\node_modules\.pnpm\@react-router+dev@7.13.2_@r_39f16ae6c5921af00c1ab2b44f90a774\node_modules\@react-router\dev\dist\vite.js:3773:30)
+      at E:\alttext-magic\node_modules\.pnpm\@react-router+dev@7.13.2_@r_39f16ae6c5921af00c1ab2b44f90a774\node_modules\@react-router\dev\dist\vite.js:3780:17
+}
+[2026-09-22 06:31:59.766] [32mINFO[39m: [36mrequest completed[39m
+    [35mapp[39m: "shopify-app"
+    [35menv[39m: "development"
+    [35mreq[39m: {
+      "id": "a6820651-ffe5-4bc9-b83c-11b134b4bfab",
+      "method": "GET",
+      "url": "/%60",
+      "headers": {
+        "host": "wildlife-stephanie-point-totally.trycloudflare.com",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        "accept-encoding": "gzip",
+        "accept-language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+        "cdn-loop": "cloudflare; loops=1; subreqs=1",
+        "cf-connecting-ip": "140.235.11.164",
+        "cf-ew-via": "15",
+        "cf-ipcountry": "SG",
+        "cf-ray": "a3ef451e28e77b14-LAX",
+        "cf-visitor": "{\"scheme\":\"https\"}",
+        "cf-warp-tag-id": "a020146e-f96b-4783-a715-cb09152552dd",
+        "cf-worker": "trycloudflare.com",
+        "connection": "close",
+        "priority": "u=4, i",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-site": "none",
+        "x-forwarded-for": "140.235.11.164",
+        "x-forwarded-proto": "https"
+      },
+      "remoteAddress": "::1",
+      "remotePort": 49909
+    }
+    [35mrequest_id[39m: "a6820651-ffe5-4bc9-b83c-11b134b4bfab"
+    [35mres[39m: {
+      "statusCode": 404,
+      "headers": {
+        "x-request-id": "a6820651-ffe5-4bc9-b83c-11b134b4bfab",
+        "vary": "Origin",
+        "content-type": "text/html"
+      }
+    }
+    [35mresponseTime[39m: 34
+[2026-09-22 06:32:01.230] [32mINFO[39m: [36mrequest completed[39m
+    [35mapp[39m: "shopify-app"
+    [35menv[39m: "development"
+    [35mreq[39m: {
+      "id": "14437dd8-a258-40ea-b64b-dec303040817",
+      "method": "GET",
+      "url": "/favicon.ico",
+      "headers": {
+        "host": "wildlife-stephanie-point-totally.trycloudflare.com",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "accept": "image/avif,image/webp,image/svg+xml,image/png,image/*,*/*;q=0.8",
+        "accept-encoding": "gzip",
+        "accept-language": "zh-CN",
+        "cdn-loop": "cloudflare; loops=1; subreqs=1",
+        "cf-connecting-ip": "140.235.11.164",
+        "cf-ew-via": "15",
+        "cf-ipcountry": "SG",
+        "cf-ray": "a3ef452598797b14-SIN",
+        "cf-visitor": "{\"scheme\":\"https\"}",
+        "cf-warp-tag-id": "a020146e-f96b-4783-a715-cb09152552dd",
+        "cf-worker": "trycloudflare.com",
+        "connection": "close",
+        "priority": "u=4, i",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-site": "none",
+        "x-forwarded-for": "140.235.11.164",
+        "x-forwarded-proto": "https"
+      },
+      "remoteAddress": "::1",
+      "remotePort": 49922
+    }
+    [35mrequest_id[39m: "14437dd8-a258-40ea-b64b-dec303040817"
+    [35mres[39m: {
+      "statusCode": 200,
+      "headers": {
+        "x-request-id": "14437dd8-a258-40ea-b64b-dec303040817",
+        "vary": "Origin",
+        "content-length": 16958,
+        "content-type": "image/x-icon",
+        "last-modified": "Mon, 14 Sep 2026 07:01:29 GMT",
+        "etag": "W/\"16958-1789369289293\"",
+        "cache-control": "no-cache"
+      }
+    }
+    [35mresponseTime[39m: 6
+[2026-09-22 06:32:01.921] [32mINFO[39m: [36mrequest completed[39m
+    [35mapp[39m: "shopify-app"
+    [35menv[39m: "development"
+    [35mreq[39m: {
+      "id": "bc921b9b-186a-4f8a-b2b3-a1e59914023a",
+      "method": "GET",
+      "url": "/favicon.ico",
+      "headers": {
+        "host": "wildlife-stephanie-point-totally.trycloudflare.com",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) QoderCN/0.3.4 Chrome/150.0.7871.114 Electron/43.1.1 Safari/537.36",
+        "accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "accept-encoding": "gzip",
+        "accept-language": "zh-CN",
+        "cdn-loop": "cloudflare; loops=1; subreqs=1",
+        "cf-connecting-ip": "140.235.11.164",
+        "cf-ew-via": "15",
+        "cf-ipcountry": "SG",
+        "cf-ray": "a3ef452c0ee67b14-LAX",
+        "cf-visitor": "{\"scheme\":\"https\"}",
+        "cf-warp-tag-id": "a020146e-f96b-4783-a715-cb09152552dd",
+        "cf-worker": "trycloudflare.com",
+        "connection": "close",
+        "if-modified-since": "Mon, 14 Sep 2026 07:01:29 GMT",
+        "if-none-match": "W/\"16958-1789369289293\"",
+        "priority": "i",
+        "sec-ch-ua": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "sec-fetch-dest": "image",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-site": "cross-site",
+        "sec-fetch-storage-access": "active",
+        "x-forwarded-for": "140.235.11.164",
+        "x-forwarded-proto": "https"
+      },
+      "remoteAddress": "::1",
+      "remotePort": 49926
+    }
+    [35mrequest_id[39m: "bc921b9b-186a-4f8a-b2b3-a1e59914023a"
+    [35mres[39m: {
+      "statusCode": 304,
+      "headers": {
+        "x-request-id": "bc921b9b-186a-4f8a-b2b3-a1e59914023a",
+        "vary": "Origin"
+      }
+    }
+    [35mresponseTime[39m: 1
