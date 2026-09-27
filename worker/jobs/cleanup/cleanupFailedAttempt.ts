@@ -34,7 +34,7 @@ export interface CleanupResult {
  * DELETE FROM scan_task_attempt WHERE id IN (
  *   SELECT id FROM scan_task_attempt
  *   WHERE status = 'FAILED'
- *     AND started_at < NOW() - interval '7 days'
+ *     AND started_at < NOW() - make_interval(days => 7)
  *   LIMIT 1000
  * )
  * ```
@@ -54,7 +54,7 @@ export async function cleanupFailedAttempt(client: PrismaClient): Promise<Cleanu
       DELETE FROM scan_task_attempt WHERE id IN (
         SELECT id FROM scan_task_attempt
         WHERE status = 'FAILED'
-          AND started_at < NOW() - interval '${RETENTION_DAYS} days'
+          AND started_at < NOW() - make_interval(days => ${RETENTION_DAYS})
         LIMIT ${BATCH_SIZE}
       )
     `;

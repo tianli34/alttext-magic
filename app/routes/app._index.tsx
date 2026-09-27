@@ -13,6 +13,8 @@ import { getBootstrapData } from "../../server/modules/bootstrap/bootstrap.servi
 import { ImageStatusPie, type ImageGroupStats } from "../components/dashboard/ImageStatusPie";
 import { QuotaSummary } from "../components/dashboard/QuotaSummary";
 import { ScanProgressFloat } from "../components/dashboard/ScanProgressFloat";
+// [TEMP-DEVTOOLS] 临时脚本入口面板，生产构建下不会渲染（见下方 import.meta.env.DEV 判断）
+import { ClearMediaAltPanel } from "../components/dashboard/ClearMediaAltPanel";
 import { GenerationFlow } from "../components/generation/GenerationFlow";
 import { useGenerationFlow } from "../hooks/useGenerationFlow";
 import { formatRelativeTime } from "../lib/format";
@@ -131,6 +133,11 @@ function DashboardContent() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   /** 刷新键（用于触发重新获取） */
   const [refreshKey, setRefreshKey] = useState(0);
+
+  /** [TEMP-DEVTOOLS] 临时工具任务结束后的稳定刷新回调 */
+  const refreshDashboard = useCallback(() => {
+    setRefreshKey((prev) => prev + 1);
+  }, []);
 
   /** 重新扫描状态 */
   const [rescanning, setRescanning] = useState(false);
@@ -448,6 +455,11 @@ function DashboardContent() {
 
           {/* 当前额度卡片 */}
           <QuotaSummary />
+
+          {/* [TEMP-DEVTOOLS] 临时脚本入口：清空店铺产品图片 alt，仅开发环境渲染 */}
+          {import.meta.env.DEV && (
+            <ClearMediaAltPanel onFinished={refreshDashboard} />
+          )}
         </s-stack>
       </s-section>
 

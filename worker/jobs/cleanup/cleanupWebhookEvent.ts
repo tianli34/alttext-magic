@@ -34,7 +34,7 @@ export interface CleanupResult {
  * DELETE FROM webhook_events WHERE id IN (
  *   SELECT id FROM webhook_events
  *   WHERE processed_at IS NOT NULL
- *     AND created_at < NOW() - interval '7 days'
+ *     AND created_at < NOW() - make_interval(days => 7)
  *   LIMIT 1000
  * )
  * ```
@@ -54,7 +54,7 @@ export async function cleanupWebhookEvent(client: PrismaClient): Promise<Cleanup
       DELETE FROM webhook_events WHERE id IN (
         SELECT id FROM webhook_events
         WHERE processed_at IS NOT NULL
-          AND created_at < NOW() - interval '${RETENTION_DAYS} days'
+          AND created_at < NOW() - make_interval(days => ${RETENTION_DAYS})
         LIMIT ${BATCH_SIZE}
       )
     `;
