@@ -1,12 +1,19 @@
 /**
  * File: app/components/generation/GenerationFlow.tsx
  * Purpose: 生成触发交互流程组件。
- *          包含预检确认 Modal、生成进度展示 Modal、自动写回进度展示 Modal、完成汇总 Modal。
+ *          包含预检确认 Modal、生成进度展示浮层、自动写回进度展示浮层、完成汇总 Modal。
+ *          生成/写回/启动阶段为左侧固定浮层（无遮罩，停靠在仪表盘左侧留白，不与仪表盘重叠；
+ *          任何视口宽度下均保持左侧停靠）；确认与汇总为居中 Modal。
  *          由外部传入 useGenerationFlow 返回值驱动渲染。
  */
 import { useLocation, useNavigate } from "react-router";
+import type { ReactNode, RefObject } from "react";
 import styles from "./GenerationFlow.module.css";
 import { buildAppPath } from "../../lib/app-navigation";
+import {
+  SIDE_PANEL_EDGE_INSET,
+  SIDE_PANEL_WIDTH,
+} from "../../hooks/useSidePanelRail";
 import type {
   GenerationFlowPhase,
   PreflightResult,
@@ -46,6 +53,10 @@ interface GenerationFlowProps {
   writebackPercent: number;
   /** 写回 SSE 连接错误 */
   writebackError: string | null;
+  /** 左侧浮层宽度（px，已按仪表盘左侧可用留白收敛，由 useSidePanelRail 计算） */
+  sidePanelWidth?: number;
+  /** 浮层元素 ref：供 useSidePanelRail 实测真实右边缘做闭环校正 */
+  sidePanelRef?: RefObject<HTMLDivElement>;
   /** 确认并启动生成 */
   onConfirmAndStart: () => void;
   /** 取消 */
@@ -72,6 +83,8 @@ export function GenerationFlow({
   writebackConnected,
   writebackPercent,
   writebackError,
+  sidePanelWidth = SIDE_PANEL_WIDTH,
+  sidePanelRef,
   onConfirmAndStart,
   onCancel,
   onCloseSummary,
@@ -99,14 +112,12 @@ export function GenerationFlow({
 
   if (phase === "STARTING") {
     return (
-      <div className={styles.overlay}>
-        <div className={styles.modal}>
-          <s-stack direction="block" gap="base">
-            <s-heading>正在启动生成…</s-heading>
-            <s-text tone="neutral">正在准备生成任务，请稍候。</s-text>
-          </s-stack>
-        </div>
-      </div>
+      <SidePanel width={sidePanelWidth} panelRef={sidePanelRef}>
+        <s-stack direction="block" gap="base">
+          <s-heading>正在启动生成…</s-heading>
+          <s-text tone="neutral">正在准备生成任务，请稍候。</s-text>
+        </s-stack>
+      </SidePanel>
     );
   }
 
@@ -118,6 +129,8 @@ export function GenerationFlow({
         connected={connected}
         percent={percent}
         error={error}
+        width={sidePanelWidth}
+        panelRef={sidePanelRef}
       />
     );
   }
@@ -129,6 +142,8 @@ export function GenerationFlow({
         connected={writebackConnected}
         percent={writebackPercent}
         error={writebackError}
+        width={sidePanelWidth}
+        panelRef={sidePanelRef}
       />
     );
   }
@@ -144,6 +159,30 @@ export function GenerationFlow({
   }
 
   return null;
+}
+
+// ============================================================================
+// 左侧浮层容器（启动/生成/写回进度：无遮罩，停靠在仪表盘左侧留白）
+// ============================================================================
+
+interface SidePanelProps {
+  /** 浮层宽度（px），已按仪表盘左侧可用留白收敛 */
+  width: number;
+  /** 浮层元素 ref（供调用方实测真实右边缘做闭环校正） */
+  panelRef?: RefObject<HTMLDivElement>;
+  children: ReactNode;
+}
+
+function SidePanel({ width, panelRef, children }: SidePanelProps) {
+  return (
+    <div
+      ref={panelRef}
+      className={styles.sidePanel}
+      style={{ left: SIDE_PANEL_EDGE_INSET, width }}
+    >
+      {children}
+    </div>
+  );
 }
 
 // ============================================================================
@@ -325,6 +364,10 @@ interface ProgressModalProps {
   connected: boolean;
   percent: number;
   error: string | null;
+  /** 浮层宽度（px） */
+  width: number;
+  /** 浮层元素 ref（供调用方实测真实右边缘做闭环校正） */
+  panelRef?: RefObject<HTMLDivElement>;
 }
 
 function ProgressModal({
@@ -333,66 +376,66 @@ function ProgressModal({
   connected,
   percent,
   error,
+  width,
+  panelRef,
 }: ProgressModalProps) {
   const current = progress?.current ?? 0;
   const total = progress?.total ?? totalCount;
 
   return (
-    <div className={styles.overlay}>
-      <div className={styles.modal}>
-        <s-stack direction="block" gap="base">
-          <s-heading>正在生成 Alt Text…</s-heading>
+    <SidePanel width={width} panelRef={panelRef}>
+      <s-stack direction="block" gap="base">
+        <s-heading>正在生成 Alt Text…</s-heading>
 
-          {/* 进度条 */}
-          <div className={styles.progressContainer}>
-            <div className={styles.progressBarTrack}>
-              <div
-                className={`${styles.progressBarFill} ${
-                  percent >= 100 ? styles.progressBarFillComplete : ""
-                }`}
-                style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
-              />
-            </div>
-            <div className={styles.progressCount}>
-              <s-text tone="neutral">
-                {connected ? "已连接" : "连接中…"}
-              </s-text>
-              <s-text>
-                {current} / {total} 已完成
-              </s-text>
-            </div>
+        {/* 进度条 */}
+        <div className={styles.progressContainer}>
+          <div className={styles.progressBarTrack}>
+            <div
+              className={`${styles.progressBarFill} ${
+                percent >= 100 ? styles.progressBarFillComplete : ""
+              }`}
+              style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
+            />
           </div>
-
-          {/* 失败计数 */}
-          {progress && progress.failed > 0 && (
-            <s-text tone="critical">
-              {progress.failed} 张图片生成失败
-            </s-text>
-          )}
-
-          {/* 跳过计数 */}
-          {progress && progress.skipped > 0 && (
-            <s-text tone="caution">
-              {progress.skipped} 张图片已跳过（已有 Alt Text）
-            </s-text>
-          )}
-
-          {/* 错误信息 */}
-          {error && (
-            <s-box padding="base" borderRadius="base" background="strong">
-              <s-text tone="critical">{error}</s-text>
-            </s-box>
-          )}
-
-          {/* 处理中提示 */}
-          {!error && percent < 100 && (
+          <div className={styles.progressCount}>
             <s-text tone="neutral">
-              AI 正在为每张图片生成 Alt Text，请勿关闭此页面。
+              {connected ? "已连接" : "连接中…"}
             </s-text>
-          )}
-        </s-stack>
-      </div>
-    </div>
+            <s-text>
+              {current} / {total} 已完成
+            </s-text>
+          </div>
+        </div>
+
+        {/* 失败计数 */}
+        {progress && progress.failed > 0 && (
+          <s-text tone="critical">
+            {progress.failed} 张图片生成失败
+          </s-text>
+        )}
+
+        {/* 跳过计数 */}
+        {progress && progress.skipped > 0 && (
+          <s-text tone="caution">
+            {progress.skipped} 张图片已跳过（已有 Alt Text）
+          </s-text>
+        )}
+
+        {/* 错误信息 */}
+        {error && (
+          <s-box padding="base" borderRadius="base" background="strong">
+            <s-text tone="critical">{error}</s-text>
+          </s-box>
+        )}
+
+        {/* 处理中提示 */}
+        {!error && percent < 100 && (
+          <s-text tone="neutral">
+            AI 正在为每张图片生成 Alt Text，请勿关闭此页面。
+          </s-text>
+        )}
+      </s-stack>
+    </SidePanel>
   );
 }
 
@@ -405,6 +448,10 @@ interface WritebackProgressViewProps {
   connected: boolean;
   percent: number;
   error: string | null;
+  /** 浮层宽度（px） */
+  width: number;
+  /** 浮层元素 ref（供调用方实测真实右边缘做闭环校正） */
+  panelRef?: RefObject<HTMLDivElement>;
 }
 
 function WritebackProgressView({
@@ -412,73 +459,73 @@ function WritebackProgressView({
   connected,
   percent,
   error,
+  width,
+  panelRef,
 }: WritebackProgressViewProps) {
   const total = progress?.total ?? 0;
   const done = (progress?.success ?? 0) + (progress?.fail ?? 0) + (progress?.skip ?? 0);
 
   return (
-    <div className={styles.overlay}>
-      <div className={styles.modal}>
-        <s-stack direction="block" gap="base">
-          <s-heading>正在自动写回 Alt Text…</s-heading>
+    <SidePanel width={width} panelRef={panelRef}>
+      <s-stack direction="block" gap="base">
+        <s-heading>正在自动写回 Alt Text…</s-heading>
 
-          {/* 进度条 */}
-          <div className={styles.progressContainer}>
-            <div className={styles.progressBarTrack}>
-              <div
-                className={`${styles.progressBarFill} ${
-                  percent >= 100 ? styles.progressBarFillComplete : ""
-                }`}
-                style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
-              />
-            </div>
-            <div className={styles.progressCount}>
-              <s-text tone="neutral">
-                {connected ? "已连接" : "连接中…"}
-              </s-text>
-              <s-text>
-                {done} / {total} 已完成
-              </s-text>
-            </div>
+        {/* 进度条 */}
+        <div className={styles.progressContainer}>
+          <div className={styles.progressBarTrack}>
+            <div
+              className={`${styles.progressBarFill} ${
+                percent >= 100 ? styles.progressBarFillComplete : ""
+              }`}
+              style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
+            />
           </div>
-
-          {/* 成功计数 */}
-          {progress && progress.success > 0 && (
-            <s-text tone="success">
-              {progress.success} 张图片写回成功
-            </s-text>
-          )}
-
-          {/* 失败计数 */}
-          {progress && progress.fail > 0 && (
-            <s-text tone="critical">
-              {progress.fail} 张图片写回失败
-            </s-text>
-          )}
-
-          {/* 跳过计数 */}
-          {progress && progress.skip > 0 && (
-            <s-text tone="caution">
-              {progress.skip} 张图片已跳过（已有 Alt Text）
-            </s-text>
-          )}
-
-          {/* 错误信息 */}
-          {error && (
-            <s-box padding="base" borderRadius="base" background="strong">
-              <s-text tone="critical">{error}</s-text>
-            </s-box>
-          )}
-
-          {/* 处理中提示 */}
-          {!error && percent < 100 && (
+          <div className={styles.progressCount}>
             <s-text tone="neutral">
-              正在将生成的 Alt Text 写回 Shopify，请勿关闭此页面。
+              {connected ? "已连接" : "连接中…"}
             </s-text>
-          )}
-        </s-stack>
-      </div>
-    </div>
+            <s-text>
+              {done} / {total} 已完成
+            </s-text>
+          </div>
+        </div>
+
+        {/* 成功计数 */}
+        {progress && progress.success > 0 && (
+          <s-text tone="success">
+            {progress.success} 张图片写回成功
+          </s-text>
+        )}
+
+        {/* 失败计数 */}
+        {progress && progress.fail > 0 && (
+          <s-text tone="critical">
+            {progress.fail} 张图片写回失败
+          </s-text>
+        )}
+
+        {/* 跳过计数 */}
+        {progress && progress.skip > 0 && (
+          <s-text tone="caution">
+            {progress.skip} 张图片已跳过（已有 Alt Text）
+          </s-text>
+        )}
+
+        {/* 错误信息 */}
+        {error && (
+          <s-box padding="base" borderRadius="base" background="strong">
+            <s-text tone="critical">{error}</s-text>
+          </s-box>
+        )}
+
+        {/* 处理中提示 */}
+        {!error && percent < 100 && (
+          <s-text tone="neutral">
+            正在将生成的 Alt Text 写回 Shopify，请勿关闭此页面。
+          </s-text>
+        )}
+      </s-stack>
+    </SidePanel>
   );
 }
 

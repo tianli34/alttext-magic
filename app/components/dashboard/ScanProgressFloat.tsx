@@ -17,6 +17,8 @@ interface ScanProgressFloatProps {
   onClose: () => void;
   /** 重新扫描回调，参数为新的 scanJobId */
   onRescan: (newScanJobId: string) => void;
+  /** 扫描到达终态回调（同一任务仅触发一次，用于同步 Dashboard 统计与图表） */
+  onTerminal?: () => void;
 }
 
 /** 资源类型中文标签 */
@@ -42,6 +44,7 @@ export function ScanProgressFloat({
   scanJobId,
   onClose,
   onRescan,
+  onTerminal,
 }: ScanProgressFloatProps) {
   const [minimized, setMinimized] = useState(false);
 
@@ -66,7 +69,7 @@ export function ScanProgressFloat({
     handleStop,
     stopping,
     stopError,
-  } = useBatchProgress(scanJobId);
+  } = useBatchProgress(scanJobId, onTerminal);
 
   const message = progress?.message ?? "";
   const tasks = scanStatus?.tasks ?? [];

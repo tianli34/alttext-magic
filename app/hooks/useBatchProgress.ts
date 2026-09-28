@@ -10,7 +10,7 @@
  *   3. SSE 事件到达后覆盖进度数据
  *   4. 到达终态后停止 SSE
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSSE, type SSEProgressData } from "./useSSE";
 import { useScanStatus, type ScanStatusData } from "./useScanStatus";
 
@@ -117,7 +117,7 @@ interface UseBatchProgressReturn {
  * 扫描进度聚合 Hook。
  *
  * @param scanJobId 扫描任务 ID
- * @param onTerminal 可选回调，到达终态时触发
+ * @param onTerminal 可选回调，扫描到达终态时触发（同一 scanJobId 仅触发一次）
  */
 export function useBatchProgress(
   scanJobId: string | null,
@@ -126,10 +126,28 @@ export function useBatchProgress(
   // 1. 初始状态恢复（页面刷新时使用）
   const { data: scanStatus, loading, refresh: refreshStatus } = useScanStatus(scanJobId);
 
-  // 2. SSE 实时推送
+  // 用 ref 保存最新回调：调用方回调身份变化时不应引起 SSE 重连
+  const onTerminalRef = useRef(onTerminal);
+  useEffect(() => {
+    onTerminalRef.current = onTerminal;
+  }, [onTerminal]);
+  /** 已通知过终态的 scanJobId（SSE 推送与轮询恢复可能先后判定为终态，需去重） */
+  const terminalNotifiedJobIdRef = useRef<string | null>(null);
+
+  /** 终态通知：同一 scanJobId 只向上层回调一次 */
+  const notifyTerminal = useCallback(() => {
+    if (!scanJobId || terminalNotifiedJobIdRef.current === scanJobId) {
+      return;
+    }
+
+    terminalNotifiedJobIdRef.current = scanJobId;
+    onTerminalRef.current?.();
+  }, [scanJobId]);
+
+  // 2. SSE 实时推送（终态事件到达时通过 notifyTerminal 通知上层）
   const { progress, connected, error: sseError } = useSSE(
     scanJobId,
-    onTerminal,
+    notifyTerminal,
   );
 
   // 3. 重新扫描状态
@@ -239,6 +257,15 @@ const canStop = !!scanStatus &&
   scanStatus.scanJob.status === "RUNNING" &&
   scanStatus.tasks.length > 0 &&
   scanStatus.tasks.every((task) => task.status === "PENDING");
+
+  // 终态兜底通知：SSE 终态事件可能丢失（连接中断 / 刷新后仅靠轮询恢复），
+  // 因此只要判定为终态就通知一次，用于同步 Dashboard 统计与图表
+  useEffect(() => {
+    if (effectiveIsTerminal) {
+      notifyTerminal();
+    }
+  }, [effectiveIsTerminal, notifyTerminal]);
+
   // 终态时触发一次最终刷新，确保任务列表与进度一致
   // 修复：SSE 终态比轮询更快到达时，轮询立即停止导致 scanStatus.tasks 为旧数据
   useEffect(() => {

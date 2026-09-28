@@ -14,6 +14,28 @@
   background: rgba(0, 0, 0, 0.45);
 }
 
+/* ---- 左侧浮层容器 ----
+   停靠在仪表盘左侧留白中（无遮罩，不遮挡主界面）。
+   任何视口宽度下均保持左侧停靠，禁止退化为底部通栏。
+   left / width 由 useSidePanelRail 的常量在运行时下发（SIDE_PANEL_EDGE_INSET / SIDE_PANEL_WIDTH），
+   此处的值仅作为 JS 未接管时的兜底，需与常量保持一致。 ---- */
+.sidePanel {
+  position: fixed;
+  top: 50%;
+  left: 12px;
+  z-index: 900;
+  width: 20rem;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 1.25rem;
+  border: 1px solid var(--p-color-border, #8a8a8a);
+  border-radius: 0.75rem;
+  background: var(--p-color-bg-surface, #ffffff);
+  /* 阴影收敛一些，避免大范围模糊晕染到仪表盘内容上造成「压边」的错觉 */
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  transform: translateY(-50%);
+}
+
 /* ---- Modal 容器 ---- */
 .modal {
   position: relative;

@@ -17,9 +17,11 @@ import { ScanProgressFloat } from "../components/dashboard/ScanProgressFloat";
 import { ClearMediaAltPanel } from "../components/dashboard/ClearMediaAltPanel";
 import { GenerationFlow } from "../components/generation/GenerationFlow";
 import { useGenerationFlow } from "../hooks/useGenerationFlow";
+import { useSidePanelRail } from "../hooks/useSidePanelRail";
 import { formatRelativeTime } from "../lib/format";
 import { useTimezone } from "../lib/timezone";
 import { DEFAULT_SCOPE_FLAG_STATE } from "../lib/scope-utils";
+import styles from "../components/dashboard/DashboardAnchor.module.css";
 
 /* ------------------------------------------------------------------ */
 /*  类型定义                                                           */
@@ -134,7 +136,7 @@ function DashboardContent() {
   /** 刷新键（用于触发重新获取） */
   const [refreshKey, setRefreshKey] = useState(0);
 
-  /** [TEMP-DEVTOOLS] 临时工具任务结束后的稳定刷新回调 */
+  /** 刷新回调：临时工具任务结束 / 扫描到达终态时重新拉取 Dashboard 数据 */
   const refreshDashboard = useCallback(() => {
     setRefreshKey((prev) => prev + 1);
   }, []);
@@ -143,6 +145,14 @@ function DashboardContent() {
   const [rescanning, setRescanning] = useState(false);
   const [rescanError, setRescanError] = useState<string | null>(null);
   const flow = useGenerationFlow();
+
+  /** 左侧进度浮层是否可见（启动/生成/写回阶段） */
+  const isProgressPanelActive =
+    flow.phase === "STARTING" ||
+    flow.phase === "GENERATING" ||
+    flow.phase === "WRITEBACK";
+  /** 左侧浮层停靠方案：测量左侧留白并计算仪表盘需要让出的宽度，避免重叠 */
+  const sidePanelRail = useSidePanelRail(isProgressPanelActive);
 
   /** 当前浮窗展示的扫描任务 ID（null 时不显示浮窗） */
   const [floatScanJobId, setFloatScanJobId] = useState<string | null>(null);
@@ -364,104 +374,108 @@ function DashboardContent() {
 
   return (
     <s-page heading="Dashboard">
-      <s-section heading="仪表盘">
-        <s-stack direction="block" gap="large">
-          {/* 扫描状态提示条 */}
-          {isScanning && (
-            <s-box
-              padding="base"
-              borderRadius="base"
-              background="strong"
-              borderWidth="base"
-            >
-              <s-stack direction="inline" gap="small">
-                <s-text tone="info">⏳</s-text>
-                <s-text>正在扫描…</s-text>
-                <s-text tone="neutral">数据可能会暂时滞后。</s-text>
-                {activeScanJobId && !floatScanJobId && (
-                  <div
-                    onClick={() => {
-                      setDismissedScanJobId(null);
-                      setFloatScanJobId(activeScanJobId);
-                    }}
-                    style={{ display: "inline-block", cursor: "pointer", marginLeft: "0.5rem" }}
-                  >
-                    <s-button variant="secondary" accessibilityLabel="查看进度">
-                      查看进度
-                    </s-button>
-                  </div>
-                )}
-              </s-stack>
-            </s-box>
-          )}
-
-          {/* 重新扫描按钮 */}
-          <s-stack direction="inline" gap="base">
-            <div
-              onClick={isScanButtonDisabled ? undefined : handleRescan}
-              style={{
-                display: "inline-block",
-                cursor: isScanButtonDisabled ? "not-allowed" : "pointer",
-                opacity: isScanButtonDisabled ? 0.6 : 1,
-              }}
-            >
-              <s-button
-                variant="primary"
-                {...(isScanButtonDisabled ? { disabled: true } : {})}
-                accessibilityLabel="扫描"
+      {/* 测量锚点：撑满仪表盘内容宽度，供浮层计算左侧可用留白；
+          仪表盘内容本身不施加让位，左边缘始终保持原位 */}
+      <div ref={sidePanelRail.anchorRef} className={styles.anchor}>
+        <s-section heading="仪表盘">
+          <s-stack direction="block" gap="large">
+            {/* 扫描状态提示条 */}
+            {isScanning && (
+              <s-box
+                padding="base"
+                borderRadius="base"
+                background="strong"
+                borderWidth="base"
               >
-                {rescanning ? "正在启动扫描…" : isScanning ? "扫描中…" : "扫描"}
-              </s-button>
-            </div>
-            <div
-              onClick={isQuickProcessDisabled ? undefined : handleQuickProcess}
-              style={{
-                display: "inline-block",
-                cursor: isQuickProcessDisabled ? "not-allowed" : "pointer",
-                opacity: isQuickProcessDisabled ? 0.6 : 1,
-              }}
-            >
-              <s-button
-                variant="primary"
-                {...(isQuickProcessDisabled ? { disabled: true } : {})}
-                accessibilityLabel="一键处理待生成和待写回图片"
+                <s-stack direction="inline" gap="small">
+                  <s-text tone="info">⏳</s-text>
+                  <s-text>正在扫描…</s-text>
+                  <s-text tone="neutral">数据可能会暂时滞后。</s-text>
+                  {activeScanJobId && !floatScanJobId && (
+                    <div
+                      onClick={() => {
+                        setDismissedScanJobId(null);
+                        setFloatScanJobId(activeScanJobId);
+                      }}
+                      style={{ display: "inline-block", cursor: "pointer", marginLeft: "0.5rem" }}
+                    >
+                      <s-button variant="secondary" accessibilityLabel="查看进度">
+                        查看进度
+                      </s-button>
+                    </div>
+                  )}
+                </s-stack>
+              </s-box>
+            )}
+
+            {/* 重新扫描按钮 */}
+            <s-stack direction="inline" gap="base">
+              <div
+                onClick={isScanButtonDisabled ? undefined : handleRescan}
+                style={{
+                  display: "inline-block",
+                  cursor: isScanButtonDisabled ? "not-allowed" : "pointer",
+                  opacity: isScanButtonDisabled ? 0.6 : 1,
+                }}
               >
-                一键处理
-              </s-button>
-            </div>
+                <s-button
+                  variant="primary"
+                  {...(isScanButtonDisabled ? { disabled: true } : {})}
+                  accessibilityLabel="扫描"
+                >
+                  {rescanning ? "正在启动扫描…" : isScanning ? "扫描中…" : "扫描"}
+                </s-button>
+              </div>
+              <div
+                onClick={isQuickProcessDisabled ? undefined : handleQuickProcess}
+                style={{
+                  display: "inline-block",
+                  cursor: isQuickProcessDisabled ? "not-allowed" : "pointer",
+                  opacity: isQuickProcessDisabled ? 0.6 : 1,
+                }}
+              >
+                <s-button
+                  variant="primary"
+                  {...(isQuickProcessDisabled ? { disabled: true } : {})}
+                  accessibilityLabel="一键处理待生成和待写回图片"
+                >
+                  一键处理
+                </s-button>
+              </div>
+            </s-stack>
+
+            {/* 重新扫描错误 */}
+            {rescanError && (
+              <s-box
+                padding="small"
+                borderRadius="base"
+                background="strong"
+              >
+                <s-text tone="critical">{rescanError}</s-text>
+              </s-box>
+            )}
+
+            {/* 上次发布时间 */}
+            <s-stack direction="inline" gap="small">
+              <s-text tone="neutral">上次数据更新：</s-text>
+              <s-text>
+                {formatRelativeTime(lastPublishedAt, timezone)}
+              </s-text>
+            </s-stack>
+
+            {/* 图片状态分布饼状图（汇总所有分组的 4 类图片数据） */}
+            <ImageStatusPie groups={groups} />
+
+            {/* 当前额度卡片 */}
+            <QuotaSummary />
+
+            {/* [TEMP-DEVTOOLS] 临时脚本入口：清空店铺产品图片 alt，仅开发环境渲染 */}
+            {import.meta.env.DEV && (
+              <ClearMediaAltPanel onFinished={refreshDashboard} />
+            )}
           </s-stack>
-
-          {/* 重新扫描错误 */}
-          {rescanError && (
-            <s-box
-              padding="small"
-              borderRadius="base"
-              background="strong"
-            >
-              <s-text tone="critical">{rescanError}</s-text>
-            </s-box>
-          )}
-
-          {/* 上次发布时间 */}
-          <s-stack direction="inline" gap="small">
-            <s-text tone="neutral">上次数据更新：</s-text>
-            <s-text>
-              {formatRelativeTime(lastPublishedAt, timezone)}
-            </s-text>
-          </s-stack>
-
-          {/* 图片状态分布饼状图（汇总所有分组的 4 类图片数据） */}
-          <ImageStatusPie groups={groups} />
-
-          {/* 当前额度卡片 */}
-          <QuotaSummary />
-
-          {/* [TEMP-DEVTOOLS] 临时脚本入口：清空店铺产品图片 alt，仅开发环境渲染 */}
-          {import.meta.env.DEV && (
-            <ClearMediaAltPanel onFinished={refreshDashboard} />
-          )}
-        </s-stack>
-      </s-section>
+        </s-section>
+      </div>
 
       {/* 扫描进度浮窗（右下角固定，可最小化） */}
       {floatScanJobId && (
@@ -474,6 +488,8 @@ function DashboardContent() {
             // 刷新 dashboard 统计数据
             setRefreshKey((prev) => prev + 1);
           }}
+          // 扫描到达终态：刷新 Dashboard 统计与饼图（同一任务仅触发一次）
+          onTerminal={refreshDashboard}
           onRescan={(newScanJobId) => {
             setDismissedScanJobId(null);
             setFloatScanJobId(newScanJobId);
@@ -494,6 +510,8 @@ function DashboardContent() {
         writebackConnected={flow.writebackConnected}
         writebackPercent={flow.writebackPercent}
         writebackError={flow.writebackError}
+        sidePanelWidth={sidePanelRail.panelWidth}
+        sidePanelRef={sidePanelRail.panelRef}
         onConfirmAndStart={() => void flow.confirmAndStart()}
         onCancel={flow.cancel}
         onCloseSummary={handleCloseSummary}
