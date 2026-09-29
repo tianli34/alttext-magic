@@ -21,6 +21,8 @@ import type {
 } from "../../hooks/useGenerationFlow";
 import type { GenerationProgressData } from "../../hooks/useGenerationSSE";
 import type { WritebackProgressData } from "../../hooks/useWritebackSSE";
+import type { WritebackTruthDebugEvent } from "../../hooks/useWritebackTruthDebug";
+import { TruthCheckDebugModal } from "./TruthCheckDebugModal";
 
 // ============================================================================
 // 类型定义
@@ -53,6 +55,10 @@ interface GenerationFlowProps {
   writebackPercent: number;
   /** 写回 SSE 连接错误 */
   writebackError: string | null;
+  /** 真值复核调试事件（仅 WRITEBACK_TRUTH_DEBUG=true 时有数据，调试专用） */
+  truthDebugEvents: WritebackTruthDebugEvent[];
+  /** 真值复核调试 SSE 是否已连接 */
+  truthDebugConnected: boolean;
   /** 左侧浮层宽度（px，已按仪表盘左侧可用留白收敛，由 useSidePanelRail 计算） */
   sidePanelWidth?: number;
   /** 浮层元素 ref：供 useSidePanelRail 实测真实右边缘做闭环校正 */
@@ -83,6 +89,8 @@ export function GenerationFlow({
   writebackConnected,
   writebackPercent,
   writebackError,
+  truthDebugEvents,
+  truthDebugConnected,
   sidePanelWidth = SIDE_PANEL_WIDTH,
   sidePanelRef,
   onConfirmAndStart,
@@ -137,14 +145,18 @@ export function GenerationFlow({
 
   if (phase === "WRITEBACK") {
     return (
-      <WritebackProgressView
-        progress={writebackProgress}
-        connected={writebackConnected}
-        percent={writebackPercent}
-        error={writebackError}
-        width={sidePanelWidth}
-        panelRef={sidePanelRef}
-      />
+      <>
+        <WritebackProgressView
+          progress={writebackProgress}
+          connected={writebackConnected}
+          percent={writebackPercent}
+          error={writebackError}
+          width={sidePanelWidth}
+          panelRef={sidePanelRef}
+        />
+        {/* 调试弹窗：实时展示写回链路的真值复核结果（无事件/已关闭/开关关闭时不渲染） */}
+        <TruthCheckDebugModal events={truthDebugEvents} connected={truthDebugConnected} />
+      </>
     );
   }
 

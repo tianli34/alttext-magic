@@ -161,6 +161,7 @@ export async function syncSubscriptionFromShopify(shopDomain, adapter, client) {
             select: { id: true, planCode: true, status: true },
         });
         return {
+            shopId: shop.id,
             created: false,
             changed: false,
             subscriptionId: localActive?.id ?? '',
@@ -178,6 +179,7 @@ export async function syncSubscriptionFromShopify(shopDomain, adapter, client) {
             select: { id: true, planCode: true, status: true },
         });
         return {
+            shopId: shop.id,
             created: false,
             changed: false,
             subscriptionId: localActive?.id ?? '',
@@ -202,6 +204,7 @@ export async function syncSubscriptionFromShopify(shopDomain, adapter, client) {
         if (existing.status === mapped.status && existing.planCode === mapped.planKey) {
             log.info({ shopId: shop.id, subscriptionId: existing.id }, '订阅已存在且状态一致，跳过（幂等）');
             return {
+                shopId: shop.id,
                 created: false,
                 changed: false,
                 subscriptionId: existing.id,
@@ -233,6 +236,7 @@ export async function syncSubscriptionFromShopify(shopDomain, adapter, client) {
         });
         log.info({ shopId: shop.id, subscriptionId: existing.id, newStatus: mapped.status }, '订阅状态更新完成');
         return {
+            shopId: shop.id,
             created: false,
             changed: true,
             subscriptionId: existing.id,
@@ -289,6 +293,7 @@ export async function syncSubscriptionFromShopify(shopDomain, adapter, client) {
         deactivatedCount: result.deactivatedCount,
     }, '新订阅创建完成，旧订阅已停用');
     return {
+        shopId: shop.id,
         created: true,
         changed: true,
         subscriptionId: result.subscriptionId,

@@ -22,6 +22,7 @@ export const generateAltConcurrency = env.GENERATE_ALT_CONCURRENCY;
 const TERMINAL_STATUSES = new Set([
     AltCandidateStatus.GENERATED,
     AltCandidateStatus.WRITEBACK_FAILED_RETRYABLE,
+    AltCandidateStatus.WRITEBACK_FAILED_PERMANENT,
     AltCandidateStatus.WRITTEN,
     AltCandidateStatus.RESOLVED,
     AltCandidateStatus.NOT_FOUND,

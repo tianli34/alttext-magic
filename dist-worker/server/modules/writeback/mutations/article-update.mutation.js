@@ -2,7 +2,7 @@
  * File: server/modules/writeback/mutations/article-update.mutation.ts
  * Purpose: ARTICLE_IMAGE_ALT 平面的 Shopify articleUpdate 写回执行器。
  */
-import { executeShopifyGraphql, formatUserErrors, isRetryableUserError } from "./mutation-utils";
+import { executeShopifyGraphql, formatUserErrors, isRetryableUserError, toExecutorFailure, toGraphqlErrorsFailure, } from "./mutation-utils";
 const ARTICLE_UPDATE_MUTATION = /* GraphQL */ `
   mutation WritebackArticleImageAlt($id: ID!, $article: ArticleUpdateInput!) {
     articleUpdate(id: $id, article: $article) {
@@ -39,11 +39,7 @@ export class ArticleAltExecutor {
                 cost: 10,
             });
             if (payload.errors?.length) {
-                return {
-                    success: false,
-                    error: payload.errors.map((error) => error.message).join("; "),
-                    retryable: true,
-                };
+                return toGraphqlErrorsFailure(payload.errors);
             }
             const userErrors = payload.data?.articleUpdate?.userErrors ?? [];
             if (userErrors.length > 0) {
@@ -63,11 +59,7 @@ export class ArticleAltExecutor {
             return { success: true };
         }
         catch (err) {
-            return {
-                success: false,
-                error: err instanceof Error ? err.message : String(err),
-                retryable: true,
-            };
+            return toExecutorFailure(err);
         }
     }
 }

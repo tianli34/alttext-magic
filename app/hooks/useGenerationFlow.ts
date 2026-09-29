@@ -16,6 +16,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useGenerationSSE, type GenerationProgressData } from "./useGenerationSSE";
 import { useWritebackSSE, type WritebackProgressData } from "./useWritebackSSE";
+import {
+  useWritebackTruthDebug,
+  type WritebackTruthDebugEvent,
+} from "./useWritebackTruthDebug";
 
 // ============================================================================
 // 进行中生成批次的本地持久化（用于刷新/路由跳转后的断点恢复）
@@ -166,6 +170,12 @@ interface UseGenerationFlowReturn {
   writebackPercent: number;
   /** 自动写回未能启动时的错误码 */
   autoWritebackError: string | null;
+  /** 真值复核调试事件（仅 WRITEBACK_TRUTH_DEBUG=true 时有数据，调试专用） */
+  truthDebugEvents: WritebackTruthDebugEvent[];
+  /** 真值复核调试 SSE 是否已连接 */
+  truthDebugConnected: boolean;
+  /** 真值复核调试端点不可用（开关关闭/批次不存在），调用方据此不渲染调试弹窗 */
+  truthDebugDisabled: boolean;
   /** 打开确认对话框（不发起预检，仅展示待生成数量） */
   openConfirm: (candidateIds: string[]) => void;
   /** 打开一键处理准备弹窗（立即反馈，候选统计请求由调用方在弹窗打开后发起） */
@@ -280,6 +290,15 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   } = useWritebackSSE(
     phase === "WRITEBACK" ? writebackBatchId : null,
     onWritebackCompleted,
+  );
+
+  // 真值复核调试 SSE（仅在 WRITEBACK 阶段激活；服务端开关关闭时 disabled）
+  const {
+    events: truthDebugEvents,
+    connected: truthDebugConnected,
+    disabled: truthDebugDisabled,
+  } = useWritebackTruthDebug(
+    phase === "WRITEBACK" ? writebackBatchId : null,
   );
 
   // ---- 预检额度（鉴权 + 余额概览 + 消费规划）----
@@ -480,6 +499,9 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     writebackError,
     writebackPercent,
     autoWritebackError,
+    truthDebugEvents,
+    truthDebugConnected,
+    truthDebugDisabled,
     openConfirm,
     openQuickProcessPrepare,
     failQuickProcessPrepare,

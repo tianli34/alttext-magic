@@ -1,40 +1,32 @@
 /**
- * File: app/routes/api.writeback.progress.tsx
- * Purpose: GET /api/writeback/progress?batchId=xxx —— 写回进度 SSE 端点。
+ * File: app/routes/api.writeback.truth-debug.tsx
+ * Purpose: GET /api/writeback/truth-debug?batchId=xxx —— 写回真值复核调试 SSE 端点。
+ *          仅 WRITEBACK_TRUTH_DEBUG=true 时可用（关闭时返回 404，视作端点不存在），
+ *          实时推送写回 Worker 的真值复核结果事件，供前端弹窗人工核对。
  */
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { startWritebackSSEStream } from "../../server/sse/writeback-sse.service";
+import { env } from "../../server/config/env";
+import { startWritebackTruthDebugSSEStream } from "../../server/sse/writeback-truth-debug-sse.service";
 import { getWritebackProgressSnapshot } from "../../server/modules/writeback/writeback-batch.service";
 import { createLogger } from "../../server/utils/logger";
 
-const logger = createLogger({ module: "api.writeback.progress" });
+const logger = createLogger({ module: "api.writeback.truth-debug" });
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (request.method !== "GET") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  // 鉴权兜底:会话令牌无效时 authenticate.admin 会抛出重定向/401 Response,
-  // 统一转为 401 JSON,避免 SSE 请求被重定向到页面后触发前端解析错误(与生成进度端点一致)
-  let shopDomain: string;
-  try {
-    const { session } = await authenticate.admin(request);
-    shopDomain = session.shop;
-  } catch (error) {
-    if (
-      error instanceof Response &&
-      (error.status === 401 || (error.status >= 300 && error.status < 400))
-    ) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    throw error;
+  // 调试开关关闭时视端点不存在，避免暴露调试通道（前端据此停连且不再重试）
+  if (!env.WRITEBACK_TRUTH_DEBUG) {
+    return Response.json({ error: "Not found" }, { status: 404 });
   }
 
+  const { session } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({
-    where: { shopDomain },
+    where: { shopDomain: session.shop },
     select: { id: true },
   });
 
@@ -51,6 +43,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
   }
 
+  // 校验批次归属当前 shop（防止越权订阅其他店铺的复核事件）
   const snapshot = await getWritebackProgressSnapshot(shop.id, batchId);
   if (!snapshot) {
     return Response.json({ error: "Writeback batch not found" }, { status: 404 });
@@ -67,12 +60,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         },
       };
 
-      const cleanup = startWritebackSSEStream(shop.id, batchId, writer);
+      const cleanup = startWritebackTruthDebugSSEStream(shop.id, batchId, writer);
       request.signal.addEventListener("abort", cleanup);
     },
   });
 
-  logger.info({ shopId: shop.id, batchId }, "writeback.sse.started");
+  logger.info({ shopId: shop.id, batchId }, "writeback truth debug SSE started");
 
   return new Response(stream, {
     headers: {

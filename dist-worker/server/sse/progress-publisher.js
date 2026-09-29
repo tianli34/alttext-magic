@@ -401,7 +401,28 @@ export async function readGenerationProgress(batchId) {
         status: data.status ?? "UNKNOWN",
         phase: data.phase ?? "generating",
         message: data.message ?? "",
+        writebackBatchId: data.writebackBatchId ? String(data.writebackBatchId) : null,
+        writebackError: data.writebackError ? String(data.writebackError) : null,
     };
+}
+/**
+ * 读取生成进度 hash 中的自动写回关联字段。
+ * 空字符串视为未关联（尚未触发或无需写回）。
+ */
+async function readAutoWritebackLink(batchId) {
+    try {
+        const fields = await queueConnection.hmget(getGenerationProgressKey(batchId), "writebackBatchId", "writebackError");
+        const rawBatchId = fields[0] ? String(fields[0]) : "";
+        const rawError = fields[1] ? String(fields[1]) : "";
+        return {
+            writebackBatchId: rawBatchId.length > 0 ? rawBatchId : null,
+            writebackError: rawError.length > 0 ? rawError : null,
+        };
+    }
+    catch (error) {
+        logger.warn({ batchId, err: error }, "generation auto-writeback link read failed");
+        return { writebackBatchId: null, writebackError: null };
+    }
 }
 /**
  * 发布生成进度到 Redis hash + Pub/Sub 频道。
@@ -445,7 +466,10 @@ export async function publishGenerationProgress(batchId) {
     });
     await queueConnection.expire(getGenerationProgressKey(batchId), GENERATION_PROGRESS_TTL_SECONDS);
     // 2. 通过 Pub/Sub 推送实时进度事件
+    // 自动写回批次 ID 存放在同一 Redis hash 的独立字段中（hset 合并写入，不会被上面的计数覆盖），
+    // 此处读出后随事件透传给前端，用于生成完成后无缝转入写回进度展示。
     const channel = getGenerationProgressChannel(batchId);
+    const autoWriteback = await readAutoWritebackLink(batchId);
     const progressEvent = {
         type: "generation_progress",
         batchId,
@@ -454,6 +478,8 @@ export async function publishGenerationProgress(batchId) {
         skipped: batch.skippedCount,
         failed: batch.failedCount,
         status: batch.status,
+        writebackBatchId: autoWriteback.writebackBatchId,
+        writebackError: autoWriteback.writebackError,
     };
     await queueConnection.publish(channel, JSON.stringify(progressEvent));
     // 3. 终态时额外发送汇总事件
@@ -466,6 +492,8 @@ export async function publishGenerationProgress(batchId) {
             skipped: batch.skippedCount,
             failed: batch.failedCount,
             status: batch.status,
+            writebackBatchId: autoWriteback.writebackBatchId,
+            writebackError: autoWriteback.writebackError,
         };
         await queueConnection.publish(channel, JSON.stringify(completedEvent));
     }

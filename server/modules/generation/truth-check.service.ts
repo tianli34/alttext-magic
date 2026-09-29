@@ -4,7 +4,7 @@
  *
  * 在 AI 调用前逐条查询 Shopify 线上当前 Alt Text，判断候选是否仍然缺失。
  * 按 alt_plane 分类调用不同 GraphQL 查询：
- *   - FILE_ALT            → node(MediaImage) → image.altText
+ *   - FILE_ALT            → node(MediaImage) → alt
  *   - COLLECTION_IMAGE_ALT → node(Collection) → image.altText
  *   - ARTICLE_IMAGE_ALT   → node(Article)    → image.altText
  *
@@ -70,7 +70,7 @@ interface ShopifyNodeResponse<TNode> {
 
 interface MediaImageNode {
   __typename: "MediaImage";
-  image: { altText: string | null } | null;
+  alt: string | null;
 }
 
 interface CollectionNode {
@@ -166,7 +166,12 @@ async function executeNodeQuery<TNode>(
 // 各 alt_plane 查询实现
 // ============================================================
 
-/** FILE_ALT: 查询 MediaImage 节点的 image.altText */
+/**
+ * FILE_ALT: 查询 MediaImage 节点的 alt。
+ * 必须与写回（fileUpdate）/ 扫描 / 清空工具同源读 `MediaImage.alt`，
+ * 而非 `image.altText`——两字段在 Shopify 侧分开存储且不保证同步，
+ * 读错字段会把空 Alt 误判为已填充（写回被整批跳过）。
+ */
 async function checkFileAlt(
   shopDomain: string,
   accessToken: string,
@@ -177,9 +182,7 @@ async function checkFileAlt(
       node(id: $id) {
         __typename
         ... on MediaImage {
-          image {
-            altText
-          }
+          alt
         }
       }
     }
@@ -196,7 +199,7 @@ async function checkFileAlt(
     return { isEmpty: true, currentAlt: null, isDeleted: true };
   }
 
-  const altText = node.image?.altText ?? null;
+  const altText = node.alt ?? null;
   const isEmpty = isAltEmpty(altText);
   return { isEmpty, currentAlt: altText };
 }

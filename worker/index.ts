@@ -287,7 +287,8 @@ const writebackWorker = new Worker<WritebackJobData>(
   WRITEBACK_QUEUE_NAME,
   async (job) => {
     await withJobLogger(job, async () => {
-      await processWritebackJob(job.data);
+      // attemptsMade 为「已完成的尝试次数」，本次执行序号需 +1
+      await processWritebackJob(job.data, undefined, { attempt: job.attemptsMade + 1 });
     }, WRITEBACK_QUEUE_NAME);
   },
   {

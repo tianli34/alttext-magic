@@ -163,6 +163,14 @@ const envSchema = z.object({
     .max(5)
     .default(3),
 
+  // ── 写回真值复核调试（仅调试用途，生产环境保持关闭）─────
+  // 开启后：写回 Worker 每次真值复核完成后向 Redis Pub/Sub 发布复核结果，
+  // 前端在写回进度期间以弹窗实时展示，用于人工对照 Shopify 后台确认真值复核是否正确。
+  WRITEBACK_TRUTH_DEBUG: z
+    .string()
+    .optional()
+    .transform((value) => value === "true" || value === "1"),
+
   // ── Settings / Help Links ──────────────────────────────
   SETTINGS_HELP_FAQ_URL: z.string().url().optional(),
   SETTINGS_HELP_CONTACT_URL: z.string().url().optional(),

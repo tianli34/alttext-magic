@@ -1070,8 +1070,11 @@ model AuditLog {
   altCandidate AltCandidate @relation(fields: [altCandidateId], references: [id], onDelete: Cascade)
   altDraft     AltDraft?    @relation(fields: [altDraftId], references: [id], onDelete: SetNull)
 
-  @@unique([shopId, writeTargetId, altCandidateId])
   // ---------- Indexes ----------
+  // 写回审计为追加式（每次成功写回一条记录）：alt_candidate.alt_target_id 唯一，
+  // 候选跨「清空 Alt → 重扫 → 再次写回」轮次复用，故 (shopId, writeTargetId, altCandidateId)
+  // 允许重复出现，只建普通索引；写回落库幂等由 idempotency_key 唯一约束承担。
+  @@index([shopId, writeTargetId, altCandidateId])
   @@index([shopId])
   @@index([jobBatchId])
   @@index([jobItemId])

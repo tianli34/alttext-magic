@@ -25,6 +25,7 @@ import type {
 import type { WritebackJobData } from "../../server/queues/writeback.queue";
 import { createLogger, type ExtendedLogger } from "../../server/utils/logger";
 import { getOfflineAdminByShopId } from "../../server/shopify/offline-admin.server";
+import { publishWritebackTruthDebug } from "../../server/sse/writeback-truth-debug.publisher";
 import { recordMetric } from "../../shared/logger/metrics";
 
 const logger = createLogger({ module: "writeback-processor" });
@@ -73,9 +74,16 @@ const defaultDependencies: WritebackProcessorDependencies = {
   now: () => new Date(),
 };
 
+/** 单次执行的运行时上下文：由 Worker 从 BullMQ job 派生 */
+export interface WritebackJobRuntime {
+  /** 第几次执行：1 = 首次投递，>1 = BullMQ 重试 */
+  attempt: number;
+}
+
 export async function processWritebackJob(
   data: WritebackJobData,
   dependencies: WritebackProcessorDependencies = defaultDependencies,
+  runtime: WritebackJobRuntime = { attempt: 1 },
 ): Promise<void> {
   const candidate = await loadCandidate(data, dependencies.prisma);
 
@@ -84,6 +92,7 @@ export async function processWritebackJob(
     alt_plane: candidate.altTarget.altPlane,
     job_item_id: candidate.id,
     write_target_id: candidate.altTarget.writeTargetId,
+    attempt: runtime.attempt,
   });
 
   if (!PROCESSABLE_STATUS_SET.has(candidate.status)) {
@@ -113,7 +122,56 @@ export async function processWritebackJob(
     writeTargetId: candidate.altTarget.writeTargetId,
   });
 
+  // ── 调试：实时发布真值复核结果（WRITEBACK_TRUTH_DEBUG 开启时生效，失败不影响主链路）──
+  // 待写文本在此处先行解析（容错版本）：draft 为空时不参与自写识别，
+  // 真正的写回分支仍走 resolveAltText 以保持原有「空 draft 抛错」行为。
+  const pendingAltText = tryResolveAltText(candidate);
+  const selfWrittenAltText =
+    !truth.isEmpty && pendingAltText !== null && isSameAltText(truth.currentAlt, pendingAltText)
+      ? pendingAltText
+      : null;
+
+  await publishWritebackTruthDebug({
+    batchId: data.batchId,
+    candidateId: candidate.id,
+    altPlane: candidate.altTarget.altPlane,
+    writeTargetId: candidate.altTarget.writeTargetId,
+    currentAlt: truth.currentAlt,
+    isEmpty: truth.isEmpty,
+    isDeleted: truth.isDeleted ?? false,
+    // 与下方实际分支保持一致：缺失（含资源已删除）→ 写回；
+    // 已填充且与待写文本一致 → 本应用自写，按幂等成功落库；其余 → 跳过
+    action: truth.isEmpty
+      ? "WRITE"
+      : selfWrittenAltText !== null
+        ? "ALREADY_WRITTEN_BY_SELF"
+        : "SKIP_ALREADY_FILLED",
+    attempt: runtime.attempt,
+  });
+
   if (!truth.isEmpty) {
+    // ── 自写识别：线上现值与本次待写文本一致，说明目标已持有本应用生成的 Alt ──
+    // 该情形不得记为「商家已手动补 Alt」：否则候选被置 RESOLVED、批次 success 少计，
+    // 商家看到「跳过」却实际是自己写入的内容（重试读到上一轮自写结果时尤其容易踩中）。
+    if (selfWrittenAltText !== null) {
+      const applied = await markWritten(
+        data,
+        candidate,
+        selfWrittenAltText,
+        truth.currentAlt,
+        jobLogger,
+        dependencies,
+      );
+      if (applied) {
+        recordMetric("writeback.success", 1, {
+          shop_domain: data.shopId,
+          batch_id: data.batchId,
+        });
+      }
+      await finalizeBatchIfComplete(data, jobLogger, dependencies);
+      return;
+    }
+
     await markSkippedAlreadyFilled(data, candidate, truth.currentAlt ?? "", jobLogger, dependencies);
     await finalizeBatchIfComplete(data, jobLogger, dependencies);
     return;
@@ -331,14 +389,28 @@ async function claimJobItem(
   return item?.status === JobItemStatus.RUNNING;
 }
 
-function resolveAltText(candidate: CandidateForWriteback): string {
+/** 解析待写 Alt（优先人工编辑稿）；draft 文本为空时返回 null，交由调用方决定处置 */
+function tryResolveAltText(candidate: CandidateForWriteback): string | null {
   const editedText = candidate.draft?.editedText?.trim();
   if (editedText && editedText.length > 0) return editedText;
 
   const generatedText = candidate.draft?.generatedText.trim();
   if (generatedText && generatedText.length > 0) return generatedText;
 
-  throw new Error(`[writeback] candidate draft 文本为空: ${candidate.id}`);
+  return null;
+}
+
+function resolveAltText(candidate: CandidateForWriteback): string {
+  const altText = tryResolveAltText(candidate);
+  if (altText === null) {
+    throw new Error(`[writeback] candidate draft 文本为空: ${candidate.id}`);
+  }
+  return altText;
+}
+
+/** 线上现值是否与待写文本一致（两侧去首尾空白后比较） */
+function isSameAltText(currentAlt: string | null, altText: string): boolean {
+  return currentAlt !== null && currentAlt.trim() === altText.trim();
 }
 
 async function markSkippedAlreadyFilled(
@@ -506,22 +578,22 @@ async function markWritten(
       },
     });
 
-    await tx.auditLog.create({
-      data: {
-        shopId: data.shopId,
-        jobBatchId: data.batchId,
-        jobItemId: jobItem.id,
-        altTargetId: candidate.altTargetId,
-        altCandidateId: candidate.id,
-        altDraftId: candidate.draft?.id ?? null,
-        idempotencyKey: `writeback:${data.batchId}:${data.candidateId}`,
-        altPlane: candidate.altTarget.altPlane,
-        writeTargetId: candidate.altTarget.writeTargetId,
-        oldAltText,
-        newAltText: altText,
-        modelUsed: candidate.draft?.modelUsed ?? "unknown",
-        writtenAt,
-      },
+    // 审计落库必须幂等：Shopify fileUpdate 是外部副作用、不随本事务回滚，
+    // 若此处唯一冲突导致回滚，候选会留在可写回状态被重试，重试复核将读回本次自写的 Alt。
+    await upsertWritebackAudit(tx, {
+      shopId: data.shopId,
+      jobBatchId: data.batchId,
+      jobItemId: jobItem.id,
+      altTargetId: candidate.altTargetId,
+      altCandidateId: candidate.id,
+      altDraftId: candidate.draft?.id ?? null,
+      idempotencyKey: `writeback:${data.batchId}:${data.candidateId}`,
+      altPlane: candidate.altTarget.altPlane,
+      writeTargetId: candidate.altTarget.writeTargetId,
+      oldAltText,
+      newAltText: altText,
+      modelUsed: candidate.draft?.modelUsed ?? "unknown",
+      writtenAt,
     });
 
     await tx.jobBatch.update({
@@ -544,6 +616,69 @@ async function markWritten(
   );
 
   return true;
+}
+
+/** 写回审计落库入参：与 audit_log 列一一对应（unchecked 变体，避免涉及关系字段） */
+type WritebackAuditInput = Prisma.AuditLogUncheckedCreateInput & {
+  idempotencyKey: string;
+};
+
+/**
+ * 幂等落库写回审计。
+ *
+ * idempotencyKey 固定为 `writeback:${batchId}:${candidateId}`，同批次同候选的任何重复执行
+ * （BullMQ 重试、并发双投递）都命中同一行：不存在则创建，已存在则覆盖为本次落库事实。
+ *
+ * 不能沿用 create 的原因：Shopify 写回是外部副作用、无法随事务回滚。审计一旦抛唯一冲突
+ * 回滚整个 markWritten 事务，候选会停留在可写回状态被重试，而重试的真值复核读回的是
+ * 本次自己刚写入的 Alt，从而把成功写回误判为「商家已手动补 Alt」（候选置 RESOLVED、
+ * 批次 success=0、审计缺失）。
+ *
+ * oldAltText 不参与覆盖：重试读到的"原值"其实是自写的 Alt，保留首次记录的写回前原值。
+ * Prisma upsert 在 READ COMMITTED 下对唯一索引竞态仍可能抛 P2002（两执行同时判定"不存在"），
+ * 此时退化为按 idempotencyKey 条件更新；其他错误原样抛出，不做降级吞异常。
+ */
+async function upsertWritebackAudit(
+  tx: Prisma.TransactionClient,
+  audit: WritebackAuditInput,
+): Promise<void> {
+  const updateData: Prisma.AuditLogUncheckedUpdateInput = {
+    jobBatchId: audit.jobBatchId,
+    jobItemId: audit.jobItemId,
+    altTargetId: audit.altTargetId,
+    altCandidateId: audit.altCandidateId,
+    altDraftId: audit.altDraftId,
+    altPlane: audit.altPlane,
+    writeTargetId: audit.writeTargetId,
+    newAltText: audit.newAltText,
+    modelUsed: audit.modelUsed,
+    writtenAt: audit.writtenAt,
+  };
+
+  try {
+    await tx.auditLog.upsert({
+      where: { idempotencyKey: audit.idempotencyKey },
+      create: audit,
+      update: updateData,
+    });
+  } catch (error) {
+    if (!isUniqueConstraintViolation(error)) throw error;
+
+    const touched = await tx.auditLog.updateMany({
+      where: { idempotencyKey: audit.idempotencyKey },
+      data: updateData,
+    });
+    if (touched.count !== 1) throw error;
+  }
+}
+
+/** 是否为 Prisma 唯一约束冲突（P2002）；结构化判断，避免引入运行时错误类依赖 */
+function isUniqueConstraintViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "P2002"
+  );
 }
 
 function resolveFinalBatchStatus(batch: {

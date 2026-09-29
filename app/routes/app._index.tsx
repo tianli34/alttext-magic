@@ -510,6 +510,8 @@ function DashboardContent() {
         writebackConnected={flow.writebackConnected}
         writebackPercent={flow.writebackPercent}
         writebackError={flow.writebackError}
+        truthDebugEvents={flow.truthDebugEvents}
+        truthDebugConnected={flow.truthDebugConnected}
         sidePanelWidth={sidePanelRail.panelWidth}
         sidePanelRef={sidePanelRail.panelRef}
         onConfirmAndStart={() => void flow.confirmAndStart()}

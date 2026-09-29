@@ -170,7 +170,8 @@ const generateAltWorker = new Worker(GENERATE_ALT_QUEUE_NAME, async (job) => {
 });
 const writebackWorker = new Worker(WRITEBACK_QUEUE_NAME, async (job) => {
     await withJobLogger(job, async () => {
-        await processWritebackJob(job.data);
+        // attemptsMade 为「已完成的尝试次数」，本次执行序号需 +1
+        await processWritebackJob(job.data, undefined, { attempt: job.attemptsMade + 1 });
     }, WRITEBACK_QUEUE_NAME);
 }, {
     connection: writebackConnection,
@@ -644,7 +645,13 @@ writebackWorker.on("failed", (job, error) => {
     const attempts = job.opts.attempts ?? 1;
     if (job.attemptsMade < attempts)
         return;
-    void markWritebackJobFailed(job.data, error instanceof Error ? error.message : String(error))
+    // BullMQ 重试耗尽后的兜底持久化：未知异常维持可重试分类（与改造前行为一致），
+    // 仅 executor 明确判定为认证失效（AUTH_FAILED）的失败才走终态。
+    void markWritebackJobFailed(job.data, {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        retryable: true,
+    })
         .then(() => finalizeBatchIfComplete(job.data))
         .catch((finalizeError) => {
         logger.error({

@@ -874,6 +874,8 @@ export default function AppCandidatesPage() {
       writebackConnected={flow.writebackConnected}
       writebackPercent={flow.writebackPercent}
       writebackError={flow.writebackError}
+      truthDebugEvents={flow.truthDebugEvents}
+      truthDebugConnected={flow.truthDebugConnected}
       onConfirmAndStart={flow.confirmAndStart}
       onCancel={flow.cancel}
       onCloseSummary={handleCloseSummary}

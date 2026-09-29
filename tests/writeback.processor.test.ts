@@ -76,6 +76,7 @@ interface MockAuditLog {
   jobBatchId: string;
   altCandidateId: string;
   altTargetId: string;
+  idempotencyKey: string;
   oldAltText: string | null;
   newAltText: string;
   modelUsed: string;
@@ -248,6 +249,34 @@ function createMockPrisma(state: MockState): PrismaClient {
       create: async (args: { data: MockAuditLog }) => {
         state.auditLogs.push(args.data);
         return args.data;
+      },
+      // markWritten 现按 idempotency_key 幂等落库（audit_log 为追加式，不再受三元组唯一约束），
+      // mock 同步支持 upsert / updateMany，等价于库内仅 idempotency_key 唯一。
+      upsert: async (args: {
+        where: { idempotencyKey: string };
+        create: MockAuditLog;
+        update: Partial<MockAuditLog>;
+      }) => {
+        const existing = state.auditLogs.find(
+          (row) => row.idempotencyKey === args.where.idempotencyKey,
+        );
+        if (existing) {
+          Object.assign(existing, args.update);
+          return existing;
+        }
+        state.auditLogs.push(args.create);
+        return args.create;
+      },
+      updateMany: async (args: {
+        where: { idempotencyKey: string };
+        data: Partial<MockAuditLog>;
+      }) => {
+        const existing = state.auditLogs.find(
+          (row) => row.idempotencyKey === args.where.idempotencyKey,
+        );
+        if (!existing) return { count: 0 };
+        Object.assign(existing, args.data);
+        return { count: 1 };
       },
     },
     jobItem: {
