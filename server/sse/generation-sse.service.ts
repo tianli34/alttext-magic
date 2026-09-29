@@ -90,6 +90,9 @@ export function startGenerationSSEStream(
     logger.info({ batchId }, "Generation SSE stream closed");
   }
 
+  /** 是否已向前端推送过 Pub/Sub 实时事件（用于避免快照回退进度） */
+  let realtimeEventSent = false;
+
   /** 处理 Pub/Sub 消息 */
   async function handleMessage(
     _channelName: string,
@@ -102,12 +105,14 @@ export function startGenerationSSEStream(
 
       if (event.type === "generation_completed") {
         // 终态汇总事件：发送后关闭流
+        realtimeEventSent = true;
         await sendEvent("generation_completed", event);
         await sendClose();
         return;
       }
 
       // 常规进度事件
+      realtimeEventSent = true;
       await sendEvent("generation_progress", event);
     } catch (error) {
       logger.error(
@@ -130,9 +135,19 @@ export function startGenerationSSEStream(
   // 启动异步初始化（不 await）
   (async () => {
     try {
-      // 1. 发送当前快照
+      // 1. 先订阅 Redis Pub/Sub 频道，再读快照。
+      //    旧顺序（先读快照再订阅）在两步之间存在竞态窗口：窗口内 worker 发布的事件全部
+      //    丢失，前端进度只能等下一个事件才会跳动，表现为进度长时间停在旧数字。
+      subscriber.on("message", (ch, msg) => {
+        if (ch === channel) {
+          void handleMessage(ch, msg);
+        }
+      });
+      await subscriber.subscribe(channel);
+
+      // 2. 发送当前快照；若订阅窗口内已推过实时事件，则跳过快照，避免进度被回退成旧值
       const snapshot = await readGenerationProgress(batchId);
-      if (snapshot) {
+      if (snapshot && !realtimeEventSent) {
         const initialEvent: GenerationProgressEvent = {
           type: "generation_progress",
           batchId,
@@ -164,14 +179,6 @@ export function startGenerationSSEStream(
           return;
         }
       }
-
-      // 2. 订阅 Redis Pub/Sub 频道
-      subscriber.on("message", (ch, msg) => {
-        if (ch === channel) {
-          void handleMessage(ch, msg);
-        }
-      });
-      await subscriber.subscribe(channel);
 
       logger.info({ batchId, channel }, "Generation SSE subscribed to Redis channel");
     } catch (error) {

@@ -577,30 +577,81 @@ export async function readGenerationProgress(batchId: string): Promise<{
   };
 }
 
-/**
- * 读取生成进度 hash 中的自动写回关联字段。
- * 空字符串视为未关联（尚未触发或无需写回）。
- */
-async function readAutoWritebackLink(batchId: string): Promise<{
+/** 自动写回关联字段读取结果（settled=false 表示字段尚未写入，终态判定需再等） */
+interface AutoWritebackLink {
   writebackBatchId: string | null;
   writebackError: string | null;
-}> {
+  /** 字段是否已被写入过（显式空串也算写入完成，即「确定无需写回」） */
+  settled: boolean;
+}
+
+const UNSETTLED_LINK: AutoWritebackLink = {
+  writebackBatchId: null,
+  writebackError: null,
+  settled: false,
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 单次读取生成进度 hash 中的自动写回关联字段。
+ *
+ * 语义区分（HMGET 返回值）：
+ *   null  → 字段不存在，triggerAutoWriteback 尚未执行（ unsettled ）
+ *   ""    → 字段已显式写入空值，确定无写回批次 / 无错误（ settled ）
+ *   其他  → 字段已写入有效值（ settled ）
+ */
+async function readAutoWritebackLinkOnce(batchId: string): Promise<AutoWritebackLink> {
   try {
     const fields = await queueConnection.hmget(
       getGenerationProgressKey(batchId),
       "writebackBatchId",
       "writebackError",
     );
-    const rawBatchId = fields[0] ? String(fields[0]) : "";
-    const rawError = fields[1] ? String(fields[1]) : "";
+    const rawBatchId = fields[0];
+    const rawError = fields[1];
+    if (rawBatchId === null && rawError === null) {
+      return UNSETTLED_LINK;
+    }
+    const batchIdValue = rawBatchId === null ? "" : String(rawBatchId);
+    const errorValue = rawError === null ? "" : String(rawError);
     return {
-      writebackBatchId: rawBatchId.length > 0 ? rawBatchId : null,
-      writebackError: rawError.length > 0 ? rawError : null,
+      writebackBatchId: batchIdValue.length > 0 ? batchIdValue : null,
+      writebackError: errorValue.length > 0 ? errorValue : null,
+      settled: true,
     };
   } catch (error) {
     logger.warn({ batchId, err: error }, "generation auto-writeback link read failed");
-    return { writebackBatchId: null, writebackError: null };
+    return UNSETTLED_LINK;
   }
+}
+
+/**
+ * 读取生成进度 hash 中的自动写回关联字段。
+ *
+ * settle 语义：批次进入终态时，「DB 状态跃迁」与「triggerAutoWriteback 回写关联字段」
+ * 是先后两步。SSE 推送路径由 worker 在收尾之后发布，字段必然已落盘，无需等待；
+ * 轮询兜底路径可能正好卡在两步之间，此时用 settleAttempts/settleDelayMs 做有限次
+ * 短延重量，避免轮询把「还没写」误判成「不需要写回」。
+ */
+export async function readAutoWritebackLink(
+  batchId: string,
+  options?: { settleAttempts?: number; settleDelayMs?: number },
+): Promise<{ writebackBatchId: string | null; writebackError: string | null }> {
+  const attempts = Math.max(1, options?.settleAttempts ?? 1);
+  const delayMs = Math.max(0, options?.settleDelayMs ?? 0);
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const link = await readAutoWritebackLinkOnce(batchId);
+    if (link.settled || attempt === attempts) {
+      return { writebackBatchId: link.writebackBatchId, writebackError: link.writebackError };
+    }
+    await sleep(delayMs);
+  }
+
+  return { writebackBatchId: null, writebackError: null };
 }
 
 /**
