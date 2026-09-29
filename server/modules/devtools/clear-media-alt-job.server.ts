@@ -1,7 +1,10 @@
 /**
  * File: server/modules/devtools/clear-media-alt-job.server.ts
- * Purpose: [TEMP-DEVTOOLS] 把 runClearMediaAlt 包装成「进程内后台任务」，供 Dashboard
- *          临时按钮调用。
+ * Purpose: [TEMP-DEVTOOLS] 把「清空产品图片 alt」与「待生成生产」包装成「进程内后台任务」，
+ *          供 Dashboard 临时按钮调用。任务分两种 mode：
+ *            - "clear"   清空 Shopify 侧 alt → 候选收敛为待写回（即「待写回生产器」）
+ *            - "pending" 清空 + 本地候选复位 INITIAL（即「待生成生产器」，见
+ *              pending-generation.core.server.ts；apply 恒为 true，造数据没有预览可言）
  *
  *          为什么不在请求里直接 await 执行：清空全店图片 alt 需要分页扫描 + 分批
  *          fileUpdate（批次间还刻意留 500ms 避让限流），耗时远超 tunnel/网关的空闲超时，
@@ -11,7 +14,7 @@
  *          状态存内存（挂 global 防 HMR 丢失），每店铺仅保留最近一次任务，
  *          同一店铺 RUNNING 期间互斥。服务重启即丢失历史任务（临时工具可接受）。
  *
- *          ⚠️ 临时性质，生产上线前与 clear-media-alt.core.server.ts 一并删除。
+ *          ⚠️ 临时性质，生产上线前与 devtools 目录其余文件一并删除。
  */
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../../utils/logger";
@@ -21,6 +24,10 @@ import {
   type ClearMediaAltResult,
   type ClearMediaAltTokenResolver,
 } from "./clear-media-alt.core.server";
+import {
+  runProducePendingGeneration,
+} from "./pending-generation.core.server";
+import type { ResetPendingTargetsResult } from "./reset-pending-targets.core.server";
 
 const logger = createLogger({ module: "devtools-clear-alt-job" });
 
@@ -30,11 +37,16 @@ const MAX_LOG_LINES = 600;
 /** 任务状态 */
 export type ClearAltJobStatus = "RUNNING" | "SUCCEEDED" | "FAILED";
 
+/** 任务模式：clear = 清空(待写回生产), pending = 清空 + 本地复位(待生成生产) */
+export type ClearAltJobMode = "clear" | "pending";
+
 /** 进程内任务记录 */
 interface ClearAltJob {
   jobId: string;
   shopDomain: string;
-  /** false = dry-run 预览, true = 实际清空 */
+  /** 任务模式, 见 ClearAltJobMode */
+  mode: ClearAltJobMode;
+  /** false = dry-run 预览, true = 实际清空（pending 模式恒为 true） */
   apply: boolean;
   status: ClearAltJobStatus;
   startedAt: Date;
@@ -45,14 +57,17 @@ interface ClearAltJob {
   droppedLogLines: number;
   /** 失败原因（status = FAILED 时有值） */
   error: string | null;
-  /** 执行结果摘要（status = SUCCEEDED 时有值） */
+  /** Shopify 侧清空结果摘要（status = SUCCEEDED 时有值） */
   result: ClearMediaAltResult | null;
+  /** 本地候选复位摘要（仅 pending 模式且实际执行了复位时有值） */
+  reset: ResetPendingTargetsResult | null;
 }
 
 /** 对外暴露的任务快照（API 响应体） */
 export interface ClearAltJobSnapshot {
   jobId: string;
   shopDomain: string;
+  mode: ClearAltJobMode;
   apply: boolean;
   status: ClearAltJobStatus;
   startedAt: string;
@@ -65,8 +80,10 @@ export interface ClearAltJobSnapshot {
   droppedLogLines: number;
   /** 失败原因（status = FAILED 时有值） */
   error: string | null;
-  /** 执行结果摘要（status = SUCCEEDED 时有值） */
+  /** Shopify 侧清空结果摘要（status = SUCCEEDED 时有值） */
   result: ClearMediaAltResult | null;
+  /** 本地候选复位摘要（仅 pending 模式） */
+  reset: ResetPendingTargetsResult | null;
 }
 
 // ── 进程内任务表（挂 global 防开发环境 HMR 重置） ──────────────────────
@@ -118,6 +135,7 @@ function toSnapshot(job: ClearAltJob, after?: number): ClearAltJobSnapshot {
   return {
     jobId: job.jobId,
     shopDomain: job.shopDomain,
+    mode: job.mode,
     apply: job.apply,
     status: job.status,
     startedAt: job.startedAt.toISOString(),
@@ -127,6 +145,7 @@ function toSnapshot(job: ClearAltJob, after?: number): ClearAltJobSnapshot {
     droppedLogLines: dropped,
     error: job.error,
     result: job.result,
+    reset: job.reset,
   };
 }
 
@@ -134,6 +153,8 @@ function toSnapshot(job: ClearAltJob, after?: number): ClearAltJobSnapshot {
 export interface StartClearAltJobParams {
   shopDomain: string;
   apply: boolean;
+  /** 任务模式, 缺省 "clear"（仅清空 Shopify 侧 alt） */
+  mode?: ClearAltJobMode;
   /** 可选：自定义 token 获取（Dashboard 入口注入官方 offline admin 链路） */
   resolveAccessToken?: ClearMediaAltTokenResolver;
 }
@@ -150,9 +171,11 @@ export function startClearAltJob(
     return { started: false, job: toSnapshot(existing) };
   }
 
+  const mode: ClearAltJobMode = params.mode ?? "clear";
   const job: ClearAltJob = {
     jobId: randomUUID(),
     shopDomain: params.shopDomain,
+    mode,
     apply: params.apply,
     status: "RUNNING",
     startedAt: new Date(),
@@ -161,6 +184,7 @@ export function startClearAltJob(
     droppedLogLines: 0,
     error: null,
     result: null,
+    reset: null,
   };
   jobs.set(params.shopDomain, job);
 
@@ -170,20 +194,37 @@ export function startClearAltJob(
     {
       jobId: job.jobId,
       shopDomain: job.shopDomain,
+      mode: job.mode,
       apply: job.apply,
     },
     "[TEMP-DEVTOOLS] clear-media-alt job started",
   );
 
   // 后台执行：不 await，状态与日志由轮询接口读取
-  void runClearMediaAlt({
-    shopDomain: params.shopDomain,
-    apply: params.apply,
-    log,
-    ...(params.resolveAccessToken
-      ? { resolveAccessToken: params.resolveAccessToken }
-      : {}),
-  })
+  //   clear   → 仅清空 Shopify 侧 alt（apply=false 时 dry-run 预览）
+  //   pending → 清空 + 本地候选复位 INITIAL, 取 outcome.clear 作为统一结果口径
+  const runner =
+    mode === "pending"
+      ? runProducePendingGeneration({
+          shopDomain: params.shopDomain,
+          log,
+          ...(params.resolveAccessToken
+            ? { resolveAccessToken: params.resolveAccessToken }
+            : {}),
+        }).then((outcome) => {
+          job.reset = outcome.reset;
+          return outcome.clear;
+        })
+      : runClearMediaAlt({
+          shopDomain: params.shopDomain,
+          apply: params.apply,
+          log,
+          ...(params.resolveAccessToken
+            ? { resolveAccessToken: params.resolveAccessToken }
+            : {}),
+        });
+
+  void runner
     .then((result) => {
       job.result = result;
       job.status = "SUCCEEDED";

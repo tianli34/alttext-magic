@@ -6,7 +6,8 @@
  *          2. 状态跃迁 RUNNING → SUCCEEDED / FAILED（含 result / error / finishedAt）
  *          3. 日志缓冲的增量游标（after）与 offset 绝对索引语义
  *          4. 日志缓冲上限(600 行)触发丢弃后的 offset 语义
- *          5. isDevToolsEnabled 生产开关
+ *          5. mode 分派：clear → 仅清空；pending → 走待生成生产器并回填 reset 摘要
+ *          6. isDevToolsEnabled 生产开关
  *
  *          core 模块（会拉起 Prisma/Shopify）与 logger 全部 mock，测试不触达外部依赖。
  */
@@ -15,10 +16,17 @@ import type {
   ClearMediaAltLog,
   ClearMediaAltResult,
 } from '../../../server/modules/devtools/clear-media-alt.core.server';
+import type { ResetPendingTargetsResult } from '../../../server/modules/devtools/reset-pending-targets.core.server';
 
 // core 模块整体替换：runClearMediaAlt 由测试完全掌控（日志回调 + 完成时机）
 vi.mock('../../../server/modules/devtools/clear-media-alt.core.server', () => ({
   runClearMediaAlt: (params: unknown) => mocks.runClearMediaAlt(params),
+}));
+
+// 待生成生产器整体替换：它依赖 Prisma，测试里只验证「任务层如何分派与回填」
+vi.mock('../../../server/modules/devtools/pending-generation.core.server', () => ({
+  runProducePendingGeneration: (params: unknown) =>
+    mocks.runProducePendingGeneration(params),
 }));
 
 // 日志器替换：避免测试输出 pino 噪音
@@ -37,6 +45,7 @@ vi.mock('../../../server/utils/logger', () => {
 
 const mocks = vi.hoisted(() => ({
   runClearMediaAlt: vi.fn(),
+  runProducePendingGeneration: vi.fn(),
 }));
 
 const {
@@ -62,6 +71,30 @@ function makeResult(overrides: Partial<ClearMediaAltResult> = {}): ClearMediaAlt
     samples: [],
     ...overrides,
   };
+}
+
+/** 与 reset 模块返回值对齐的本地复位摘要（测试只需部分字段参与断言） */
+function makeReset(
+  overrides: Partial<ResetPendingTargetsResult> = {},
+): ResetPendingTargetsResult {
+  return {
+    requestCount: 5,
+    matchedTargets: 5,
+    missingTargets: 0,
+    resetTargets: 5,
+    resetCandidates: 4,
+    createdCandidates: 1,
+    deletedDrafts: 3,
+    skippedDecorative: 1,
+    skippedGenerating: 0,
+    ...overrides,
+  };
+}
+
+/** runProducePendingGeneration 的入参形状（只取断言所需字段） */
+interface PendingGenerationParams {
+  shopDomain: string;
+  log: ClearMediaAltLog;
 }
 
 /** 可控完成的 Promise 包装 */
@@ -100,6 +133,7 @@ function startDeferredJob(shopDomain: string, apply: boolean) {
 
 beforeEach(() => {
   mocks.runClearMediaAlt.mockReset();
+  mocks.runProducePendingGeneration.mockReset();
 });
 
 // ============================================================================
@@ -233,7 +267,84 @@ describe('日志增量游标', () => {
 });
 
 // ============================================================================
-// 4. 生产开关
+// 4. mode 分派（待写回生产 / 待生成生产）
+// ============================================================================
+
+describe('mode 分派', () => {
+  it('缺省 mode=clear：只调 runClearMediaAlt，快照 reset 为 null', () => {
+    const gate = deferred<ClearMediaAltResult>();
+    mocks.runClearMediaAlt.mockImplementation(() => gate.promise);
+
+    const { started, job } = startClearAltJob({
+      shopDomain: 'mode-clear.myshopify.com',
+      apply: true,
+    });
+
+    expect(started).toBe(true);
+    expect(job.mode).toBe('clear');
+    expect(job.reset).toBeNull();
+    expect(mocks.runProducePendingGeneration).not.toHaveBeenCalled();
+    expect(mocks.runClearMediaAlt).toHaveBeenCalledTimes(1);
+
+    gate.settle()?.(makeResult());
+  });
+
+  it('mode=pending：走待生成生产器，结果取 clear 且回填 reset 摘要', async () => {
+    const gate = deferred<{
+      clear: ClearMediaAltResult;
+      reset: ResetPendingTargetsResult | null;
+    }>();
+    mocks.runProducePendingGeneration.mockImplementation(() => gate.promise);
+
+    const { job } = startClearAltJob({
+      shopDomain: 'mode-pending.myshopify.com',
+      // 任务层只透传，强制 apply=true 由路由层负责
+      apply: false,
+      mode: 'pending',
+    });
+    expect(job.mode).toBe('pending');
+    expect(mocks.runClearMediaAlt).not.toHaveBeenCalled();
+
+    const params = mocks.runProducePendingGeneration.mock.calls
+      .at(-1)?.[0] as PendingGenerationParams;
+    expect(params.shopDomain).toBe('mode-pending.myshopify.com');
+    expect(typeof params.log).toBe('function');
+
+    gate.settle()?.({
+      clear: makeResult({ pendingCount: 9, succeeded: 9 }),
+      reset: makeReset(),
+    });
+    await flush();
+
+    const snapshot = getClearAltJob('mode-pending.myshopify.com');
+    expect(snapshot?.status).toBe('SUCCEEDED');
+    expect(snapshot?.mode).toBe('pending');
+    expect(snapshot?.result?.pendingCount).toBe(9);
+    expect(snapshot?.reset?.resetCandidates).toBe(4);
+    expect(snapshot?.reset?.deletedDrafts).toBe(3);
+  });
+
+  it('mode=pending 且本地复位未执行（店铺缺图/缺记录）时 reset 保持 null', async () => {
+    mocks.runProducePendingGeneration.mockResolvedValue({
+      clear: makeResult(),
+      reset: null,
+    });
+
+    startClearAltJob({
+      shopDomain: 'mode-pending-null.myshopify.com',
+      apply: true,
+      mode: 'pending',
+    });
+    await flush();
+
+    const snapshot = getClearAltJob('mode-pending-null.myshopify.com');
+    expect(snapshot?.status).toBe('SUCCEEDED');
+    expect(snapshot?.reset).toBeNull();
+  });
+});
+
+// ============================================================================
+// 5. 生产开关
 // ============================================================================
 
 describe('isDevToolsEnabled', () => {

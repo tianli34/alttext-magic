@@ -3,7 +3,11 @@
  * Purpose: [TEMP-DEVTOOLS] Dashboard 临时面板：在页面里直接触发 scripts/clear-media-alt.ts
  *          的等价逻辑 —— 扫描并清空「当前登录店铺」全部产品图片的 alt。
  *
- *          交互: 预览(dry-run) / 实际清空(两步确认) → 后台任务 → 每 2s 轮询日志。
+ *          交互: 预览(dry-run) / 待写回生产器 / 待生成生产器 → 后台任务 → 每 2s 轮询日志。
+ *                前两者 = mode=clear（apply 分别 false/true）：清空 Shopify 侧 alt 后，
+ *                已有草稿仍在 → 候选收敛为「待写回」；
+ *                待生成生产器 = mode=pending：额外删草稿并把候选复位 INITIAL
+ *                → 候选落在「待生成」（见 server/modules/devtools/pending-generation.core.server.ts）。
  *          入口: app/routes/app._index.tsx 中仅在 import.meta.env.DEV 时渲染本组件；
  *                服务端 api.dev.clear-alt.* 另有 NODE_ENV !== "production" 开关。
  *          ⚠️ 生产上线前删除本文件 + app/routes/api.dev.clear-alt.*.tsx
@@ -35,10 +39,25 @@ interface ClearAltResult {
   }>;
 }
 
+/** 本地候选复位摘要（与 ResetPendingTargetsResult 对齐，仅 mode=pending 时有值） */
+interface ClearAltResetSummary {
+  requestCount: number;
+  matchedTargets: number;
+  missingTargets: number;
+  resetTargets: number;
+  resetCandidates: number;
+  createdCandidates: number;
+  deletedDrafts: number;
+  skippedDecorative: number;
+  skippedGenerating: number;
+}
+
 /** 任务快照（与 ClearAltJobSnapshot 对齐） */
 interface ClearAltJob {
   jobId: string;
   shopDomain: string;
+  /** clear = 清空 alt(待写回生产); pending = 清空 + 本地复位(待生成生产) */
+  mode: "clear" | "pending";
   apply: boolean;
   status: ClearAltJobStatus;
   startedAt: string;
@@ -51,6 +70,8 @@ interface ClearAltJob {
   droppedLogLines: number;
   error: string | null;
   result: ClearAltResult | null;
+  /** 本地候选复位摘要（仅 mode=pending 且实际执行了复位时有值） */
+  reset: ClearAltResetSummary | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -100,8 +121,6 @@ export function ClearMediaAltPanel({ onFinished }: ClearMediaAltPanelProps) {
   const [job, setJob] = useState<ClearAltJob | null>(null);
   /** 累积展示的日志 */
   const [logs, setLogs] = useState<string[]>([]);
-  /** 是否处于「实际清空」二次确认状态 */
-  const [confirming, setConfirming] = useState(false);
   /** 启动请求进行中 */
   const [submitting, setSubmitting] = useState(false);
   /** 面板级错误（请求失败等） */
@@ -212,19 +231,19 @@ export function ClearMediaAltPanel({ onFinished }: ClearMediaAltPanelProps) {
   }, [logs]);
 
   /* ---------------------------------------------------------------- */
-  /*  启动任务：apply=false 预览, apply=true 实际清空                    */
+  /*  启动任务：mode=clear + apply=false 预览 / apply=true 待写回生产；  */
+  /*  mode=pending 待生成生产（服务端强制 apply=true）                   */
   /* ---------------------------------------------------------------- */
   const startJob = useCallback(
-    async (apply: boolean) => {
+    async (mode: "clear" | "pending", apply: boolean) => {
       setSubmitting(true);
       setError(null);
-      setConfirming(false);
 
       try {
         const response = await fetch(START_ENDPOINT, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ apply }),
+          body: JSON.stringify({ mode, apply }),
         });
 
         const payload = (await response.json()) as {
@@ -269,59 +288,47 @@ export function ClearMediaAltPanel({ onFinished }: ClearMediaAltPanelProps) {
       <s-stack direction="block" gap="small">
         <s-stack direction="inline" gap="small">
           <s-text tone="critical">🧪</s-text>
-          <s-heading>临时工具：清空店铺产品图片 Alt</s-heading>
+          <s-heading>临时工具：测试数据生产器（待写回 / 待生成）</s-heading>
         </s-stack>
 
         <s-text tone="neutral">
-          等价 npx tsx scripts/clear-media-alt.ts，仅作用于当前登录店铺；默认
-          dry-run 只预览不写数据，实际清空需二次确认。此面板为开发期入口，生产环境移除。
+          等价 npx tsx scripts/clear-media-alt.ts，仅作用于当前登录店铺；dry-run
+          只预览不写数据，两个生产器都会真实清空 Shopify 侧 alt（不可恢复）。
+          「待写回」= 只清 alt，草稿仍在，扫描后落在待写回；「待生成」= 清 alt +
+          删草稿 + 候选复位 INITIAL，扫描/统计口径下落在待生成。开发期入口，生产环境移除。
         </s-text>
 
-        {/* 操作按钮：预览 / 实际清空（实际清空需二次确认） */}
+        {/* 操作按钮：预览 / 待写回生产器 / 待生成生产器 */}
         <s-stack direction="inline" gap="small">
           <s-button
             variant="secondary"
             disabled={running}
-            onClick={() => void startJob(false)}
+            onClick={() => void startJob("clear", false)}
             accessibilityLabel="预览待清空图片 dry-run"
           >
-            {job?.status === "RUNNING" && !job.apply
+            {running && job?.mode === "clear" && !job.apply
               ? "预览中…"
               : "预览 (dry-run)"}
           </s-button>
 
-          {confirming ? (
-            <>
-              <s-text tone="critical">
-                ⚠️ 将把该店铺所有产品图片 alt 置空且不可恢复，确认执行？
-              </s-text>
-              <s-button
-                variant="primary"
-                onClick={() => void startJob(true)}
-                accessibilityLabel="确认执行清空"
-              >
-                确认执行
-              </s-button>
-              <s-button
-                variant="secondary"
-                onClick={() => setConfirming(false)}
-                accessibilityLabel="取消"
-              >
-                取消
-              </s-button>
-            </>
-          ) : (
-            <s-button
-              variant="primary"
-              disabled={running}
-              onClick={() => setConfirming(true)}
-              accessibilityLabel="实际清空全部产品图片 alt"
-            >
-              {job?.status === "RUNNING" && job.apply
-                ? "清空中…"
-                : "实际清空 alt…"}
-            </s-button>
-          )}
+          <s-button
+            variant="primary"
+            disabled={running}
+            onClick={() => void startJob("clear", true)}
+            accessibilityLabel="待写回生产器：清空全部产品图片 alt"
+          >
+            {running && job?.mode === "clear" && job.apply ? "清空中…" : "待写回生产器"}
+          </s-button>
+
+          <s-button
+            variant="primary"
+            tone="critical"
+            disabled={running}
+            onClick={() => void startJob("pending", true)}
+            accessibilityLabel="待生成生产器：清空 alt 并把候选复位为待生成"
+          >
+            {running && job?.mode === "pending" ? "造数中…" : "待生成生产器"}
+          </s-button>
         </s-stack>
 
         {/* 面板级错误 */}
@@ -333,21 +340,41 @@ export function ClearMediaAltPanel({ onFinished }: ClearMediaAltPanelProps) {
 
         {/* 任务状态与结果摘要 */}
         {job && (
-          <s-stack direction="inline" gap="base">
-            <s-text>
-              {STATUS_LABEL[job.status]}（
-              {job.apply ? "实际清空" : "dry-run"}）
-            </s-text>
-            {result && (
+          <s-stack direction="block" gap="small">
+            <s-stack direction="inline" gap="base">
+              <s-text>
+                {STATUS_LABEL[job.status]}（
+                {job.mode === "pending"
+                  ? "待生成生产"
+                  : job.apply
+                    ? "待写回生产"
+                    : "dry-run"}
+                ）
+              </s-text>
+              {result && (
+                <s-text tone="neutral">
+                  待清空 {result.pendingCount} 张
+                  {result.dryRun ? "" : ` · 成功 ${result.succeeded} · 失败 ${result.failed}`}
+                  {result.skippedOverlimit > 0
+                    ? ` · 媒体超限跳过 ${result.skippedOverlimit} 个产品`
+                    : ""}
+                </s-text>
+              )}
+              {job.error && <s-text tone="critical">{job.error}</s-text>}
+            </s-stack>
+
+            {/* 待生成生产器专属：本地候选复位摘要 */}
+            {job.reset && (
               <s-text tone="neutral">
-                待清空 {result.pendingCount} 张
-                {result.dryRun ? "" : ` · 成功 ${result.succeeded} · 失败 ${result.failed}`}
-                {result.skippedOverlimit > 0
-                  ? ` · 媒体超限跳过 ${result.skippedOverlimit} 个产品`
+                本地复位候选 {job.reset.resetCandidates} 张（补建 {job.reset.createdCandidates}
+                {" · "}删草稿 {job.reset.deletedDrafts}）
+                {" · "}跳过 装饰性 {job.reset.skippedDecorative} / 生成中{" "}
+                {job.reset.skippedGenerating}
+                {job.reset.missingTargets > 0
+                  ? ` · 本地无 target ${job.reset.missingTargets} 张`
                   : ""}
               </s-text>
             )}
-            {job.error && <s-text tone="critical">{job.error}</s-text>}
           </s-stack>
         )}
 

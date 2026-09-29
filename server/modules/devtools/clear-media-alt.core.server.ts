@@ -1,10 +1,12 @@
 /**
  * File: server/modules/devtools/clear-media-alt.core.server.ts
  * Purpose: [TEMP-DEVTOOLS] 「批量清空店铺全部产品图片 alt」的核心逻辑。
- *          由 scripts/clear-media-alt.ts 抽取而来，供两个入口共用（单一真源）：
+ *          由 scripts/clear-media-alt.ts 抽取而来，供以下入口共用（单一真源）：
  *            1) CLI:  npx tsx scripts/clear-media-alt.ts [--shop x] [--apply]
  *            2) Dashboard 临时按钮: POST /api/dev/clear-alt/start（后台任务化，
- *               见同目录 clear-media-alt-job.server.ts）
+ *               见同目录 clear-media-alt-job.server.ts）—— 即「待写回生产器」
+ *            3) 「待生成生产器」: 同目录 pending-generation.core.server.ts 复用本模块的
+ *               扫描+清空，再通过 onMediaScanned 拿到图片 gid 全集做本地候选复位
  *
  *          机制（与原脚本一致）:
  *            1. 取得 offline access token（默认读 Session 表，临期用 refreshToken 走
@@ -165,6 +167,12 @@ export interface ClearMediaAltOptions {
   log?: ClearMediaAltLog;
   /** 自定义 token 获取方式, 缺省为 Session 表 + refresh grant */
   resolveAccessToken?: ClearMediaAltTokenResolver;
+  /**
+   * 扫描完成回调: 回传本次扫到的全部 MediaImage gid（含 alt 本就为空的）。
+   * dry-run 与实际执行都会触发; 供「待生成生产器」复用同一趟扫描结果做本地复位,
+   * 见 devtools/pending-generation.core.server.ts。
+   */
+  onMediaScanned?: (mediaIds: string[]) => void;
 }
 
 /** dry-run 样本条目 */
@@ -368,14 +376,18 @@ async function adminGraphql<TData>(
 }
 
 // ── 扫描与写回 ────────────────────────────────────────────────────────
-/** 分页遍历全部产品, 收集 alt 非空的 MediaImage */
+/**
+ * 分页遍历全部产品, 收集 MediaImage gid 全集与其中 alt 非空的待清空清单。
+ * gid 全集供「待生成生产器」复用（alt 本就为空的图片同样需要本地复位）。
+ */
 async function collectPendingMedia(
   endpoint: string,
   token: string,
   log: ClearMediaAltLog,
   counters: { pages: number; skippedOverlimit: number },
-): Promise<PendingMedia[]> {
+): Promise<{ pending: PendingMedia[]; scannedMediaIds: string[] }> {
   const pending: PendingMedia[] = [];
+  const scannedMediaIds: string[] = [];
   let cursor: string | null = null;
   let pageIndex = 0;
 
@@ -410,13 +422,11 @@ async function collectPendingMedia(
         );
       }
       for (const media of product.media.nodes) {
-        if (
-          media.__typename === "MediaImage" &&
-          media.id &&
-          media.alt !== null &&
-          media.alt !== undefined &&
-          media.alt !== ""
-        ) {
+        if (media.__typename !== "MediaImage" || !media.id) {
+          continue;
+        }
+        scannedMediaIds.push(media.id);
+        if (media.alt !== null && media.alt !== undefined && media.alt !== "") {
           pending.push({
             mediaId: media.id,
             productId: product.id,
@@ -435,7 +445,7 @@ async function collectPendingMedia(
   } while (cursor !== null);
 
   counters.pages = pageIndex;
-  return pending;
+  return { pending, scannedMediaIds };
 }
 
 /** 分批调用 fileUpdate 将 alt 置空, 返回成功/失败计数 */
@@ -511,9 +521,15 @@ export async function runClearMediaAlt(
   const token = await resolveAccessToken(shopDomain, log);
   const endpoint = `https://${shopDomain}/admin/api/${SHOPIFY_ADMIN_API_VERSION}/graphql.json`;
 
-  // 2. 收集待清空媒体
+  // 2. 收集待清空媒体（同时拿到本次扫到的图片 gid 全集）
   const counters = { pages: 0, skippedOverlimit: 0 };
-  const pending = await collectPendingMedia(endpoint, token, log, counters);
+  const { pending, scannedMediaIds } = await collectPendingMedia(
+    endpoint,
+    token,
+    log,
+    counters,
+  );
+  options.onMediaScanned?.(scannedMediaIds);
 
   log(`\n📊 扫描完成: 共 ${pending.length} 张产品图片 alt 非空\n`);
 
