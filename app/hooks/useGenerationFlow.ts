@@ -14,12 +14,17 @@
  *   writebackBatchId 无缝转入 WRITEBACK 阶段展示写回进度，最终合并汇总。
  */
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useAppBridge } from "@shopify/app-bridge-react";
 import { useGenerationSSE, type GenerationProgressData } from "./useGenerationSSE";
 import { useWritebackSSE, type WritebackProgressData } from "./useWritebackSSE";
 import {
   useWritebackTruthDebug,
   type WritebackTruthDebugEvent,
 } from "./useWritebackTruthDebug";
+import {
+  isGenerationTallySnapshot,
+  toGenerationTally,
+} from "../lib/generation-tally";
 
 // ============================================================================
 // 进行中生成批次的本地持久化（用于刷新/路由跳转后的断点恢复）
@@ -112,12 +117,16 @@ interface StartResult {
 export interface GenerationSummary {
   /** 总处理数 */
   total: number;
-  /** 成功数 */
-  succeeded: number;
-  /** 跳过数（已有 Alt） */
-  skipped: number;
-  /** 失败数 */
-  failed: number;
+  /**
+   * 成功数（派生量：total - skipped - failed，非服务端权威字段）。
+   * null 表示生成阶段计数无法取得（如刷新恢复路径回填失败），
+   * UI 必须以占位符呈现，不得退化成 0 造成「生成成功 0 / 写回成功 94」的错觉。
+   */
+  succeeded: number | null;
+  /** 跳过数（已有 Alt），null 语义同 succeeded */
+  skipped: number | null;
+  /** 失败数，null 语义同 succeeded */
+  failed: number | null;
   /** 自动写回结果（无需写回/未能启动时为 null） */
   writeback: {
     /** 写回批次 ID */
@@ -197,6 +206,7 @@ interface UseGenerationFlowReturn {
 // ============================================================================
 
 export function useGenerationFlow(): UseGenerationFlowReturn {
+  const shopify = useAppBridge();
   const [phase, setPhase] = useState<GenerationFlowPhase>("IDLE");
   const [preflightResult, setPreflightResult] = useState<PreflightResult | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -211,6 +221,35 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   const startedQuickWritebackBatchIdRef = useRef<string | null>(null);
   // 生成计数的暂存：转入 WRITEBACK 阶段后用于合并最终汇总。
   const generationTallyRef = useRef<{ total: number; succeeded: number; skipped: number; failed: number } | null>(null);
+  // 刷新恢复路径的计数回填 Promise：写回终态回调可能先于回填完成，
+  // 此时需等待该 Promise 落地再构造汇总，避免把「尚未取得」误判为「未知」。
+  const pendingGenerationTallyRef = useRef<Promise<void> | null>(null);
+
+  /**
+   * 刷新恢复路径的生成计数回填。
+   *
+   * 恢复时直接进 WRITEBACK 阶段，useGenerationSSE 不再激活（其入参 batchId 为 null），
+   * 生成终态回调不会触发 → 内存 tally 恒为 null → 汇总里「生成成功」被兜底成 0，
+   * 与写回成功的真实计数自相矛盾。此处用与生成进度同口径的轮询快照补回该派生量；
+   * 取不到时保持 null（UI 显示占位符），不伪造 0。
+   */
+  const hydrateGenerationTally = useCallback(async (generationBatchId: string) => {
+    try {
+      const token = await shopify.idToken();
+      const response = await fetch(
+        `/api/generation/batch/${encodeURIComponent(generationBatchId)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!response.ok) return;
+
+      const snapshot: unknown = await response.json();
+      if (!isGenerationTallySnapshot(snapshot)) return;
+
+      generationTallyRef.current = toGenerationTally(snapshot);
+    } catch {
+      // 静默降级：计数保持「未知」，由汇总 UI 以占位符呈现
+    }
+  }, [shopify]);
 
   // 挂载后恢复进行中的生成批次（避免在 SSR/hydration 阶段读取 sessionStorage 引发不一致）
   useEffect(() => {
@@ -221,25 +260,29 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     if (persisted.writebackBatchId) {
       setWritebackBatchId(persisted.writebackBatchId);
       setPhase("WRITEBACK");
+      // 已转入写回阶段的批次：生成阶段不会再被激活，需回填生成计数
+      pendingGenerationTallyRef.current = hydrateGenerationTally(persisted.batchId);
     } else {
       setPhase("GENERATING");
     }
-  }, []);
+  }, [hydrateGenerationTally]);
 
   // 生成 SSE 完成回调：有自动写回批次则转入 WRITEBACK，否则直接汇总。
   const onGenerationCompleted = useCallback((data: GenerationProgressData) => {
-    const succeeded = data.total - data.skipped - data.failed;
-    const tally = {
+    // 派生口径与 worker 一致（total - skipped - failed），统一走 toGenerationTally，
+    // 避免此处与刷新恢复路径两处各写一套算法导致口径漂移
+    const tally = toGenerationTally({
       total: data.total,
-      succeeded,
       skipped: data.skipped,
       failed: data.failed,
-    };
+    });
     const linkedWritebackBatchId = data.writebackBatchId ?? null;
     const linkedWritebackError = data.writebackError ?? null;
 
     if (linkedWritebackBatchId) {
       generationTallyRef.current = tally;
+      // 本会话已经拿到权威生成计数，恢复路径的回填（若有）不再需要等待
+      pendingGenerationTallyRef.current = null;
       setWritebackBatchId(linkedWritebackBatchId);
       setAutoWritebackError(linkedWritebackError);
       if (batchId) persistGeneration(batchId, data.total, linkedWritebackBatchId);
@@ -247,6 +290,7 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
       return;
     }
 
+    pendingGenerationTallyRef.current = null;
     setSummary({ ...tally, writeback: null, writebackError: linkedWritebackError });
     setPhase("SUMMARY");
     clearPersistedGeneration();
@@ -259,26 +303,42 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   );
 
   // 写回 SSE 完成回调：合并生成计数与写回计数后进入 SUMMARY。
+  // 生成计数缺失（刷新恢复且回填失败）时以 null 呈递，由 UI 显示占位符——
+  // 写回计数来自 job_batch 权威计数，即使生成侧未知也照常展示。
+  // 若恢复路径的计数回填仍在进行（写回批次可能已完成，终态回调抢先到达），
+  // 先等它落地再构造汇总，避免把「尚未取得」误判为「未知」。
   const onWritebackCompleted = useCallback((data: WritebackProgressData) => {
-    const tally = generationTallyRef.current;
-    setSummary({
-      total: tally?.total ?? data.total,
-      succeeded: tally?.succeeded ?? 0,
-      skipped: tally?.skipped ?? 0,
-      failed: tally?.failed ?? 0,
-      writeback: {
-        batchId: data.batchId,
-        total: data.total,
-        success: data.success,
-        fail: data.fail,
-        skip: data.skip,
-        pending: data.pending,
-      },
-      writebackError: null,
-    });
-    generationTallyRef.current = null;
-    setPhase("SUMMARY");
-    clearPersistedGeneration();
+    void (async () => {
+      const pendingHydration = pendingGenerationTallyRef.current;
+      if (generationTallyRef.current === null && pendingHydration) {
+        try {
+          await pendingHydration;
+        } catch {
+          // 回填失败：保持 null，由汇总 UI 以占位符呈现
+        }
+      }
+
+      const tally = generationTallyRef.current;
+      setSummary({
+        total: tally?.total ?? data.total,
+        succeeded: tally?.succeeded ?? null,
+        skipped: tally?.skipped ?? null,
+        failed: tally?.failed ?? null,
+        writeback: {
+          batchId: data.batchId,
+          total: data.total,
+          success: data.success,
+          fail: data.fail,
+          skip: data.skip,
+          pending: data.pending,
+        },
+        writebackError: null,
+      });
+      generationTallyRef.current = null;
+      pendingGenerationTallyRef.current = null;
+      setPhase("SUMMARY");
+      clearPersistedGeneration();
+    })();
   }, []);
 
   // 写回 SSE 连接（仅在 WRITEBACK 阶段且有 writebackBatchId 时激活）
@@ -457,6 +517,7 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   const cancel = useCallback(() => {
     clearPersistedGeneration();
     generationTallyRef.current = null;
+    pendingGenerationTallyRef.current = null;
     setPhase("IDLE");
     setPreflightResult(null);
     setBatchId(null);
@@ -469,6 +530,7 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   const closeSummary = useCallback(() => {
     clearPersistedGeneration();
     generationTallyRef.current = null;
+    pendingGenerationTallyRef.current = null;
     setPhase("IDLE");
     setPreflightResult(null);
     setBatchId(null);

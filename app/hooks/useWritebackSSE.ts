@@ -98,6 +98,8 @@ export function useWritebackSSE(
   const completedRef = useRef(false);
   const batchIdRef = useRef<string | null>(batchId);
   batchIdRef.current = batchId;
+  /** 上一轮批次 ID：仅在批次真正切换（含回到 null）时重置通道状态 */
+  const prevBatchIdRef = useRef<string | null | undefined>(undefined);
 
   const handleMessage = useCallback((event: EventSourceMessage) => {
     if (event.event === "close") {
@@ -247,6 +249,22 @@ export function useWritebackSSE(
   }, [shopify]);
 
   useEffect(() => {
+    // 批次切换（含回到 null）时必须重置通道状态：
+    // completedRef 是「终态回调只触发一次」的闸门，若跨批次沿用，同一页面会话里
+    // 第二次一键处理的 complete 事件与轮询兜底都会被旧闸门挡掉（progressRef 还停在
+    // 上一轮的终态，pollOnce 开头即短路），汇总弹窗不再自动弹出、进度浮层永久停留，
+    // 只有刷新页面（重建 Hook 实例）才补齐。progressRef/lastSSEDataAtRef 同理需清空，
+    // 避免新一轮进度被上一轮的终态快照污染或误判为「SSE 新鲜」。
+    if (prevBatchIdRef.current !== batchId) {
+      prevBatchIdRef.current = batchId;
+      completedRef.current = false;
+      progressRef.current = null;
+      lastSSEDataAtRef.current = 0;
+      setProgress(null);
+      setConnected(false);
+      setError(null);
+    }
+
     void connect();
 
     return () => {

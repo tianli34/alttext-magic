@@ -28,6 +28,13 @@ import { TruthCheckDebugModal } from "./TruthCheckDebugModal";
 // 类型定义
 // ============================================================================
 
+/**
+ * 「未知」计数占位符。
+ * 生成侧计数（成功/跳过/失败）是派生量而非服务端权威字段，
+ * 刷新恢复路径回填失败时该值不存在，必须以此占位，不得兜底成 0。
+ */
+const UNKNOWN_COUNT_PLACEHOLDER = "—";
+
 interface GenerationFlowProps {
   /** 当前阶段 */
   phase: GenerationFlowPhase;
@@ -554,9 +561,13 @@ interface SummaryModalProps {
 function SummaryModal({ summary, totalCount, onClose }: SummaryModalProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const succeeded = summary?.succeeded ?? 0;
-  const skipped = summary?.skipped ?? 0;
-  const failed = summary?.failed ?? 0;
+  // 生成计数为派生量：刷新恢复路径回填失败时为 null，必须以占位符呈现，
+  // 不得兜底成 0（否则会出现「生成成功 0 / 写回成功 94」这种自相矛盾的汇总）
+  const succeeded = summary?.succeeded ?? null;
+  const skipped = summary?.skipped ?? null;
+  const failed = summary?.failed ?? null;
+  const generationCountUnknown =
+    succeeded === null || skipped === null || failed === null;
   const writeback = summary?.writeback ?? null;
   const writebackError = summary?.writebackError ?? null;
   const allSuccess = failed === 0 && skipped === 0;
@@ -587,23 +598,30 @@ function SummaryModal({ summary, totalCount, onClose }: SummaryModalProps) {
           <div className={styles.summaryStats}>
             <div className={`${styles.statCard} ${styles.statCardSuccess}`}>
               <span className={`${styles.statNumber} ${styles.statNumberSuccess}`}>
-                {succeeded}
+                {succeeded ?? UNKNOWN_COUNT_PLACEHOLDER}
               </span>
               <span className={styles.statLabel}>成功</span>
             </div>
             <div className={`${styles.statCard} ${styles.statCardCaution}`}>
               <span className={`${styles.statNumber} ${styles.statNumberCaution}`}>
-                {skipped}
+                {skipped ?? UNKNOWN_COUNT_PLACEHOLDER}
               </span>
               <span className={styles.statLabel}>跳过（已有 Alt）</span>
             </div>
             <div className={`${styles.statCard} ${styles.statCardCritical}`}>
               <span className={`${styles.statNumber} ${styles.statNumberCritical}`}>
-                {failed}
+                {failed ?? UNKNOWN_COUNT_PLACEHOLDER}
               </span>
               <span className={styles.statLabel}>失败</span>
             </div>
           </div>
+
+          {/* 计数未知提示：刷新恢复路径回填失败时，生成侧计数以占位符呈现，明确标注而非显示 0 */}
+          {generationCountUnknown && (
+            <s-text tone="neutral">
+              生成阶段计数未能取得（{UNKNOWN_COUNT_PLACEHOLDER}），请以候选列表与写回历史为准。
+            </s-text>
+          )}
 
           {/* 自动写回结果 */}
           {writeback ? (
@@ -641,7 +659,7 @@ function SummaryModal({ summary, totalCount, onClose }: SummaryModalProps) {
           )}
 
           {/* 失败提示 */}
-          {failed > 0 && (
+          {(failed ?? 0) > 0 && (
             <s-text tone="neutral">
               生成失败的图片可返回候选列表重新选择生成。
             </s-text>
