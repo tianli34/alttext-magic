@@ -22,7 +22,7 @@ import {
   type WritebackTruthDebugEvent,
 } from "./useWritebackTruthDebug";
 import {
-  isGenerationTallySnapshot,
+  hydrateGenerationTallyWithRetry,
   toGenerationTally,
 } from "../lib/generation-tally";
 
@@ -80,6 +80,13 @@ function clearPersistedGeneration(): void {
     // 忽略清除异常
   }
 }
+
+// ============================================================================
+// 恢复路径的生成计数回填参数（取数策略见 app/lib/generation-tally.ts）
+// ============================================================================
+
+/** 写回终态回调等待回填的上限：生成端点长期故障时先出汇总（占位符），回填成功后原地补数 */
+const GENERATION_TALLY_WAIT_CAP_MS = 15_000;
 
 // ============================================================================
 // 类型定义
@@ -221,34 +228,51 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   const startedQuickWritebackBatchIdRef = useRef<string | null>(null);
   // 生成计数的暂存：转入 WRITEBACK 阶段后用于合并最终汇总。
   const generationTallyRef = useRef<{ total: number; succeeded: number; skipped: number; failed: number } | null>(null);
-  // 刷新恢复路径的计数回填 Promise：写回终态回调可能先于回填完成，
-  // 此时需等待该 Promise 落地再构造汇总，避免把「尚未取得」误判为「未知」。
+  // 刷新恢复路径的计数回填 Promise（重试直至成功的循环，见 hydrateGenerationTally）：
+  // 写回终态回调可能先于回填成功，此时等待其落地（带上限）再构造汇总，
+  // 避免把「尚未取得」误判为「未知」。
   const pendingGenerationTallyRef = useRef<Promise<void> | null>(null);
+  // 回填循环的会话代号：恢复 effect 重入（StrictMode 卸载重挂）与 teardown
+  // （cancel/closeSummary/组件卸载）时递增；循环每次落状态前核对，失效即退出，
+  // 防止旧循环在后台无限轮询或向已关闭的流程写入上一批次的计数。
+  const generationTallyRunIdRef = useRef(0);
 
   /**
    * 刷新恢复路径的生成计数回填。
    *
    * 恢复时直接进 WRITEBACK 阶段，useGenerationSSE 不再激活（其入参 batchId 为 null），
    * 生成终态回调不会触发 → 内存 tally 恒为 null → 汇总里「生成成功」被兜底成 0，
-   * 与写回成功的真实计数自相矛盾。此处用与生成进度同口径的轮询快照补回该派生量；
+   * 与写回成功的真实计数自相矛盾。此处经 hydrateGenerationTallyWithRetry 轮询
+   * 与生成进度同口径的快照补回该派生量（失败静默、重试直至成功，策略见 lib）；
    * 取不到时保持 null（UI 显示占位符），不伪造 0。
+   *
+   * @param runId 回填会话代号：与 generationTallyRunIdRef 当前值不符即视为已 teardown
    */
-  const hydrateGenerationTally = useCallback(async (generationBatchId: string) => {
-    try {
-      const token = await shopify.idToken();
-      const response = await fetch(
-        `/api/generation/batch/${encodeURIComponent(generationBatchId)}`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      if (!response.ok) return;
-
-      const snapshot: unknown = await response.json();
-      if (!isGenerationTallySnapshot(snapshot)) return;
-
-      generationTallyRef.current = toGenerationTally(snapshot);
-    } catch {
-      // 静默降级：计数保持「未知」，由汇总 UI 以占位符呈现
-    }
+  const hydrateGenerationTally = useCallback(async (generationBatchId: string, runId: number): Promise<void> => {
+    await hydrateGenerationTallyWithRetry({
+      fetchSnapshot: async () => {
+        const token = await shopify.idToken();
+        return fetch(`/api/generation/batch/${encodeURIComponent(generationBatchId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      },
+      onTally: (tally) => {
+        generationTallyRef.current = tally;
+        // 汇总若已先于回填落地（等待上限兜底放行），把占位符原地补成真实计数
+        setSummary((prev) =>
+          prev && prev.succeeded === null
+            ? {
+                ...prev,
+                total: tally.total,
+                succeeded: tally.succeeded,
+                skipped: tally.skipped,
+                failed: tally.failed,
+              }
+            : prev,
+        );
+      },
+      isCancelled: () => generationTallyRunIdRef.current !== runId,
+    });
   }, [shopify]);
 
   // 挂载后恢复进行中的生成批次（避免在 SSR/hydration 阶段读取 sessionStorage 引发不一致）
@@ -260,11 +284,16 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     if (persisted.writebackBatchId) {
       setWritebackBatchId(persisted.writebackBatchId);
       setPhase("WRITEBACK");
-      // 已转入写回阶段的批次：生成阶段不会再被激活，需回填生成计数
-      pendingGenerationTallyRef.current = hydrateGenerationTally(persisted.batchId);
+      // 已转入写回阶段的批次：生成阶段不会再被激活，需回填生成计数（重试直至成功）
+      const runId = ++generationTallyRunIdRef.current;
+      pendingGenerationTallyRef.current = hydrateGenerationTally(persisted.batchId, runId);
     } else {
       setPhase("GENERATING");
     }
+    // 卸载/重入时递增代号，使仍在重试的回填循环立即退出
+    return () => {
+      generationTallyRunIdRef.current += 1;
+    };
   }, [hydrateGenerationTally]);
 
   // 生成 SSE 完成回调：有自动写回批次则转入 WRITEBACK，否则直接汇总。
@@ -311,11 +340,13 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     void (async () => {
       const pendingHydration = pendingGenerationTallyRef.current;
       if (generationTallyRef.current === null && pendingHydration) {
-        try {
-          await pendingHydration;
-        } catch {
-          // 回填失败：保持 null，由汇总 UI 以占位符呈现
-        }
+        // 回填是「重试直至成功」的循环，通常数秒内落地；等待设上限：
+        // 生成端点长期故障时不得无限期阻塞汇总，先以占位符呈现，
+        // 回填成功后由循环的 onTally 原地补数
+        await Promise.race([
+          pendingHydration.catch(() => undefined),
+          new Promise<void>((resolve) => setTimeout(resolve, GENERATION_TALLY_WAIT_CAP_MS)),
+        ]);
       }
 
       const tally = generationTallyRef.current;
@@ -516,6 +547,7 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   // 从 WRITEBACK 取消仅关闭前端展示，服务端自动写回继续执行（结果可在历史页查看）。
   const cancel = useCallback(() => {
     clearPersistedGeneration();
+    generationTallyRunIdRef.current += 1; // 使仍在重试的回填循环立即退出
     generationTallyRef.current = null;
     pendingGenerationTallyRef.current = null;
     setPhase("IDLE");
@@ -529,6 +561,7 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   // ---- Close Summary ----
   const closeSummary = useCallback(() => {
     clearPersistedGeneration();
+    generationTallyRunIdRef.current += 1; // 使仍在重试的回填循环立即退出
     generationTallyRef.current = null;
     pendingGenerationTallyRef.current = null;
     setPhase("IDLE");
