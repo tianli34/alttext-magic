@@ -7,6 +7,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useLocation, useNavigate } from "react-router";
 import { useState, useEffect, useCallback } from "react";
+import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getBootstrapData } from "../../server/modules/bootstrap/bootstrap.service";
@@ -21,6 +22,7 @@ import { useSidePanelRail } from "../hooks/useSidePanelRail";
 import { formatRelativeTime } from "../lib/format";
 import { useTimezone } from "../lib/timezone";
 import { DEFAULT_SCOPE_FLAG_STATE } from "../lib/scope-utils";
+import { extractResponseError, parseJsonResponse } from "../lib/http-error";
 import styles from "../components/dashboard/DashboardAnchor.module.css";
 
 /* ------------------------------------------------------------------ */
@@ -127,6 +129,9 @@ export default function AppDashboardPage() {
 
 function DashboardContent() {
   const timezone = useTimezone();
+  // fetch 请求显式携带会话令牌：嵌入 iframe 内 cookie 会话可能被拦，
+  // 鉴权失败时服务端会重定向到 HTML 页，非 JSON 响应体会让 .json() 抛浏览器原生报错
+  const shopify = useAppBridge();
   /** Dashboard API 数据 */
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   /** 数据加载中 */
@@ -167,13 +172,17 @@ function DashboardContent() {
     setFetchError(null);
 
     try {
-      const response = await fetch("/api/dashboard", { signal });
+      const token = await shopify.idToken();
+      const response = await fetch("/api/dashboard", {
+        signal,
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       if (!response.ok) {
-        throw new Error(`请求失败 (${response.status})`);
+        throw new Error(await extractResponseError(response));
       }
 
-      const result = await response.json() as DashboardData;
+      const result = await parseJsonResponse<DashboardData>(response);
       setDashboardData(result);
     } catch (err) {
       // 忽略取消请求的错误
@@ -186,7 +195,7 @@ function DashboardContent() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [shopify]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -240,9 +249,10 @@ function DashboardContent() {
     const scopeFlags = dashboardData?.scanScopeFlags ?? DEFAULT_SCOPE_FLAG_STATE;
 
     try {
+      const token = await shopify.idToken();
       const response = await fetch("/api/scan/start", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           scopeFlags,
           noticeVersion: "1.3",
@@ -250,13 +260,12 @@ function DashboardContent() {
       });
 
       if (!response.ok) {
-        const body = await response.json() as { error?: string };
-        setRescanError(body.error ?? `请求失败 (${response.status})`);
+        setRescanError(await extractResponseError(response));
         setRescanning(false);
         return;
       }
 
-      const result = await response.json() as { scanJobId?: string };
+      const result = await parseJsonResponse<{ scanJobId?: string }>(response);
       if (result.scanJobId) {
         // 拿到 scanJobId → 展示进度浮窗
         setDismissedScanJobId(null);
@@ -281,22 +290,25 @@ function DashboardContent() {
       setRescanError("网络错误，请稍后重试");
       setRescanning(false);
     }
-  }, [dashboardData]);
+  }, [dashboardData, shopify]);
 
   const handleQuickProcess = useCallback(async () => {
     // 立即弹出准备弹窗（PREFLIGHT_LOADING），候选统计请求在弹窗打开后发起，
     // 避免点击后长时间仅按钮转圈而无对话框反馈
     flow.openQuickProcessPrepare();
     try {
-      const response = await fetch("/api/dashboard/process", { method: "POST" });
+      const token = await shopify.idToken();
+      const response = await fetch("/api/dashboard/process", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!response.ok) {
-        const body = (await response.json()) as { error?: string };
-        throw new Error(body.error ?? `请求失败 (${response.status})`);
+        throw new Error(await extractResponseError(response));
       }
-      const result = (await response.json()) as {
+      const result = await parseJsonResponse<{
         generationCandidateIds: string[];
         writebackCandidateIds: string[];
-      };
+      }>(response);
       if (result.generationCandidateIds.length === 0 && result.writebackCandidateIds.length === 0) {
         // 停留准备弹窗展示提示，用户可关闭
         flow.failQuickProcessPrepare("当前没有待生成或待写回的图片");
@@ -309,7 +321,7 @@ function DashboardContent() {
     } catch (err) {
       flow.failQuickProcessPrepare(err instanceof Error ? err.message : "一键处理失败，请稍后重试");
     }
-  }, [flow]);
+  }, [flow, shopify]);
 
   const handleCloseSummary = useCallback(() => {
     flow.closeSummary();

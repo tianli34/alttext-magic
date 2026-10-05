@@ -7,6 +7,7 @@ import { useState, useCallback } from 'react';
 import type { PurchasePackResponse } from '../components/billing/types';
 import { getEmbeddedHost } from '../lib/app-navigation';
 import { openTopLevel } from '../lib/top-navigation';
+import { parseJsonResponse } from '../lib/http-error';
 
 interface UsePurchasePackResult {
   /** 请求中 */
@@ -32,7 +33,7 @@ export function usePurchasePack(): UsePurchasePackResult {
         body: JSON.stringify({ packCode, host: getEmbeddedHost() }),
       });
 
-      const result = (await response.json()) as PurchasePackResponse;
+      const result = await parseJsonResponse<PurchasePackResponse>(response);
 
       if (!response.ok || result.error) {
         throw new Error(result.error || `请求失败 (${response.status})`);

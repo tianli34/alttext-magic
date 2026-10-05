@@ -64,6 +64,21 @@ export function isGenerationTallySnapshot(value: unknown): value is GenerationTa
   );
 }
 
+/**
+ * 校验持久化缓存或外部载荷是否为合法的 GenerationTally 结构。
+ */
+export function isGenerationTally(value: unknown): value is GenerationTally {
+  if (typeof value !== "object" || value === null) return false;
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.total === "number" &&
+    typeof candidate.succeeded === "number" &&
+    typeof candidate.skipped === "number" &&
+    typeof candidate.failed === "number"
+  );
+}
+
 // ============================================================================
 // 刷新恢复路径的计数回填循环
 // ============================================================================

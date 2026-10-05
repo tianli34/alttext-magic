@@ -14,6 +14,10 @@ import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 import { GenerationFlow } from "../components/generation/GenerationFlow";
 import { formatRelativeTime } from "../lib/format";
 import { useTimezone } from "../lib/timezone";
+import {
+  extractResponseError,
+  parseJsonResponse,
+} from "../lib/http-error";
 
 type GroupType = "PRODUCT_MEDIA" | "FILES" | "COLLECTION" | "ARTICLE";
 type CandidateStatus =
@@ -307,10 +311,10 @@ export default function AppCandidatesPage() {
       const response = await fetch(`/api/candidates?${query}`, { signal });
 
       if (!response.ok) {
-        throw new Error(`候选列表加载失败 (${response.status})`);
+        throw new Error(await extractResponseError(response));
       }
 
-      return await response.json() as CandidateListResponse;
+      return await parseJsonResponse<CandidateListResponse>(response);
     },
     [selectedGroup, selectedStatus],
   );
@@ -329,10 +333,10 @@ export default function AppCandidatesPage() {
         ]);
 
         if (!dashboardResponse.ok) {
-          throw new Error(`分组筛选加载失败 (${dashboardResponse.status})`);
+          throw new Error(await extractResponseError(dashboardResponse));
         }
 
-        const dashboard = await dashboardResponse.json() as DashboardResponse;
+        const dashboard = await parseJsonResponse<DashboardResponse>(dashboardResponse);
         const candidates = candidateResponse;
 
         setGroups(dashboard.groups);
@@ -412,10 +416,10 @@ export default function AppCandidatesPage() {
         );
 
         if (!response.ok) {
-          throw new Error(`影响范围加载失败 (${response.status})`);
+          throw new Error(await extractResponseError(response));
         }
 
-        const data = await response.json() as UsageListResponse;
+        const data = await parseJsonResponse<UsageListResponse>(response);
         setUsageByCandidateId((current) => ({
           ...current,
           [item.altCandidateId]: { loading: false, error: null, usages: data.usages },
@@ -467,13 +471,12 @@ export default function AppCandidatesPage() {
         });
 
         if (!response.ok) {
-          const body = (await response.json()) as { error?: string };
-          throw new Error(body.error ?? `操作失败 (${response.status})`);
+          throw new Error(await extractResponseError(response));
         }
 
-        const data = (await response.json()) as {
+        const data = await parseJsonResponse<{
           candidate: { status: CandidateStatus };
-        };
+        }>(response);
         // 实时更新列表项状态（无需整页刷新）
         setItems((current) =>
           current.map((i) =>

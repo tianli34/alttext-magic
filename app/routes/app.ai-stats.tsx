@@ -4,6 +4,10 @@
  */
 import { useEffect, useState, useCallback } from "react";
 import { displayModelName } from "../lib/format";
+import {
+  extractResponseError,
+  parseJsonResponse,
+} from "../lib/http-error";
 
 interface StatusDuration {
   avgDurationMs: number;
@@ -86,10 +90,9 @@ export default function AppAiStatsPage() {
     try {
       const res = await fetch("/api/ai-stats");
       if (!res.ok) {
-        const body = (await res.json()) as { error?: string };
-        throw new Error(body.error ?? `请求失败 (${res.status})`);
+        throw new Error(await extractResponseError(res));
       }
-      const json = (await res.json()) as AiStatsResponse;
+      const json = await parseJsonResponse<AiStatsResponse>(res);
       setData(json);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载统计失败");

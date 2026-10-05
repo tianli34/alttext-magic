@@ -100,6 +100,19 @@ export function useWritebackSSE(
   batchIdRef.current = batchId;
   /** 上一轮批次 ID：仅在批次真正切换（含回到 null）时重置通道状态 */
   const prevBatchIdRef = useRef<string | null | undefined>(undefined);
+  /**
+   * 轮询通道的会话代号：与 completedRef 的复位同处一个同步块递增。
+   *
+   * 为什么单靠 completedRef 拦不住：
+   * 转入 SUMMARY 后传给本 Hook 的 batchId 变为 null，复位块把 completedRef 重新打开
+   * （同一页面会话的下一轮一键处理需要它），但轮询的 fetch 不会随这次复位取消。
+   * 响应若在复位之后才落地，pollOnce 只在 await 之后复查 completedRef（此刻已为
+   * false），于是对同一批次二次触发终态回调（同批次二次回调会覆盖已落地的汇总）。
+   * 会话代号在取数发起时捕获、落地时核对，使上一轮的响应即使迟到也被整份丢弃。
+   */
+  const pollRunIdRef = useRef(0);
+  /** 在途轮询请求的取消句柄：批次切换（含回到 null）时中止，避免陈旧响应落地回写进度 */
+  const pollAbortControllerRef = useRef<AbortController | null>(null);
 
   const handleMessage = useCallback((event: EventSourceMessage) => {
     if (event.event === "close") {
@@ -207,23 +220,44 @@ export function useWritebackSSE(
 
   // ---- 轮询兜底:普通请求获取 DB 快照,SSE 数据新鲜时主动避让 ----
   const pollOnce = useCallback(async () => {
+    const runId = pollRunIdRef.current;
     const currentBatchId = batchIdRef.current;
     if (!currentBatchId || completedRef.current) return;
 
     // 进度已到终态:无需继续轮询
     if (isTerminalStatus(progressRef.current?.status)) return;
 
+    // 本次取数是否仍属于当前轮次:批次切换（含回到 null）后会话代号递增，
+    // 或入参批次 ID 已变（batchIdRef 在渲染期同步更新，失效点比复位块更早）
+    const isStale = () =>
+      pollRunIdRef.current !== runId || batchIdRef.current !== currentBatchId;
+
+    const abortController = new AbortController();
+    pollAbortControllerRef.current = abortController;
+
     try {
       const token = await shopify.idToken();
+      if (isStale()) return;
+
       const response = await fetch(
         `/api/writeback/batch/${encodeURIComponent(currentBatchId)}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: abortController.signal,
+        },
       );
 
       // 批次不存在(404):静默跳过,等待下次轮询/SSE 给出结论
       if (!response.ok) return;
 
       const detail = (await response.json()) as WritebackProgressData;
+
+      // 每个 await 之后都必须复核归属:批次若在这期间切换（如终态已由 SSE 送达、
+      // 写回批次 ID 归 null 转入汇总）或流程已 teardown,这份响应属于上一轮,
+      // 既不回写进度也不触发终态回调——复位块已把 completedRef 重新打开,
+      // 单靠它拦不住这次迟到
+      if (isStale()) return;
+
       const snapshot = toProgressData(detail);
 
       // SSE 数据仍新鲜时以 SSE 为准,避免旧快照回退进度条
@@ -245,6 +279,10 @@ export function useWritebackSSE(
       }
     } catch {
       // 轮询失败静默跳过:错误展示交给 SSE 通道,下一轮重试
+    } finally {
+      if (pollAbortControllerRef.current === abortController) {
+        pollAbortControllerRef.current = null;
+      }
     }
   }, [shopify]);
 
@@ -255,8 +293,16 @@ export function useWritebackSSE(
     // 上一轮的终态，pollOnce 开头即短路），汇总弹窗不再自动弹出、进度浮层永久停留，
     // 只有刷新页面（重建 Hook 实例）才补齐。progressRef/lastSSEDataAtRef 同理需清空，
     // 避免新一轮进度被上一轮的终态快照污染或误判为「SSE 新鲜」。
+    //
+    // 闸门复位的同时必须作废在途轮询：复位把 completedRef 重新打开后，上一轮那次
+    // 尚未返回的取数就再没有任何东西拦它——它会二次触发终态回调，把已落地的汇总
+    // （生成侧三项由 generationTallyRef 供数，那时已被清空）覆盖成未知。故这里递增
+    // 轮询会话代号并中止在途请求，双保险确保迟到响应被整份丢弃。
     if (prevBatchIdRef.current !== batchId) {
       prevBatchIdRef.current = batchId;
+      pollRunIdRef.current += 1;
+      pollAbortControllerRef.current?.abort();
+      pollAbortControllerRef.current = null;
       completedRef.current = false;
       progressRef.current = null;
       lastSSEDataAtRef.current = 0;

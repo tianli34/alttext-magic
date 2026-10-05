@@ -18,6 +18,7 @@ import {
   listEnabledScopeFlags,
 } from "../lib/scope-utils";
 import { buildAppPath } from "../lib/app-navigation";
+import { extractResponseError, parseJsonResponse } from "../lib/http-error";
 import { SCAN_NOTICE_VERSION } from "../../shared/constants";
 
 /** Bootstrap 数据类型（前端需要的子集） */
@@ -113,14 +114,13 @@ export default function OnboardingPage() {
       });
 
       if (!response.ok) {
-        const data = await response.json() as { error?: string };
-        setError(data.error ?? `请求失败 (${response.status})`);
+        setError(await extractResponseError(response));
         setSubmitting(false);
         return;
       }
 
       // 提取 scanJobId → 回到 Dashboard，由其进度浮窗自动展示扫描进度
-      await response.json();
+      await parseJsonResponse<unknown>(response);
       navigate(buildAppPath("/app", location.search));
     } catch {
       setError("网络错误，请稍后重试");

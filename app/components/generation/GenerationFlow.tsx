@@ -487,7 +487,12 @@ function WritebackProgressView({
   return (
     <SidePanel width={width} panelRef={panelRef}>
       <s-stack direction="block" gap="base">
-        <s-heading>正在自动写回 Alt Text…</s-heading>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <s-heading>正在自动写回 Alt Text…</s-heading>
+          <s-box padding="small" borderRadius="base" background="subdued">
+            <s-text tone="success">✓ 对齐已应用</s-text>
+          </s-box>
+        </div>
 
         {/* 进度条 */}
         <div className={styles.progressContainer}>
@@ -566,11 +571,25 @@ function SummaryModal({ summary, totalCount, onClose }: SummaryModalProps) {
   const succeeded = summary?.succeeded ?? null;
   const skipped = summary?.skipped ?? null;
   const failed = summary?.failed ?? null;
+  // 「仅写回」的一键处理（无生成候选）全程没有生成阶段：生成侧三项本就不存在，
+  // 既不渲染生成结果卡片，也不显示「计数未能取得」提示
+  const generationRan = summary?.generationRan ?? true;
   const generationCountUnknown =
-    succeeded === null || skipped === null || failed === null;
+    generationRan && (succeeded === null || skipped === null || failed === null);
   const writeback = summary?.writeback ?? null;
   const writebackError = summary?.writebackError ?? null;
-  const allSuccess = failed === 0 && skipped === 0;
+  // 未运行生成阶段时不以生成侧计数判定成败：那三项恒为 null，
+  // 若沿用原判定，写回全部成功的「仅写回」流程会被拖成「已结束」
+  const generationAllSuccess = !generationRan || (failed === 0 && skipped === 0);
+  const allSuccess =
+    generationAllSuccess && !writebackError && (writeback === null || writeback.fail === 0);
+  const heading = allSuccess
+    ? generationRan
+      ? "生成完成！"
+      : "写回完成！"
+    : generationRan
+      ? "生成已结束"
+      : "写回已结束";
 
   const handleViewHistory = () => {
     navigate(buildAppPath("/app/history", location.search));
@@ -581,7 +600,7 @@ function SummaryModal({ summary, totalCount, onClose }: SummaryModalProps) {
       <div className={styles.modal}>
         <s-stack direction="block" gap="base">
           <div className={styles.modalHeader}>
-            <s-heading>{allSuccess && !writebackError && (writeback === null || writeback.fail === 0) ? "生成完成！" : "生成已结束"}</s-heading>
+            <s-heading>{heading}</s-heading>
             <button
               type="button"
               className={styles.closeButton}
@@ -593,34 +612,43 @@ function SummaryModal({ summary, totalCount, onClose }: SummaryModalProps) {
             </button>
           </div>
 
-          {/* 生成汇总统计卡片 */}
-          <s-text tone="neutral">生成结果</s-text>
-          <div className={styles.summaryStats}>
-            <div className={`${styles.statCard} ${styles.statCardSuccess}`}>
-              <span className={`${styles.statNumber} ${styles.statNumberSuccess}`}>
-                {succeeded ?? UNKNOWN_COUNT_PLACEHOLDER}
-              </span>
-              <span className={styles.statLabel}>成功</span>
-            </div>
-            <div className={`${styles.statCard} ${styles.statCardCaution}`}>
-              <span className={`${styles.statNumber} ${styles.statNumberCaution}`}>
-                {skipped ?? UNKNOWN_COUNT_PLACEHOLDER}
-              </span>
-              <span className={styles.statLabel}>跳过（已有 Alt）</span>
-            </div>
-            <div className={`${styles.statCard} ${styles.statCardCritical}`}>
-              <span className={`${styles.statNumber} ${styles.statNumberCritical}`}>
-                {failed ?? UNKNOWN_COUNT_PLACEHOLDER}
-              </span>
-              <span className={styles.statLabel}>失败</span>
-            </div>
-          </div>
+          {/* 生成汇总统计卡片（仅写回的一键处理没有生成阶段，整段不渲染） */}
+          {generationRan && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <s-text tone="neutral">生成结果</s-text>
+                <s-box padding="small" borderRadius="base" background="subdued">
+                  <s-text tone="success">✓ 计数对齐已应用</s-text>
+                </s-box>
+              </div>
+              <div className={styles.summaryStats}>
+                <div className={`${styles.statCard} ${styles.statCardSuccess}`}>
+                  <span className={`${styles.statNumber} ${styles.statNumberSuccess}`}>
+                    {succeeded ?? UNKNOWN_COUNT_PLACEHOLDER}
+                  </span>
+                  <span className={styles.statLabel}>成功</span>
+                </div>
+                <div className={`${styles.statCard} ${styles.statCardCaution}`}>
+                  <span className={`${styles.statNumber} ${styles.statNumberCaution}`}>
+                    {skipped ?? UNKNOWN_COUNT_PLACEHOLDER}
+                  </span>
+                  <span className={styles.statLabel}>跳过（已有 Alt）</span>
+                </div>
+                <div className={`${styles.statCard} ${styles.statCardCritical}`}>
+                  <span className={`${styles.statNumber} ${styles.statNumberCritical}`}>
+                    {failed ?? UNKNOWN_COUNT_PLACEHOLDER}
+                  </span>
+                  <span className={styles.statLabel}>失败</span>
+                </div>
+              </div>
 
-          {/* 计数未知提示：刷新恢复路径回填失败时，生成侧计数以占位符呈现，明确标注而非显示 0 */}
-          {generationCountUnknown && (
-            <s-text tone="neutral">
-              生成阶段计数未能取得（{UNKNOWN_COUNT_PLACEHOLDER}），请以候选列表与写回历史为准。
-            </s-text>
+              {/* 计数未知提示：刷新恢复路径回填失败时，生成侧计数以占位符呈现，明确标注而非显示 0 */}
+              {generationCountUnknown && (
+                <s-text tone="neutral">
+                  生成阶段计数未能取得（{UNKNOWN_COUNT_PLACEHOLDER}），请以候选列表与写回历史为准。
+                </s-text>
+              )}
+            </>
           )}
 
           {/* 自动写回结果 */}

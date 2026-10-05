@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   GENERATION_TALLY_RETRY_DELAY_MS,
   hydrateGenerationTallyWithRetry,
+  isGenerationTally,
   isGenerationTallySnapshot,
   toGenerationTally,
 } from '../../../app/lib/generation-tally';
@@ -82,6 +83,38 @@ describe('isGenerationTallySnapshot', () => {
 
   it('错误响应体（仅有 error 字段）判定不可用', () => {
     expect(isGenerationTallySnapshot({ error: 'Generation batch not found' })).toBe(false);
+  });
+});
+
+describe('isGenerationTally', () => {
+  it('接受包含完整 4 项数字的 GenerationTally 结构', () => {
+    expect(
+      isGenerationTally({
+        total: 94,
+        succeeded: 94,
+        skipped: 0,
+        failed: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it('缺少 succeeded 或其他字段时判定不可用', () => {
+    expect(isGenerationTally({ total: 94, skipped: 0, failed: 0 })).toBe(false);
+    expect(isGenerationTally({ total: 94, succeeded: 94 })).toBe(false);
+  });
+
+  it('非对象、null 或字段类型非 number 判定不可用', () => {
+    expect(isGenerationTally(null)).toBe(false);
+    expect(isGenerationTally(undefined)).toBe(false);
+    expect(isGenerationTally('invalid')).toBe(false);
+    expect(
+      isGenerationTally({
+        total: 94,
+        succeeded: '94',
+        skipped: 0,
+        failed: 0,
+      }),
+    ).toBe(false);
   });
 });
 

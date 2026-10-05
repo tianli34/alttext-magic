@@ -7,6 +7,7 @@ import { useState, useCallback } from 'react';
 import type { PlanKey, BillingInterval, ChangePlanResponse } from '../components/billing/types';
 import { getEmbeddedHost } from '../lib/app-navigation';
 import { openTopLevel } from '../lib/top-navigation';
+import { parseJsonResponse } from '../lib/http-error';
 
 interface UseChangePlanResult {
   /** 请求中 */
@@ -32,7 +33,7 @@ export function useChangePlan(): UseChangePlanResult {
         body: JSON.stringify({ plan, interval, host: getEmbeddedHost() }),
       });
 
-      const result = (await response.json()) as ChangePlanResponse;
+      const result = await parseJsonResponse<ChangePlanResponse>(response);
 
       if (!response.ok || result.error) {
         throw new Error(result.error || `请求失败 (${response.status})`);

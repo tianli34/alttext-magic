@@ -49,6 +49,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
+  // 2-8. 鉴权与业务逻辑：未捕获异常统一转 JSON 500。
+  //      框架对资源路由未捕获异常的兜底是 HTML 错误页，前端 .json() 解析时会抛
+  //      浏览器原生 JSON.parse 报错（如 "unexpected character at line 1 column 1"），
+  //      既看不到真实故障也无法定位接口，故在出口处拦一道。
+  try {
+    return await handlePreflight(request);
+  } catch (error) {
+    // 鉴权会话失效时 shopify 适配层抛出的是 Response（401/重定向），原样放行
+    if (error instanceof Response) throw error;
+    logger.error({ err: error }, "Preflight 未捕获异常");
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }
+};
+
+async function handlePreflight(request: Request): Promise<Response> {
   // 2. 鉴权 —— 确保 Shopify 登录态
   const { session } = await authenticate.admin(request);
   const shopDomain = session.shop;
@@ -133,7 +148,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     currentPlan: shop.currentPlan,
     allocation: mergedAllocation,
   });
-};
+}
 
 // ============================================================================
 // 辅助函数

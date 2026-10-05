@@ -7,6 +7,7 @@ import { useSearchParams } from "react-router";
 import styles from "../components/history/HistoryPage.module.css";
 import { useTimezone } from "../lib/timezone";
 import { formatDateTime } from "../lib/format";
+import { parseJsonResponse } from "../lib/http-error";
 
 type AltPlane = "FILE_ALT" | "COLLECTION_IMAGE_ALT" | "ARTICLE_IMAGE_ALT";
 type HistoryCategoryFilter = "" | "PRODUCT" | AltPlane;
@@ -142,7 +143,7 @@ export default function AppHistoryPage() {
           throw new Error(`历史记录加载失败 (${response.status})`);
         }
 
-        const data = (await response.json()) as HistoryResponse;
+        const data = await parseJsonResponse<HistoryResponse>(response);
         let filteredItems = data.items;
         if (selectedCategory === "PRODUCT") {
           filteredItems = data.items.filter(

@@ -14,6 +14,7 @@
  *            + server/modules/devtools/ + app._index.tsx 内的 [TEMP-DEVTOOLS] 代码块。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseJsonResponse } from "../../lib/http-error";
 
 /* ------------------------------------------------------------------ */
 /*  类型定义（与 /api/dev/clear-alt/* 响应体对齐，客户端不导入服务端类型） */
@@ -246,10 +247,10 @@ export function ClearMediaAltPanel({ onFinished }: ClearMediaAltPanelProps) {
           body: JSON.stringify({ mode, apply }),
         });
 
-        const payload = (await response.json()) as {
+        const payload = await parseJsonResponse<{
           error?: string;
           job?: ClearAltJob;
-        };
+        }>(response);
 
         if (!response.ok) {
           setError(payload.error ?? `请求失败 (${response.status})`);

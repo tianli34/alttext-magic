@@ -13,6 +13,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSSE, type SSEProgressData } from "./useSSE";
 import { useScanStatus, type ScanStatusData } from "./useScanStatus";
+import {
+  extractResponseError,
+  parseJsonResponse,
+} from "../lib/http-error";
 
 /** 资源类型中文标签映射 */
 const RESOURCE_TYPE_LABELS: Record<string, string> = {
@@ -192,13 +196,12 @@ export function useBatchProgress(
       });
 
       if (!response.ok) {
-        const body = await response.json() as { error?: string };
-        setRescanError(body.error ?? `请求失败 (${response.status})`);
+        setRescanError(await extractResponseError(response));
         setRescanning(false);
         return null;
       }
 
-      const result = await response.json() as { scanJobId?: string };
+      const result = await parseJsonResponse<{ scanJobId?: string }>(response);
       setRescanning(false);
       return result.scanJobId ?? null;
     } catch {
@@ -304,8 +307,7 @@ const canStop = !!scanStatus &&
       });
 
       if (!response.ok) {
-        const body = await response.json() as { error?: string };
-        setStopError(body.error ?? `请求失败 (${response.status})`);
+        setStopError(await extractResponseError(response));
         setStopping(false);
         return;
       }

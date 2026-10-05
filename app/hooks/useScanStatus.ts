@@ -5,6 +5,10 @@
  *          用于页面刷新后恢复状态。
  */
 import { useState, useEffect, useCallback } from "react";
+import {
+  extractResponseError,
+  parseJsonResponse,
+} from "../lib/http-error";
 
 /** 扫描任务状态（对应 ScanStatusTask） */
 export interface ScanTaskStatus {
@@ -106,14 +110,13 @@ export function useScanStatus(scanJobId: string | null): UseScanStatusReturn {
         );
 
         if (!response.ok) {
-          const body = await response.json() as { error?: string };
           if (!cancelled) {
-            setError(body.error ?? `请求失败 (${response.status})`);
+            setError(await extractResponseError(response));
           }
           return;
         }
 
-        const result = await response.json() as ScanStatusData;
+        const result = await parseJsonResponse<ScanStatusData>(response);
         if (!cancelled) {
           setData(result);
         }

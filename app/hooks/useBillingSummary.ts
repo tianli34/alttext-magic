@@ -4,6 +4,10 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import type { BillingSummaryResponse } from '../components/billing/types';
+import {
+  extractResponseError,
+  parseJsonResponse,
+} from '../lib/http-error';
 
 interface UseBillingSummaryResult {
   /** 计费摘要数据 */
@@ -30,10 +34,10 @@ export function useBillingSummary(): UseBillingSummaryResult {
       const response = await fetch('/api/billing/summary', { signal });
 
       if (!response.ok) {
-        throw new Error(`请求失败 (${response.status})`);
+        throw new Error(await extractResponseError(response));
       }
 
-      const result = (await response.json()) as BillingSummaryResponse;
+      const result = await parseJsonResponse<BillingSummaryResponse>(response);
       setData(result);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {

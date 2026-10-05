@@ -37,6 +37,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
+  // 未捕获异常统一转 JSON 500：框架对资源路由异常的兜底是 HTML 错误页，
+  // 前端 .json() 解析时会抛浏览器原生 JSON.parse 报错，掩盖真实故障
+  try {
+    return await handleWritebackStart(request);
+  } catch (error) {
+    // 鉴权会话失效时 shopify 适配层抛出的是 Response（401/重定向），原样放行
+    if (error instanceof Response) throw error;
+    logger.error({ err: error }, "Writeback start 未捕获异常");
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }
+};
+
+async function handleWritebackStart(request: Request): Promise<Response> {
   const { session } = await authenticate.admin(request);
   const shopDomain = session.shop;
 
@@ -93,7 +106,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { status: 500 },
     );
   }
-};
+}
 
 async function parseRequestBody(
   request: Request,

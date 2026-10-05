@@ -72,6 +72,20 @@ export const loader = () => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  // 未捕获异常统一转 JSON 500（try 块之外还有鉴权/锁检查/候选加载/额度预检）：
+  // 框架对资源路由异常的兜底是 HTML 错误页，前端 .json() 解析时会抛
+  // 浏览器原生 JSON.parse 报错，掩盖真实故障
+  try {
+    return await handleGenerationStart(request);
+  } catch (error) {
+    // 鉴权会话失效时 shopify 适配层抛出的是 Response（401/重定向），原样放行
+    if (error instanceof Response) throw error;
+    logger.error({ err: error }, "Generation start 未捕获异常");
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }
+};
+
+async function handleGenerationStart(request: Request): Promise<Response> {
   const { session } = await authenticate.admin(request);
   const shopDomain = session.shop;
 
@@ -208,7 +222,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { status: 500 },
     );
   }
-};
+}
 
 async function parseRequestBody(
   request: Request,

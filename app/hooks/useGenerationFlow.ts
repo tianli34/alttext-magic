@@ -22,15 +22,20 @@ import {
   type WritebackTruthDebugEvent,
 } from "./useWritebackTruthDebug";
 import {
+  type GenerationTally,
   hydrateGenerationTallyWithRetry,
+  isGenerationTally,
   toGenerationTally,
 } from "../lib/generation-tally";
+import {
+  extractResponseError,
+  parseJsonResponse,
+} from "../lib/http-error";
 
 // ============================================================================
 // 进行中生成批次的本地持久化（用于刷新/路由跳转后的断点恢复）
-//   仅保存 batchId 与总数；进度与汇总始终以 SSE 返回的快照为准。
-//   服务端生成任务经 BullMQ 持久运行、Redis 保存进度快照，刷新不会丢失数据，
-//   缺失的仅是「前端持有 batchId」这一环，故用 sessionStorage 补齐即可。
+//   保存 batchId 与总数；转入写回阶段时连同生成计数一并存入（与写回对齐），
+//   彻底避免刷新恢复后因网络竞态导致生成计数缺失呈现未知占位符。
 // ============================================================================
 
 const ACTIVE_GENERATION_KEY = "alttext.activeGenerationBatch";
@@ -42,6 +47,8 @@ interface PersistedGeneration {
   totalCount: number;
   /** 自动触发的写回批次 ID（已转入写回阶段时存在） */
   writebackBatchId?: string | null;
+  /** 生成计数（已转入写回阶段时存在，使生成与写回行为对齐，刷新后直接同步还原） */
+  generationTally?: GenerationTally | null;
 }
 
 /** 读取持久化的进行中生成批次（SSR/无 sessionStorage 时安全返回 null） */
@@ -54,17 +61,35 @@ function readPersistedGeneration(): PersistedGeneration | null {
     if (!parsed || typeof parsed.batchId !== "string" || !parsed.batchId) {
       return null;
     }
-    return parsed;
+    const generationTally = isGenerationTally(parsed.generationTally)
+      ? parsed.generationTally
+      : null;
+    return {
+      batchId: parsed.batchId,
+      totalCount: typeof parsed.totalCount === "number" ? parsed.totalCount : 0,
+      writebackBatchId: parsed.writebackBatchId ?? null,
+      generationTally,
+    };
   } catch {
     return null;
   }
 }
 
 /** 持久化进行中生成批次 */
-function persistGeneration(batchId: string, totalCount: number, writebackBatchId?: string | null): void {
+function persistGeneration(
+  batchId: string,
+  totalCount: number,
+  writebackBatchId?: string | null,
+  generationTally?: GenerationTally | null,
+): void {
   if (typeof window === "undefined" || !window.sessionStorage) return;
   try {
-    const payload: PersistedGeneration = { batchId, totalCount, writebackBatchId: writebackBatchId ?? null };
+    const payload: PersistedGeneration = {
+      batchId,
+      totalCount,
+      writebackBatchId: writebackBatchId ?? null,
+      generationTally: generationTally ?? null,
+    };
     window.sessionStorage.setItem(ACTIVE_GENERATION_KEY, JSON.stringify(payload));
   } catch {
     // 忽略写入异常（如隐私模式禁用存储）
@@ -134,6 +159,14 @@ export interface GenerationSummary {
   skipped: number | null;
   /** 失败数，null 语义同 succeeded */
   failed: number | null;
+  /**
+   * 本次流程是否运行过生成阶段。
+   * false 只出现在「仅写回」的一键处理：没有生成候选，全程只有写回批次，
+   * 生成侧三项本就不存在（而非取不到）。UI 据此不渲染生成结果卡片与
+   * 「计数未能取得」提示，也不得让恒为 null 的生成侧计数把成功的写回
+   * 拖成失败判定。
+   */
+  generationRan: boolean;
   /** 自动写回结果（无需写回/未能启动时为 null） */
   writeback: {
     /** 写回批次 ID */
@@ -228,6 +261,13 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   const startedQuickWritebackBatchIdRef = useRef<string | null>(null);
   // 生成计数的暂存：转入 WRITEBACK 阶段后用于合并最终汇总。
   const generationTallyRef = useRef<{ total: number; succeeded: number; skipped: number; failed: number } | null>(null);
+  // 已组装过汇总的写回批次 ID。
+  // 写回终态快照有 SSE 与轮询两条通道，同一批次可能先后送达两次（见 useWritebackSSE
+  // 的轮询会话代号说明）。本回调在组装后即清空 generationTallyRef 与本地缓存，
+  // 若放行第二次组装，已取得的生成计数会被覆盖成 null——界面留下
+  // 「生成阶段计数未能取得」，而写回三格照旧有数（数字来自第二次载荷）。
+  // 批次 ID 每次运行都不同，故按 ID 记账即可，无需在收尾时清除。
+  const summarizedWritebackBatchIdRef = useRef<string | null>(null);
   // 刷新恢复路径的计数回填 Promise（重试直至成功的循环，见 hydrateGenerationTally）：
   // 写回终态回调可能先于回填成功，此时等待其落地（带上限）再构造汇总，
   // 避免把「尚未取得」误判为「未知」。
@@ -258,6 +298,16 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
       },
       onTally: (tally) => {
         generationTallyRef.current = tally;
+        // 兜底回填成功时补写进本地存储，防御写回阶段后续再次刷新
+        const persisted = readPersistedGeneration();
+        if (persisted && persisted.batchId === generationBatchId && persisted.writebackBatchId) {
+          persistGeneration(
+            persisted.batchId,
+            persisted.totalCount,
+            persisted.writebackBatchId,
+            tally,
+          );
+        }
         // 汇总若已先于回填落地（等待上限兜底放行），把占位符原地补成真实计数
         setSummary((prev) =>
           prev && prev.succeeded === null
@@ -284,9 +334,15 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     if (persisted.writebackBatchId) {
       setWritebackBatchId(persisted.writebackBatchId);
       setPhase("WRITEBACK");
-      // 已转入写回阶段的批次：生成阶段不会再被激活，需回填生成计数（重试直至成功）
-      const runId = ++generationTallyRunIdRef.current;
-      pendingGenerationTallyRef.current = hydrateGenerationTally(persisted.batchId, runId);
+      // 若本地持久化已持有生成计数（与写回对齐），直接恢复到内存，无需等待或发起网络回填
+      if (persisted.generationTally) {
+        generationTallyRef.current = persisted.generationTally;
+        pendingGenerationTallyRef.current = null;
+      } else {
+        // 兜底（兼容未持久化 tally 的旧会话或降级）：启动异步回填循环（重试直至成功）
+        const runId = ++generationTallyRunIdRef.current;
+        pendingGenerationTallyRef.current = hydrateGenerationTally(persisted.batchId, runId);
+      }
     } else {
       setPhase("GENERATING");
     }
@@ -314,13 +370,13 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
       pendingGenerationTallyRef.current = null;
       setWritebackBatchId(linkedWritebackBatchId);
       setAutoWritebackError(linkedWritebackError);
-      if (batchId) persistGeneration(batchId, data.total, linkedWritebackBatchId);
+      if (batchId) persistGeneration(batchId, data.total, linkedWritebackBatchId, tally);
       setPhase("WRITEBACK");
       return;
     }
 
     pendingGenerationTallyRef.current = null;
-    setSummary({ ...tally, writeback: null, writebackError: linkedWritebackError });
+    setSummary({ ...tally, writeback: null, writebackError: linkedWritebackError, generationRan: true });
     setPhase("SUMMARY");
     clearPersistedGeneration();
   }, [batchId]);
@@ -337,6 +393,16 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
   // 若恢复路径的计数回填仍在进行（写回批次可能已完成，终态回调抢先到达），
   // 先等它落地再构造汇总，避免把「尚未取得」误判为「未知」。
   const onWritebackCompleted = useCallback((data: WritebackProgressData) => {
+    // 同一写回批次只组装一次汇总：终态回调可能被两条通道各送一次，
+    // 第二次到达时生成计数已被上一次清空，组装结果会把已知数字盖成未知
+    if (summarizedWritebackBatchIdRef.current === data.batchId) return;
+    summarizedWritebackBatchIdRef.current = data.batchId;
+
+    // 「本次流程是否运行过生成阶段」：batchId 只在生成流程中被写入
+    // （confirmAndStart 的生成分支与刷新恢复），仅写回的一键处理全程为 null。
+    // 从依赖取值而非 ref 镜像，避免在渲染期写 ref（见本 Hook 的 ref 使用约定）。
+    const generationRan = batchId !== null;
+
     void (async () => {
       const pendingHydration = pendingGenerationTallyRef.current;
       if (generationTallyRef.current === null && pendingHydration) {
@@ -355,6 +421,7 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
         succeeded: tally?.succeeded ?? null,
         skipped: tally?.skipped ?? null,
         failed: tally?.failed ?? null,
+        generationRan,
         writeback: {
           batchId: data.batchId,
           total: data.total,
@@ -370,7 +437,9 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
       setPhase("SUMMARY");
       clearPersistedGeneration();
     })();
-  }, []);
+    // batchId 参与依赖仅为取用「是否运行过生成阶段」快照：本回调只被
+    // useWritebackSSE 存进 ref 后调用，身份变化不会重连 SSE 或重启轮询。
+  }, [batchId]);
 
   // 写回 SSE 连接（仅在 WRITEBACK 阶段且有 writebackBatchId 时激活）
   const {
@@ -399,18 +468,19 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     setError(null);
 
     try {
+      // 嵌入式 iframe 下 cookie 会话可能被拦，与 SSE/回填通道一致显式携带会话令牌
+      const token = await shopify.idToken();
       const preflightResponse = await fetch("/api/generation/preflight", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ candidateIds: candidateIdsRef.current }),
       });
 
       if (!preflightResponse.ok) {
-        const body = (await preflightResponse.json()) as { error?: string };
-        throw new Error(body.error ?? `Preflight 请求失败 (${preflightResponse.status})`);
+        throw new Error(await extractResponseError(preflightResponse));
       }
 
-      const preflightData = (await preflightResponse.json()) as PreflightResult;
+      const preflightData = await parseJsonResponse<PreflightResult>(preflightResponse);
       setPreflightResult(preflightData);
       return preflightData;
     } catch (err) {
@@ -419,7 +489,7 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     } finally {
       setPreflightLoading(false);
     }
-  }, []);
+  }, [shopify]);
 
   // ---- 打开确认对话框（立即弹出，并在后台预检额度以展示当前余额）----
   const openConfirm = useCallback((candidateIds: string[]) => {
@@ -471,18 +541,19 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
     setError(null);
 
     try {
+      // 同 runPreflight：显式携带会话令牌，不依赖 iframe 内 cookie 会话
+      const token = await shopify.idToken();
       let startedWritebackBatchId = startedQuickWritebackBatchIdRef.current;
       if (!startedWritebackBatchId && writebackCandidateIdsRef.current.length > 0) {
         const writebackResponse = await fetch("/api/writeback/start", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ candidateIds: writebackCandidateIdsRef.current }),
         });
         if (!writebackResponse.ok) {
-          const body = (await writebackResponse.json()) as { message?: string; error?: string };
-          throw new Error(body.message ?? body.error ?? `启动写回失败 (${writebackResponse.status})`);
+          throw new Error(await extractResponseError(writebackResponse));
         }
-        const writebackData = (await writebackResponse.json()) as { batchId: string };
+        const writebackData = await parseJsonResponse<{ batchId: string }>(writebackResponse);
         startedWritebackBatchId = writebackData.batchId;
         startedQuickWritebackBatchIdRef.current = startedWritebackBatchId;
       }
@@ -500,16 +571,18 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
 
       const response = await fetch("/api/generation/start", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ candidateIds: candidateIdsRef.current }),
       });
 
       if (!response.ok) {
-        const body = (await response.json()) as Partial<PreflightResult> & {
+        // 409 余额不足分支需要解析结构化余额字段；非 JSON 响应体（HTML 错误页）
+        // 由 parseJsonResponse 转成带状态码与片段的错误，不再漏出浏览器原生报错
+        const body = await parseJsonResponse<Partial<PreflightResult> & {
           error?: string;
           message?: string;
           code?: string;
-        };
+        }>(response);
 
         // 额度不足 → 回填余额详情，停留确认弹窗展示不足引导（Upgrade / Buy Pack）
         if (response.status === 409 && body.error === "INSUFFICIENT_CREDIT") {
@@ -531,7 +604,7 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
         throw new Error(detail);
       }
 
-      const data = (await response.json()) as StartResult;
+      const data = await parseJsonResponse<StartResult>(response);
       setBatchId(data.batchId);
       setTotalCount(data.totalCount);
       // 持久化进行中批次，确保刷新/跳转后可恢复进度
@@ -541,7 +614,7 @@ export function useGenerationFlow(): UseGenerationFlowReturn {
       setError(err instanceof Error ? err.message : "启动生成失败");
       setPhase("CONFIRMING");
     }
-  }, []);
+  }, [shopify]);
 
   // ---- Cancel ----
   // 从 WRITEBACK 取消仅关闭前端展示，服务端自动写回继续执行（结果可在历史页查看）。
