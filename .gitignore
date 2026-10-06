@@ -46,3 +46,8 @@ pnpm-lock.yaml
 
 ../AI-Forbidden/
 E:\alttext-magic-docs\AI-Forbidden
+# E2E（Playwright）登录态与产物
+tests/e2e/.auth/
+tests/e2e/.artifacts/
+tests/e2e/.chrome-profile/
+tests/e2e/.ff-profile/

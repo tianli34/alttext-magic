@@ -34,7 +34,10 @@
     "testpublish": "tsx tests/publish-scan.test.ts",
     "clear:alt": "tsx scripts/clear-media-alt.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:login": "playwright test --project=setup --headed"
   },
   "type": "module",
   "engines": {
@@ -67,6 +70,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.63.0",
     "@prisma/config": "^7.5.0",
     "@react-router/dev": "^7.12.0",
     "@shopify/api-codegen-preset": "^1.2.0",
