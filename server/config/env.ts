@@ -87,9 +87,20 @@ const envSchema = z.object({
   LOG_FORMAT: z.enum(["json", "pretty"]).default("pretty"),
 
   // ── Billing Adapter ─────────────────────────────────────
+  // 生产环境防呆：fake 适配器不会真实扣款，误用于生产会导致收入损失，
+  // 因此在 env 校验阶段直接拒绝（含仅设置默认值未显式配置的情况）。
   BILLING_ADAPTER: z
     .enum(["shopify", "fake"])
-    .default("fake"),
+    .default("fake")
+    .superRefine((value, ctx) => {
+      if (process.env.NODE_ENV === "production" && value === "fake") {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "BILLING_ADAPTER=fake is not allowed in production — set BILLING_ADAPTER=shopify to enable real Shopify billing",
+        });
+      }
+    }),
 
   // ── AI Provider ─────────────────────────────────────────
   // fake: 本地/测试用 FakeAIProvider；real: 使用真实主/副模型

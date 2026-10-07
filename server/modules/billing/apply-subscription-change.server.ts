@@ -1,17 +1,18 @@
 /**
  * File: server/modules/billing/apply-subscription-change.server.ts
  * Purpose: 订阅变更业务处理服务 —— 根据订阅状态变化完成 included bucket 发放、
- *          旧计划 included 桶作废、首次付费欢迎额度发放、增量扫描开关、Free 降级补发等逻辑。
+ *          旧计划 included 桶保留至当前周期末、首次付费欢迎额度发放、增量扫描开关、Free 降级补发等逻辑。
  *
  * ### 处理场景
- * 1. 升级到月付计划：MONTHLY_INCLUDED + 作废旧 included 桶 + (WELCOME 首次付费) + 开启增量扫描
- * 2. 升级到年付计划：ANNUAL_INCLUDED + 作废旧 included 桶 + (WELCOME 首次付费) + 开启增量扫描
- * 3. 降级回 Free：关闭增量扫描 + 作废旧付费 included 桶 + 补发当月 FREE_MONTHLY_INCLUDED（如不存在）
+ * 1. 升级到月付计划：MONTHLY_INCLUDED + 旧 included 桶保留至当前周期末 + (WELCOME 首次付费) + 开启增量扫描
+ * 2. 升级到年付计划：ANNUAL_INCLUDED + 旧 included 桶保留至当前周期末 + (WELCOME 首次付费) + 开启增量扫描
+ * 3. 降级回 Free：关闭增量扫描 + 旧付费 included 桶保留至当前周期末 + 补发当月 FREE_MONTHLY_INCLUDED（如不存在）
  *
  * ### 幂等保证
  * - 所有 bucket 发放通过 grantCreditBucket 的唯一约束 (shopId + bucketType + cycleKey) 实现幂等
  * - 首次付费欢迎额度通过 shop.firstPaidBonusGrantedAt + bucket 唯一约束双重保障
- * - 旧桶作废仅命中 status=ACTIVE 的 included 桶，二次执行自然无匹配
+ * - 旧付费 included 桶仅设置 expiresAt 保留至周期末（不翻转 status、不写 EXPIRE ledger），
+ *   二次执行时旧桶已有 expiresAt 不再匹配
  * - 重复调用仅返回已存在的 bucket，不产生重复数据
  *
  * ### 调用时机
@@ -33,6 +34,10 @@ import {
   getPlanConfig,
   getPaidWelcomeCredits,
 } from './plan-config.js';
+import {
+  generateAnnualIncludedCycleKey,
+  generateMonthlyIncludedCycleKey,
+} from './included-cycle-key.js';
 
 // ----------------------------------------------------------------------------
 // Logger
@@ -81,31 +86,7 @@ export interface ApplySubscriptionChangeResult {
 }
 
 // ----------------------------------------------------------------------------
-// cycleKey 生成
-// ----------------------------------------------------------------------------
-
-/**
- * 生成月付计划的 included bucket cycleKey。
- * 格式：`{planKey}:MONTHLY:YYYY-MM`
- * 示例：`STARTER:MONTHLY:2026-05`
- */
-function generateMonthlyCycleKey(planKey: PlanKey, date: Date): string {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  return `${planKey}:MONTHLY:${year}-${month}`;
-}
-
-/**
- * 生成年付计划的 included bucket cycleKey。
- * 格式：`{planKey}:ANNUAL:{shopifySubscriptionId}`
- * 示例：`GROWTH:ANNUAL:gid://shopify/AppSubscription/1234567`
- */
-function generateAnnualCycleKey(planKey: PlanKey, externalSubscriptionId: string): string {
-  return `${planKey}:ANNUAL:${externalSubscriptionId}`;
-}
-
-// ----------------------------------------------------------------------------
-// 旧 included 桶作废
+// 旧 included 桶保留至周期末
 // ----------------------------------------------------------------------------
 
 /** included family 全量类型 */
@@ -115,77 +96,99 @@ const INCLUDED_FAMILY_BUCKET_TYPES: readonly CreditBucketType[] = [
   'ANNUAL_INCLUDED',
 ];
 
-/** 作废操作入参 */
-interface ExpireIncludedBucketsParams {
+/** 保留至周期末操作入参 */
+interface DeferIncludedBucketsParams {
   shopId: string;
-  /** 可作废的候选类型集合 */
+  /** 候选类型集合 */
   candidateTypes: readonly CreditBucketType[];
   /** 本次发放、需要保留的桶；无新桶时为 null */
   keep: { bucketType: CreditBucketType; cycleKey: string } | null;
-  /** 写入 EXPIRE ledger 的原因 */
+  /** 旧桶可用截止时间（当前周期末） */
+  deferTo: Date;
+  /** 日志原因 */
   reason: string;
 }
 
 /**
- * 将候选 included 类型下仍 ACTIVE 的旧桶置为 EXPIRED，并按剩余量写 EXPIRE ledger。
+ * 将候选 included 类型下 ACTIVE 且未设置过期时间的旧桶保留至当前周期末。
  *
- * 幂等：仅命中 status=ACTIVE 的桶，二次执行时旧桶已转 EXPIRED 不再匹配；
- * ledger idempotencyKey 由 bucketId 唯一确定，并发重复写入会被唯一约束拒绝。
+ * 与"立即作废"不同：本操作只设置 expiresAt，不翻转 status、不写 EXPIRE ledger，
+ * 桶内剩余额度在周期末前仍可正常消费（对齐 Shopify 降级/换套餐周期末生效语义）。
  *
- * @returns 被作废的 bucket ID 列表
+ * 幂等：仅命中 expiresAt 为 null 的桶，二次执行时旧桶已有 expiresAt 不再匹配；
+ * FREE_MONTHLY 桶自带下月初的 expiresAt，天然不会被命中。
+ *
+ * @returns 被保留至周期末的 bucket ID 列表
  */
-async function expireIncludedBuckets(
-  params: ExpireIncludedBucketsParams,
+async function deferIncludedBuckets(
+  params: DeferIncludedBucketsParams,
   db: PrismaClient,
-  now: Date,
 ): Promise<string[]> {
-  const { shopId, candidateTypes, keep, reason } = params;
+  const { shopId, candidateTypes, keep, deferTo, reason } = params;
 
   const staleBuckets = await db.creditBucket.findMany({
     where: {
       shopId,
       status: 'ACTIVE',
       bucketType: { in: [...candidateTypes] },
+      expiresAt: null,
       ...(keep
         ? { NOT: [{ bucketType: keep.bucketType, cycleKey: keep.cycleKey }] }
         : {}),
     },
-    select: { id: true, remainingAmount: true },
+    select: { id: true },
   });
 
-  const expiredIds: string[] = [];
+  if (staleBuckets.length === 0) return [];
 
-  for (const bucket of staleBuckets) {
-    await db.$transaction(async (tx) => {
-      const { count } = await tx.creditBucket.updateMany({
-        where: { id: bucket.id, status: 'ACTIVE' },
-        data: { status: 'EXPIRED', expiresAt: now },
-      });
-      if (count === 0) return;
+  const { count } = await db.creditBucket.updateMany({
+    where: {
+      id: { in: staleBuckets.map((bucket) => bucket.id) },
+      status: 'ACTIVE',
+      expiresAt: null,
+    },
+    data: { expiresAt: deferTo },
+  });
 
-      if (bucket.remainingAmount > 0) {
-        await tx.creditLedger.create({
-          data: {
-            shopId,
-            bucketId: bucket.id,
-            type: 'EXPIRE',
-            deltaAmount: -bucket.remainingAmount,
-            balanceAfter: 0,
-            reason,
-            idempotencyKey: `${shopId}:EXPIRE:${bucket.id}`,
-            eventAt: now,
-          },
-        });
-      }
-    });
-    expiredIds.push(bucket.id);
+  if (count > 0) {
+    log.info(
+      { shopId, deferredCount: count, deferTo, reason },
+      '旧 included 额度桶保留至周期末',
+    );
   }
 
-  if (expiredIds.length > 0) {
-    log.info({ shopId, expiredBucketIds: expiredIds }, '旧 included 额度桶作废完成');
+  return staleBuckets.map((bucket) => bucket.id);
+}
+
+/**
+ * 解析订阅当前周期的结束时间，作为旧桶保留截止点。
+ *
+ * 优先使用 billingSubscription.currentPeriodEnd（同步自 Shopify 时计算）；
+ * 缺失或已过期时按计费周期兜底：
+ * - MONTHLY → 当月最后一天 23:59:59.999 UTC
+ * - ANNUAL  → 当年 12 月 31 日 23:59:59.999 UTC
+ */
+async function resolveSubscriptionPeriodEnd(
+  db: PrismaClient,
+  subscriptionId: string,
+  now: Date,
+): Promise<Date> {
+  const subscription = await db.billingSubscription.findUnique({
+    where: { id: subscriptionId },
+    select: { currentPeriodEnd: true, billingInterval: true },
+  });
+
+  if (subscription?.currentPeriodEnd && subscription.currentPeriodEnd > now) {
+    return subscription.currentPeriodEnd;
   }
 
-  return expiredIds;
+  // 兜底：按计费周期近似周期末（正常路径 currentPeriodEnd 总会被同步写入）
+  if (subscription?.billingInterval === 'ANNUAL') {
+    return new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59, 999));
+  }
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -277,10 +280,21 @@ async function applyUpgradeToPaid(
     if (!externalSubscriptionId) {
       throw new Error('[apply-subscription-change] 年付计划必须提供 externalSubscriptionId');
     }
-    includedCycleKey = generateAnnualCycleKey(planKey, externalSubscriptionId);
+    includedCycleKey = generateAnnualIncludedCycleKey(planKey, externalSubscriptionId);
   } else {
-    includedCycleKey = generateMonthlyCycleKey(planKey, now);
+    includedCycleKey = generateMonthlyIncludedCycleKey(planKey, now);
   }
+
+  // ---- 1b(前置). 解析订阅周期末（用于本次桶过期时间与旧桶保留截止点） ----
+  const upgradePeriodEnd = await resolveSubscriptionPeriodEnd(db, subscriptionId, now);
+
+  // 桶生命周期与续发服务(paid-included-grant)保持一致：
+  // - 月付：桶至次月 1 日 00:00 UTC（跨月由 quota-grant 调度续发新桶）
+  // - 年付：桶至订阅周期末（跨年由 quota-grant 调度按周期窗口续发新桶）
+  const includedExpiresAt: Date =
+    interval === 'ANNUAL'
+      ? upgradePeriodEnd
+      : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
   const includedResult = await grantCreditBucket(
     {
@@ -289,7 +303,7 @@ async function applyUpgradeToPaid(
       amount: includedCredits,
       cycleKey: includedCycleKey,
       effectiveAt: now,
-      expiresAt: null,
+      expiresAt: includedExpiresAt,
       billingSubscriptionId: subscriptionId,
       source: 'subscription-change',
       sourceRef: externalSubscriptionId,
@@ -298,16 +312,16 @@ async function applyUpgradeToPaid(
     db,
   );
 
-  // ---- 1b. 作废旧计划遗留的 included 桶（保留本次发放的桶） ----
-  await expireIncludedBuckets(
+  // ---- 1c. 旧计划遗留的 included 桶保留至当前周期末（排除本次发放的桶） ----
+  await deferIncludedBuckets(
     {
       shopId,
       candidateTypes: INCLUDED_FAMILY_BUCKET_TYPES,
       keep: { bucketType: includedBucketType, cycleKey: includedCycleKey },
-      reason: `${planKey} ${interval} 计划切换，作废旧 included 额度`,
+      deferTo: upgradePeriodEnd,
+      reason: `${planKey} ${interval} 计划切换，旧 included 额度保留至周期末`,
     },
     db,
-    now,
   );
 
   // ---- 2. 首次付费欢迎额度 ----
@@ -398,7 +412,7 @@ async function applyUpgradeToPaid(
  *
  * 1. 关闭增量扫描（incrementalScanEnabled = false）
  * 2. 补发当月 FREE_MONTHLY_INCLUDED(25)，如果不存在
- * 3. 作废旧付费计划的 included 桶（MONTHLY / ANNUAL_INCLUDED）
+ * 3. 旧付费计划的 included 桶（MONTHLY / ANNUAL_INCLUDED）保留至当前周期末
  * 4. 保留历史 WELCOME、OVERAGE_PACK（不删除）
  */
 async function applyDowngradeToFree(
@@ -442,16 +456,17 @@ async function applyDowngradeToFree(
     db,
   );
 
-  // ---- 3. 作废旧付费计划的 included 桶 ----
-  await expireIncludedBuckets(
+  // ---- 3. 旧付费计划的 included 桶保留至当前周期末 ----
+  const downgradePeriodEnd = await resolveSubscriptionPeriodEnd(db, subscriptionId, now);
+  await deferIncludedBuckets(
     {
       shopId,
       candidateTypes: ['MONTHLY_INCLUDED', 'ANNUAL_INCLUDED'],
       keep: null,
-      reason: '降级到 Free，作废旧付费 included 额度',
+      deferTo: downgradePeriodEnd,
+      reason: '降级到 Free，旧付费 included 额度保留至周期末',
     },
     db,
-    now,
   );
 
   log.info(
@@ -480,7 +495,7 @@ async function applyDowngradeToFree(
 // ----------------------------------------------------------------------------
 
 /**
- * 根据 syncSubscriptionFromShopify 的结果即时执行订阅变更处理（发放额度、作废旧桶）。
+ * 根据 syncSubscriptionFromShopify 的结果即时执行订阅变更处理（发放额度、旧桶保留至周期末）。
  *
  * 仅在 changed=true 且最终状态为 ACTIVE 时执行；异常只记录日志并返回 false，
  * 不中断调用方流程（callback 重定向 / webhook 确认），由 billing-sync 定时任务兜底重试。

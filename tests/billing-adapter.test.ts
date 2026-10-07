@@ -278,7 +278,33 @@ async function testGetBillingAdapterType(): Promise<void> {
   process.env.BILLING_ADAPTER = 'SHOPIFY'; // 大写
   assertEqual(getBillingAdapterType(), 'shopify', '大写 SHOPIFY → shopify');
 
+  // 生产环境防呆：NODE_ENV=production 时拒绝落到 fake
+  const originalNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  process.env.BILLING_ADAPTER = 'fake';
+  let productionThrew = false;
+  try {
+    getBillingAdapterType();
+  } catch {
+    productionThrew = true;
+  }
+  assertTrue(productionThrew, '生产环境 + fake 应抛错（防呆守卫）');
+
+  process.env.BILLING_ADAPTER = 'shopify';
+  let productionShopifyThrew = false;
+  try {
+    getBillingAdapterType();
+  } catch {
+    productionShopifyThrew = true;
+  }
+  assertTrue(!productionShopifyThrew, '生产环境 + shopify 正常返回');
+
   // 恢复
+  if (originalNodeEnv !== undefined) {
+    process.env.NODE_ENV = originalNodeEnv;
+  } else {
+    delete process.env.NODE_ENV;
+  }
   if (original !== undefined) {
     process.env.BILLING_ADAPTER = original;
   } else {

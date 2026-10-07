@@ -151,7 +151,13 @@ const APP_SUBSCRIPTION_CANCEL_MUTATION = /* GraphQL */ `
   }
 `;
 
-/** 查询当前活跃订阅 */
+/**
+ * 查询当前活跃订阅。
+ *
+ * 2026-04 版 AppSubscription 上不存在 interval/amount/currencyCode 顶层字段，
+ * 周期与价格位于 lineItems[].plan.pricingDetails（union AppPricingDetails）的
+ * AppRecurringPricing 成员上，金额嵌套在 price: MoneyV2 内。
+ */
 const CURRENT_SUBSCRIPTIONS_QUERY = /* GraphQL */ `
   query {
     currentAppInstallation {
@@ -160,9 +166,19 @@ const CURRENT_SUBSCRIPTIONS_QUERY = /* GraphQL */ `
         name
         status
         test
-        interval
-        amount
-        currencyCode
+        lineItems {
+          plan {
+            pricingDetails {
+              ... on AppRecurringPricing {
+                interval
+                price {
+                  amount
+                  currencyCode
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -183,6 +199,25 @@ const ONE_TIME_PURCHASES_QUERY = /* GraphQL */ `
     }
   }
 `;
+
+/** activeSubscriptions 原始响应中的 recurring 定价明细（AppRecurringPricing 成员） */
+interface RawRecurringPricingDetails {
+  interval?: string;
+  price?: { amount: string; currencyCode: string };
+}
+
+/** activeSubscriptions 原始响应中的单条订阅 */
+interface RawActiveSubscription {
+  id: string;
+  name: string;
+  status: string;
+  test: boolean;
+  lineItems?: Array<{
+    plan?: {
+      pricingDetails?: RawRecurringPricingDetails;
+    };
+  }>;
+}
 
 // ----------------------------------------------------------------------------
 // Helper：判断是否为测试模式
@@ -411,15 +446,7 @@ export class ShopifyBillingAdapter implements BillingAdapter {
     try {
       const result = await shopifyGraphql<{
         currentAppInstallation: {
-          activeSubscriptions: Array<{
-            id: string;
-            name: string;
-            status: string;
-            test: boolean;
-            interval?: string;
-            amount?: string;
-            currencyCode?: string;
-          }>;
+          activeSubscriptions: RawActiveSubscription[];
         };
       }>(shop, accessToken, CURRENT_SUBSCRIPTIONS_QUERY, {});
 
@@ -431,15 +458,22 @@ export class ShopifyBillingAdapter implements BillingAdapter {
 
       const rawSubs = result.data?.currentAppInstallation?.activeSubscriptions ?? [];
 
-      const subscriptions: ActiveSubscription[] = rawSubs.map((sub) => ({
-        id: sub.id,
-        name: sub.name,
-        status: sub.status as ActiveSubscription['status'],
-        test: sub.test,
-        interval: sub.interval as 'EVERY_30_DAYS' | 'ANNUAL' | undefined,
-        amount: sub.amount,
-        currencyCode: sub.currencyCode,
-      }));
+      const subscriptions: ActiveSubscription[] = rawSubs.map((sub) => {
+        // 从 lineItems 中取第一条 recurring 定价明细（usage 定价无 interval/price，返回空对象）
+        const pricing = sub.lineItems
+          ?.map((item) => item.plan?.pricingDetails)
+          .find((details) => details?.interval !== undefined || details?.price !== undefined);
+
+        return {
+          id: sub.id,
+          name: sub.name,
+          status: sub.status as ActiveSubscription['status'],
+          test: sub.test,
+          interval: pricing?.interval as 'EVERY_30_DAYS' | 'ANNUAL' | undefined,
+          amount: pricing?.price?.amount,
+          currencyCode: pricing?.price?.currencyCode,
+        };
+      });
 
       log.info({ shop, count: subscriptions.length }, 'Queried active subscriptions');
 

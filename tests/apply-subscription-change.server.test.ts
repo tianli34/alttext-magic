@@ -3,14 +3,16 @@
  * Purpose: applySubscriptionChange 单元测试 —— 通过 mock PrismaClient 验证核心逻辑。
  *
  * 测试覆盖：
- *   1. 升级 Starter 月付（首次付费）→ MONTHLY_INCLUDED(150) + WELCOME(200)
- *   2. 升级 Growth 年付（首次付费）→ ANNUAL_INCLUDED(4200) + WELCOME(500)
+ *   1. 升级 Starter 月付（首次付费）→ MONTHLY_INCLUDED(150，桶至次月 1 日) + WELCOME(200)
+ *   2. 升级 Growth 年付（首次付费）→ ANNUAL_INCLUDED(4200，桶至订阅周期末) + WELCOME(500)
  *   3. 再次升级不重复发放首次付费欢迎额度
  *   4. 年付计划缺少 externalSubscriptionId 抛错
  *   5. 降级 Free → 关闭增量扫描 + 补发 FREE_MONTHLY_INCLUDED(25)
  *   6. 降级 Free 当月已有 Free bucket（幂等，不重复发放）
  *   7. 参数校验：shopId 为空抛错
  *   8. 参数校验：subscriptionId 为空抛错
+ *  11. 升级时旧计划 included 桶保留至当前周期末（defer：仅设 expiresAt，不置 EXPIRED）
+ *  12. 降级 Free 时旧付费 included 桶保留至当前周期末（defer：仅设 expiresAt，不写 ledger）
  *
  * Usage: npx tsx tests/apply-subscription-change.server.test.ts
  */
@@ -97,8 +99,12 @@ interface MockConfig {
     amount: number;
     cycleKey: string;
   }>;
-  /** expireIncludedBuckets 顶层查询命中的旧 ACTIVE included 桶（默认为空） */
-  staleBuckets?: Array<{ id: string; remainingAmount: number }>;
+  /** deferIncludedBuckets 顶层查询命中的旧 ACTIVE included 桶（默认为空） */
+  staleBuckets?: Array<{ id: string }>;
+  /** resolveSubscriptionPeriodEnd 返回的订阅周期末（默认 null → 走计费周期兜底分支） */
+  subscriptionPeriodEnd?: Date | null;
+  /** 订阅计费周期（默认 MONTHLY，仅周期末兜底分支使用） */
+  subscriptionBillingInterval?: 'MONTHLY' | 'ANNUAL' | 'NONE';
 }
 
 /**
@@ -175,6 +181,10 @@ function createMockPrisma(config: MockConfig) {
       },
     },
     billingSubscription: {
+      findUnique: async () => ({
+        currentPeriodEnd: config.subscriptionPeriodEnd ?? null,
+        billingInterval: config.subscriptionBillingInterval ?? 'MONTHLY',
+      }),
       update: async (arg: {
         where: Record<string, unknown>;
         data: Record<string, unknown>;
@@ -189,19 +199,26 @@ function createMockPrisma(config: MockConfig) {
       findUnique: async () => null,
       findMany: async (arg: { where: Record<string, unknown> }) => {
         calls.push({
-          method: 'creditBucket.findMany[expire]',
+          method: 'creditBucket.findMany[defer]',
           data: arg.where,
         });
-        return (config.staleBuckets ?? []).map((b) => ({
-          id: b.id,
-          remainingAmount: b.remainingAmount,
-        }));
+        return (config.staleBuckets ?? []).map((b) => ({ id: b.id }));
+      },
+      updateMany: async (arg: {
+        where: Record<string, unknown>;
+        data: Record<string, unknown>;
+      }) => {
+        calls.push({
+          method: 'creditBucket.updateMany[defer]',
+          data: { where: arg.where, ...arg.data },
+        });
+        return { count: (config.staleBuckets ?? []).length };
       },
     },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
       const result = await fn(mockTx);
-      // 仅发放事务（grantCreditBucket 返回 { bucket, ledger, created }）推进序列索引，
-      // 作废等辅助事务不得干扰 existingBuckets/createdBuckets 的按序取数
+      // 仅发放事务（grantCreditBucket 返回 { bucket, ledger, created }）推进序列索引；
+      // defer 旧桶等辅助操作不走事务，不干扰 existingBuckets/createdBuckets 的按序取数
       if (result && typeof result === 'object' && 'bucket' in result) {
         grantCallIndex++;
       }
@@ -740,12 +757,14 @@ async function run(): Promise<void> {
   }
 
   // ------------------------------------------------------------------
-  // 11. 升级时作废旧计划 included 桶
+  // 11. 升级时旧计划 included 桶保留至当前周期末（defer，不作废）
   // ------------------------------------------------------------------
   {
-    console.log('11. 升级时作废旧计划 included 桶');
+    console.log('11. 升级时旧计划 included 桶保留至周期末');
+    const periodEnd = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000); // 8 天后，确保 > now
     const mock = createMockPrisma({
       firstPaidBonusGrantedAt: new Date('2026-01-01T00:00:00Z'),
+      subscriptionPeriodEnd: periodEnd,
       existingBuckets: [false],
       createdBuckets: [
         {
@@ -755,7 +774,7 @@ async function run(): Promise<void> {
           cycleKey: 'GROWTH:MONTHLY:2026-09',
         },
       ],
-      staleBuckets: [{ id: 'old-starter-bucket', remainingAmount: 80 }],
+      staleBuckets: [{ id: 'old-starter-bucket' }],
     });
 
     const result = await applySubscriptionChange(
@@ -770,41 +789,56 @@ async function run(): Promise<void> {
 
     assertTrue(result.included!.created, 'included bucket 已创建');
 
-    const findManyCall = mock._calls.find(
-      (c) => c.method === 'creditBucket.findMany[expire]',
+    // 首次发放的月付桶自带过期时间（次月 1 日），不再永久有效
+    const includedCreate = mock._calls.find(
+      (c) => c.method === 'creditBucket.create[0]',
     );
-    assertTrue(!!findManyCall, '作废查询被调用');
-    assertEqual(
-      findManyCall!.data.status,
-      'ACTIVE',
-      '作废查询仅命中 ACTIVE 桶',
+    assertTrue(
+      includedCreate!.data.expiresAt instanceof Date,
+      '月付 included 桶发放时带 expiresAt（次月 1 日）',
     );
 
-    const updateManyCall = mock._calls.find(
-      (c) => c.method === 'tx.creditBucket.updateMany',
+    const findManyCall = mock._calls.find(
+      (c) => c.method === 'creditBucket.findMany[defer]',
     );
-    assertTrue(!!updateManyCall, '旧桶状态置位被调用');
-    assertEqual(updateManyCall!.data.status, 'EXPIRED', '旧桶置为 EXPIRED');
+    assertTrue(!!findManyCall, 'defer 查询被调用');
+    assertEqual(findManyCall!.data.status, 'ACTIVE', 'defer 查询仅命中 ACTIVE 桶');
+    assertEqual(
+      findManyCall!.data.expiresAt,
+      null,
+      'defer 查询仅命中未设过期时间的桶',
+    );
+    assertTrue(!!findManyCall!.data.NOT, 'defer 查询排除本次发放的桶（keep）');
+
+    const updateManyCall = mock._calls.find(
+      (c) => c.method === 'creditBucket.updateMany[defer]',
+    );
+    assertTrue(!!updateManyCall, '旧桶 defer 更新被调用');
+    assertEqual(
+      (updateManyCall!.data.expiresAt as Date).getTime(),
+      periodEnd.getTime(),
+      '旧桶 expiresAt 设为订阅周期末',
+    );
+    assertTrue(
+      updateManyCall!.data.status === undefined,
+      'defer 不翻转 status（旧桶在周期末前仍可消费）',
+    );
 
     const expireLedger = mock._calls.find(
       (c) => c.method === 'tx.creditLedger.create[EXPIRE]',
     );
-    assertTrue(!!expireLedger, 'EXPIRE ledger 被写入');
-    assertEqual(expireLedger!.data.deltaAmount, -80, 'EXPIRE delta = -remaining');
-    assertEqual(
-      expireLedger!.data.idempotencyKey,
-      'shop-001:EXPIRE:old-starter-bucket',
-      'EXPIRE 幂等键由 bucketId 唯一确定',
-    );
+    assertEqual(expireLedger, undefined, 'defer 不写 EXPIRE ledger');
   }
 
   // ------------------------------------------------------------------
-  // 12. 降级 Free 时作废旧付费 included 桶
+  // 12. 降级 Free 时旧付费 included 桶保留至当前周期末（defer，不作废）
   // ------------------------------------------------------------------
   {
-    console.log('12. 降级 Free 时作废旧付费 included 桶');
+    console.log('12. 降级 Free 时旧付费 included 桶保留至周期末');
+    const periodEnd = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000); // 8 天后，确保 > now
     const mock = createMockPrisma({
       firstPaidBonusGrantedAt: new Date('2026-01-01T00:00:00Z'),
+      subscriptionPeriodEnd: periodEnd,
       existingBuckets: [false],
       createdBuckets: [
         {
@@ -814,7 +848,7 @@ async function run(): Promise<void> {
           cycleKey: 'FREE:2026-09',
         },
       ],
-      staleBuckets: [{ id: 'old-paid-bucket', remainingAmount: 0 }],
+      staleBuckets: [{ id: 'old-paid-bucket' }],
     });
 
     const result = await applySubscriptionChange(
@@ -830,30 +864,35 @@ async function run(): Promise<void> {
     assertTrue(result.freeMonthly!.created, 'freeMonthly bucket 已创建');
 
     const findManyCall = mock._calls.find(
-      (c) => c.method === 'creditBucket.findMany[expire]',
+      (c) => c.method === 'creditBucket.findMany[defer]',
     );
-    assertTrue(!!findManyCall, '作废查询被调用');
+    assertTrue(!!findManyCall, 'defer 查询被调用');
     const candidateTypes = (findManyCall!.data.bucketType as { in: string[] }).in;
-    assertEqual(candidateTypes.length, 2, '降级仅作废两类付费 included 桶');
+    assertEqual(candidateTypes.length, 2, '降级仅 defer 两类付费 included 桶');
     assertTrue(
       candidateTypes.includes('MONTHLY_INCLUDED') &&
         candidateTypes.includes('ANNUAL_INCLUDED'),
-      '作废候选类型为 MONTHLY_INCLUDED / ANNUAL_INCLUDED（不含 FREE_MONTHLY）',
+      'defer 候选类型为 MONTHLY_INCLUDED / ANNUAL_INCLUDED（不含 FREE_MONTHLY）',
     );
 
     const updateManyCall = mock._calls.find(
-      (c) => c.method === 'tx.creditBucket.updateMany',
+      (c) => c.method === 'creditBucket.updateMany[defer]',
     );
-    assertTrue(!!updateManyCall, '旧付费桶置为 EXPIRED');
+    assertTrue(!!updateManyCall, '旧付费桶 defer 更新被调用');
+    assertEqual(
+      (updateManyCall!.data.expiresAt as Date).getTime(),
+      periodEnd.getTime(),
+      '旧付费桶 expiresAt 设为订阅周期末',
+    );
+    assertTrue(
+      updateManyCall!.data.status === undefined,
+      'defer 不翻转 status（旧桶在周期末前仍可消费）',
+    );
 
     const expireLedger = mock._calls.find(
       (c) => c.method === 'tx.creditLedger.create[EXPIRE]',
     );
-    assertEqual(
-      expireLedger,
-      undefined,
-      'remaining=0 的旧桶不写 EXPIRE ledger',
-    );
+    assertEqual(expireLedger, undefined, 'defer 不写 EXPIRE ledger');
   }
 
   // ------------------------------------------------------------------

@@ -27,10 +27,20 @@ let _shopifyInstance: ShopifyBillingAdapter | undefined;
 /**
  * 读取 BILLING_ADAPTER 环境变量，默认为 `fake`。
  * 允许值：`shopify` | `fake`
+ *
+ * 生产环境防呆：env 校验之外的双保险 —— 即使 env 校验被绕过
+ * （如进程直接改写 process.env），运行时也拒绝在 production 下落到
+ * fake 适配器，避免静默放弃真实扣款造成收入损失。
  */
 export function getBillingAdapterType(): BillingAdapterType {
   const value = (process.env.BILLING_ADAPTER ?? 'fake').toLowerCase();
   if (value === 'shopify') return 'shopify';
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      '[billing-adapter] 生产环境禁止使用 fake 计费适配器：请设置 BILLING_ADAPTER=shopify',
+    );
+  }
   return 'fake';
 }
 

@@ -142,6 +142,63 @@ function mapShopifySubscription(sub: ActiveSubscription): MappedSubscription {
   };
 }
 
+/**
+ * 价格对账告警（仅告警、不阻断同步流程）。
+ *
+ * 背景：本地仅按订阅名称映射 planKey，完全忽略 Shopify 侧实际扣款金额。
+ * 若 Shopify 后台改价（新店定价、区域定价、测试价等），本地配置将与真实扣款脱节，
+ * 且配额照常发放，造成收入缺口无法被发现。此处在每次同步时将 Shopify 实际
+ * 订阅价格与本地计划配置对账，不一致时输出 warn 日志供运营/告警系统捕获。
+ */
+function warnOnPriceMismatch(
+  shopId: string,
+  activeSub: ActiveSubscription,
+  planKey: PlanKey,
+  interval: PrismaBillingInterval,
+): void {
+  // FREE 计划无价格对账意义；amount 缺失或非法时无法对账
+  if (planKey === 'FREE') return;
+  if (!activeSub.amount) return;
+
+  const parsedAmount = Number(activeSub.amount);
+  if (Number.isNaN(parsedAmount)) return;
+
+  const config = getPlanConfig(planKey);
+  // 年付总价 = 年付折算月价 × 12；月付直接取月价
+  const expectedCents =
+    interval === 'ANNUAL'
+      ? config.annualMonthlyPriceCents * 12
+      : config.monthlyPriceCents;
+  const actualCents = Math.round(parsedAmount * 100);
+
+  if (actualCents !== expectedCents) {
+    log.warn(
+      {
+        shopId,
+        externalSubscriptionId: activeSub.id,
+        subName: activeSub.name,
+        interval,
+        expectedCents,
+        actualCents,
+      },
+      '[price-reconciliation] Shopify 实际订阅价格与本地计划配置不一致，请核对 Shopify 后台定价',
+    );
+  }
+
+  // 币种校验：本地价格配置以美元（USD）计价
+  if (activeSub.currencyCode && activeSub.currencyCode !== 'USD') {
+    log.warn(
+      {
+        shopId,
+        externalSubscriptionId: activeSub.id,
+        subName: activeSub.name,
+        currencyCode: activeSub.currencyCode,
+      },
+      '[price-reconciliation] Shopify 订阅币种非 USD，本地价格按美元计价，请人工核对',
+    );
+  }
+}
+
 // ----------------------------------------------------------------------------
 // 核心服务：从 Shopify 同步订阅状态
 // ----------------------------------------------------------------------------
@@ -253,6 +310,9 @@ export async function syncSubscriptionFromShopify(
       status: localActive?.status ?? 'ACTIVE',
     };
   }
+
+  // ---- 4b. 价格对账告警（Shopify 实际扣款 vs 本地计划配置） ----
+  warnOnPriceMismatch(shop.id, activeSub, mapped.planKey, mapped.interval);
 
   log.info(
     {
